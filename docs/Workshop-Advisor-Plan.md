@@ -140,8 +140,8 @@ The baselines, leave-one-model-out, pooled (the full tables are in `baseline.md`
 | Task | Population | Trivial baseline | Best cheap baseline |
 |---|---|---|---|
 | Role | 4,588 labelled parts in 26 models (Body 2,830, Turret 607, Wheel 479, Ignore 256, then a long tail; armour 3,527 of them, nearly all the Ehrhardt) | always Default: 1 % right | majority role of the other models: Body 62 % precision / 100 % recall, every other role 0 % |
-| Delete | 29,482 parts in the 52 files the user judged (marks, letters or a recipe), 7,241 marked X or Ignore (24.6 %) | never: recall 0 % | the smallest tenth of each file: 48 % precision / 25 % recall; "interior" (vis = 0): 99 % precision / 1 % recall, because only recipe rows carry a visibility verdict |
-| Delete, the user's own marks | the same files without the 2,128 parts the Workshop marks itself: 27,354 parts, 5,542 positives (20.3 %) | never | the smallest tenth: 24 % precision / 14 % recall. Size alone finds the tool's deletions, not the user's |
+| Delete | 29,482 parts in the 52 files the user judged (marks, letters or a recipe), 10,673 deleted (36.2 %) once a deletion at a later stage file counts for the same part at the earlier one (Phase 1's status; it was 7,241 before) | never: recall 0 % | the smallest tenth of each file: 57 % precision / 20 % recall; every interior part (vis = 0, the probe's verdict for every file since Phase 1): 88 % precision / 14 % recall |
+| Delete, the user's own marks | the same files without the 2,128 parts the Workshop marks itself: 27,354 parts, 8,589 positives (31.4 %) | never | the smallest tenth: 39 % precision / 15 % recall; every interior part: 84 % / 13 %. Size alone finds the tool's deletions, not the user's; the verdict finds one in eight of the user's at high precision |
 | Split | 10,457 splittable parts in the 11 raw and cut files with marks, 178 marked S or T (1.7 %) | never | multi-island part above the file's median size: 18 % precision / 79 % recall; every multi-island part: 14 % / 100 % |
 | Group | 19,056 parts in 27 files with letters; 1.34 M of 21.1 M pairs truly together | all apart: 0 % recall; all together: 6 % precision | one group per material name: 14 % precision / 1 % recall of the together pairs |
 | Dials | 16 recipes carrying dials; a dial a recipe lacks reads as the Lab's default (rigging 75, structure 50, else 0) | median dial of the other models: body 23 points mean error, structure 13, rudder 40, default 50 | the category's median: body 22, structure 10, rudder 26, default 27 |
@@ -149,9 +149,8 @@ The baselines, leave-one-model-out, pooled (the full tables are in `baseline.md`
 What the numbers say about the phases: the Split heuristic recalls four in five of the user's splits at one right
 proposal in five, so Phase 1's island-dominance rule has a precision job, not a recall job; grouping by name is
 useless, so Phase 1's contact graph has the whole job; deletion by size finds only what the Workshop already deletes
-by itself, and the user's own deletions have no cheap signal in the raw files because the visibility verdict is not
-in the table yet (the probe's escape rays are only in the recipe rows), which puts the C# probe export ahead of any
-model; roles are 62 % Body and the interesting roles are a few hundred parts each, so Phase 2 and 3 are judged per
+by itself, and the user's own deletions had no cheap signal until the probe's visibility verdict was in the table for
+every file (Phase 1: it is now, and the deletion proposer builds on it); roles are 62 % Body and the interesting roles are a few hundred parts each, so Phase 2 and 3 are judged per
 role, never overall.
 
 ### Phase 1: deterministic proposers
@@ -164,7 +163,8 @@ role, never overall.
 - Measure all three against the corpus. Expect grouping to be close to the user's choices and the other two
   to be conservative. Whatever this phase gets right is time saved with no model running.
 
-**Status (2026-11-09): the Split proposer is built and measured; grouping and Ignore are not started.**
+**Status (2026-11-09): the Split proposer and the deletion proposer are built and measured, with the probe's visibility
+verdict in the table for every file; grouping is not started.**
 
 - The corpus now carries the island count the user actually reads in the Cutter: the probe's 1 % distance merge
   (`GlbDisconnectedParts.AnalyzeMesh`, "DISTANCE MERGE") is ported into `corpus.py` as `islands_merged`, with the
@@ -194,6 +194,42 @@ role, never overall.
   when no grid rule finds a training split, including when training is empty or has no positive labels.
   It never writes the live `.marks.txt`; the user renames or merges it. Loading a proposal into the
   Cutter is Phase 6.
+- **The visibility verdict for every file.** `tools/advisor/probe_vis.sh` compiles `tools/advisor/ProbeVis.cs` against the
+  editor sources (the vehicle probe drill's compile list) and runs the Lab's own probe (`VehicleProbe.Run`: the escape
+  rays over one BVH of the whole file, the inside-out count) over every GLB `corpus.py --list` names, as a 64-bit
+  process; all 53 files take about 40 s (38 and 44 s wall on two runs of 2026-11-09; the Saleg's split file 7-8 s). `corpus.py --probe <table>` joins the rows by
+  glTF node (a single-mesh file's loose parts fold onto their node: external when any part escapes, flips summed) and
+  checks each file's size and write time against the table - a file re-cut since is reported stale and falls back to
+  the recipe's verdict, named in `vis_from`. The join's own check: of the 1,128 recipe rows carrying a `vis` field
+  1,126 agree with the probe and the other 2 are the Lab's -1 (unclassified, no verdict). 30,740 probe rows fold onto 30,053 corpus rows,
+  1,681 of them interior (the 3,388 recipe-only rows keep the recipe's verdict).
+- **The deletion truth was understated.** The user splits at the raw file and deletes at the split file, so a raw
+  row the split file marks X read as "kept": 2,000 parts of the Espana's raw file, 1,290 of the Dragon's, 3,432 in
+  all over eight files (the other six: the Steam Frigate 78, the Sirius 58, the Svea's cut file 2 and raw 1, the
+  Saleg 2, the Wespe 1). `corpus.carry_later_marks` carries the X back as `mark_later` when name and vertex count
+  match in a later stage file of the same folder whose name extends this file's with stage tokens (3,432 of 3,432
+  match on both, no conflict: no part is marked X at one later file and listed unmarked at another of the same or a
+  higher stage); a part absent from the later file is not inferred deleted (the Teutonic's `_cut2_split` lists 220
+  of 1,437 unmarked parts: a partial export), and an unnamed node is never the same part. The evaluator's delete tasks count `mark_later`; the table above carries the corrected
+  baselines (the interior baseline went from 75 % precision on the uncorrected truth to 84 %).
+- **`tools/advisor/proposers/delete.py`** proposes X for a part the probe calls interior whose largest extent is at
+  most A of the model's, or any part at most B of the model's extent; A and B are learned on the other models over
+  a small grid maximising F0.5 (precision double: a wrong deletion is a hole in the model, a missed one a click),
+  ties to the stricter rule. Leave-one-model-out on the 27,354 hand-judged parts (8,589 deleted): **86 % precision,
+  52 % recall** (5,180 proposed, 4,443 right, 737 wrong, 4,146 missed), against 84 % / 13 % for every interior part
+  and 39 % / 15 % for the smallest tenth. The rule is interior up to 10 % of the model, anything up to 0.05 %, on
+  23 of 26 folds (F1 would learn a looser one, every interior part and anything up to 0.1 %, on 24 of 26: the beta
+  is a choice, not a detail). Per model: the Espana 2,937 right and 52 wrong, the Dragon 1,042 and 34, the Rah66 45
+  and 0; the Romanic is where it is wrong (all its 494 wrong carry a fuse letter: tiny parts the user lettered into
+  fuse groups instead of deleting; 603 of the 737 wrong over every model do), the Steam Frigate 115 wrong of 206.
+  The misses are 3,696 exterior parts (450 of the 4,146 missed are interior), four in five of them between 0.07 %
+  and 2.7 % of the model (median 0.35 %): visible fittings the user judged not worth their triangles, which no size
+  rule separates from the ones kept - Phase 4's question. `--write` puts the X lines into the same
+  `<file>.glb.marks.proposed.txt` the Split proposer writes its S lines to (`proposers/common.py`: each proposer
+  owns its letters, the other's stay). If two letters target the same node, the write is refused by name and node
+  index so the user can resolve the conflict; the previous file remains unchanged. Writes replace the proposals
+  file atomically, so a failed write cannot discard the other proposer's saved lines. A deletion candidate requires
+  all three size dimensions to be finite and nonnegative; a partly unknown box is never treated as tiny.
 
 ### Phase 2: role classifier without a language model
 
@@ -257,7 +293,8 @@ role, never overall.
 2. The order after Phase 0. The baselines (above) say: Split first, because the island heuristic already recalls
    79 % of the user's splits and only its precision is missing; then the visibility verdict into the table (the
    probe's escape rays for every file, not only the recipe's), because the user's own deletions have no cheap signal
-   without it; grouping by the contact graph after that. The most interesting is still Phase 4.
+   without it; grouping by the contact graph after that. Split and the verdict are done (Phase 1's status), the
+   deletion proposer with them; grouping is next. The most interesting is still Phase 4.
 3. Where the advisor runs: on the home PC beside Unity, accepting the VRAM conflict, or on a second card.
 4. What the dial solver optimises: the saved dials sit above 30,000 projected vertices on 12 of 16 recipes, so
    "under 30k" is not what the user has been doing. Read the Factory's **Reduce to ~tris** against the Lab's dials

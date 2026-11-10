@@ -466,6 +466,20 @@ class ReviewRound2(unittest.TestCase):
         self.assertEqual(len(evaluate.population("delete", parts2)), 2)
         self.assertEqual(evaluate.population("delete-hand", parts2), [])                        # both deletions are the tool's
 
+    def test_a_blocked_mesh_has_no_box(self):
+        # its vertices are not read, so its size is not known: empty cells, not the nan and -inf a translated node's
+        # empty loop once left (which every size threshold was "above", so the delete proposer proposed every such part)
+        glb = make_glb(nodes=[{"name": "Rope", "mesh": 0, "translation": [0.0, 0.0, 100.0]}, {"name": "Flat", "mesh": 0}, {"name": "Hull", "mesh": 1}],
+                       meshes=[[(0, 0)], [(0, 1)]], positions=[TWO_ISLANDS], index_lists=[[0, 1, 1, 2, 3, 4], [0, 1, 2, 3, 4, 5]], modes={0: 1})
+        parts, _, _, out = self.write_folder("Rah66", glb, sidecars={".marks.txt": "#fuse-groups v2\nX|2|Hull\n"})
+        for name in ("Rope", "Flat"):
+            r = [p for p in parts if p["name"] == name][0]
+            self.assertEqual([r[c] for c in ("cx", "cy", "cz", "sx", "sy", "sz")], [""] * 6, name)
+        hull = [p for p in parts if p["name"] == "Hull"][0]
+        self.assertEqual(hull["sx"], 11.0)
+        parts2, _ = evaluate.load_corpus(out)
+        self.assertEqual([r["sx"] for r in parts2 if r["name"] == "Rope"], [""])
+
     def test_a_three_triangle_part_marked_x_is_the_users_judgement(self):
         glb = make_glb(nodes=[{"name": "Plate", "mesh": 0}], meshes=[[(0, 0)]], positions=[TWO_ISLANDS + [(20, 0, 0)]], index_lists=[[0, 1, 2, 3, 4, 5, 3, 4, 6]])
         parts, _, _, out = self.write_folder("Rah66", glb, sidecars={".marks.txt": "#fuse-groups v2\nX|0|Plate\n"})
@@ -773,6 +787,522 @@ class Rules(unittest.TestCase):
         out = corpus.resolve_sidecar([("A", 1, "Deck"), ("B", 7, "Mast"), ("C", None, "Deck"), ("D", 5, "Ghost")], rows, refused)
         self.assertEqual(out, {1: "A", 2: "B"})   # 'Deck' at index 1 is the file's name there; Mast by its unique name
         self.assertEqual(len(refused), 2, refused)   # 'Deck' with no index names two parts; Ghost names none
+
+
+class ProbeTableAndLaterMarks(unittest.TestCase):
+    """The probe's verdicts joined by node (tools/advisor/probe_vis.sh's table, corpus.py --probe) and the deletion a
+    part received at a later stage file carried back to the earlier row (mark_later)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="advisor-probe-")
+        cls.models = os.path.join(cls.tmp, "models")
+        cls.recipes = os.path.join(cls.tmp, "recipes")
+        cls.out = os.path.join(cls.tmp, "out")
+        folder = os.path.join(cls.models, "Espana")
+        os.makedirs(folder)
+        os.makedirs(cls.recipes)
+        # RAW: Hull (two islands, marked S), Gear and Rivet (one triangle each), Lamp (the six-vertex mesh)
+        raw = make_glb(nodes=[{"name": "Hull", "mesh": 0}, {"name": "Gear", "mesh": 1}, {"name": "Rivet", "mesh": 1}, {"name": "Lamp", "mesh": 0}],
+                       meshes=[[(0, 0)], [(1, 1)]], positions=[TWO_ISLANDS, ONE_TRI], index_lists=[[0, 1, 2, 3, 4, 5], [0, 1, 2]])
+        cls.raw = os.path.join(folder, "ship.glb")
+        with open(cls.raw, "wb") as f:
+            f.write(raw)
+        with io.open(cls.raw + ".marks.txt", "w", encoding="utf-8") as f:
+            f.write("#fuse-groups v2\nS|0|Hull\n")
+        # SPLIT: the hull's two children, Gear and Rivet unchanged, Lamp now a three-vertex part (not the same part); Gear and Lamp marked X
+        split = make_glb(nodes=[{"name": "Hull_Part_001", "mesh": 0}, {"name": "Hull_Part_002", "mesh": 1}, {"name": "Gear", "mesh": 2}, {"name": "Rivet", "mesh": 2}, {"name": "Lamp", "mesh": 2}],
+                         meshes=[[(0, 0)], [(0, 1)], [(1, 2)]], positions=[TWO_ISLANDS, ONE_TRI], index_lists=[[0, 1, 2], [3, 4, 5], [0, 1, 2]])
+        cls.split = os.path.join(folder, "ship_split.glb")
+        with open(cls.split, "wb") as f:
+            f.write(split)
+        with io.open(cls.split + ".marks.txt", "w", encoding="utf-8") as f:
+            f.write("#fuse-groups v2\nX|2|Gear\nX|4|Lamp\n")
+        # a recipe on the raw file: Gear's verdict agrees with the probe, Rivet's differs, Lamp's is the Lab's -1 (unclassified)
+        recipe = {"srcFile": cls.raw.replace("\\", "/"), "parts": [
+            {"name": "Gear", "verts": 3, "role": 3, "vis": 0, "flip": 0}, {"name": "Rivet", "verts": 3, "role": 0, "vis": 0, "flip": 0},
+            {"name": "Lamp", "verts": 6, "role": 0, "vis": -1, "flip": 0}]}
+        with io.open(os.path.join(cls.recipes, "ship.json"), "w", encoding="utf-8") as f:
+            json.dump(recipe, f)
+        # the probe's table: the raw file as it is on disk (the hull in two loose parts, one of them escaping), the split file STALE
+        st = os.stat(cls.raw)
+        ticks = st.st_mtime_ns // 100 + corpus.WINDOWS_EPOCH_TICKS
+        raw_key = cls.raw.replace("\\", "/")
+        cls.probe = os.path.join(cls.tmp, "probe.tsv")
+        with io.open(cls.probe, "w", encoding="utf-8") as f:
+            f.write("FILE\t%s\t%d\t%d\tparts=5\tsplit=0\tms=3\n" % (raw_key, st.st_size, ticks))
+            f.write("PART\t%s\t0\tHull\t3\t0\t1\t\n" % raw_key)
+            f.write("PART\t%s\t0\tHull.001\t3\t1\t2\tspine\n" % raw_key)
+            f.write("PART\t%s\t1\tGear\t3\t0\t0\t\n" % raw_key)
+            f.write("PART\t%s\t2\tRivet\t3\t1\t0\t\n" % raw_key)
+            f.write("PART\t%s\t3\tLamp\t6\t0\t0\t\n" % raw_key)
+            f.write("FILE\t%s\t1\t1\tparts=5\tsplit=0\tms=3\n" % cls.split.replace("\\", "/"))
+            f.write("PART\t%s\t2\tGear\t3\t0\t0\t\n" % cls.split.replace("\\", "/"))
+            f.write("FAIL\t%s\tInvalidDataException: no chunk\n" % os.path.join(folder, "broken.glb").replace("\\", "/"))
+        cls.parts, cls.models_rows, cls.report = corpus.build(cls.models, cls.recipes, cls.out, use_cache=False, log=lambda *_: None, probe_path=cls.probe)
+        cls.by = {(r["file"], r["name"]): r for r in cls.parts}
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_the_table_is_read_with_its_file_identity_and_failures(self):
+        report = []
+        table = corpus.read_probe(self.probe, report)
+        entry = table[corpus.norm_path(self.raw)]
+        self.assertEqual(len(entry["nodes"][0]), 2)   # the hull's two loose parts share node 0
+        self.assertEqual(entry["nodes"][0][1], (1, 2, "spine", 3, "Hull.001"))
+        self.assertTrue(corpus.probe_current(entry, self.raw))
+        self.assertFalse(corpus.probe_current(dict(entry, ticks=entry["ticks"] + 1), self.raw))   # rewritten at the same size
+        self.assertFalse(corpus.probe_current(dict(entry, size=entry["size"] + 1), self.raw))
+        self.assertFalse(corpus.probe_current(table[corpus.norm_path(self.split)], self.split))
+        self.assertTrue(any(l.startswith("PROBE FAIL") and "broken.glb" in l for l in report), report)
+
+    def test_verdicts_land_per_node_and_a_nodes_loose_parts_fold(self):
+        hull = self.by[("Espana/ship.glb", "Hull")]
+        self.assertEqual((hull["vis"], hull["flip"], hull["bone"], hull["vis_from"]), (1, 3, "spine", "probe"))   # any part escaping = external; flips summed
+        gear = self.by[("Espana/ship.glb", "Gear")]
+        self.assertEqual((gear["vis"], gear["vis_from"]), (0, "probe"))
+
+    def test_a_stale_file_falls_back_and_is_reported(self):
+        gear = self.by[("Espana/ship_split.glb", "Gear")]
+        self.assertEqual((gear["vis"], gear["vis_from"]), ("", ""))   # no recipe on the split file either
+        self.assertTrue(any(l.startswith("PROBE stale: Espana/ship_split.glb") for l in self.report), self.report)
+
+    def test_the_recipes_verdict_checks_the_join_and_does_not_overwrite_the_probes(self):
+        rivet = self.by[("Espana/ship.glb", "Rivet")]
+        self.assertEqual((rivet["vis"], rivet["vis_from"], rivet["recipe"]), (1, "probe", "ship.json"))   # the probe's 1 stands over the recipe's 0
+        self.assertTrue(any(l.startswith("PROBE differs at Espana/ship.glb 'Rivet'") for l in self.report), self.report)
+        summary = [l for l in self.report if l.startswith("PROBE summary")][0]
+        self.assertIn("recipe vis agree 1, recipe vis differ 1, recipe vis unclassified 1", summary)
+
+    def test_a_deletion_at_the_split_file_is_carried_back_to_the_same_part_at_the_raw_file(self):
+        self.assertEqual(self.by[("Espana/ship.glb", "Gear")]["mark_later"], "X")   # same name, same vertex count, X later
+        self.assertEqual(self.by[("Espana/ship.glb", "Rivet")]["mark_later"], "")   # not deleted later
+        self.assertEqual(self.by[("Espana/ship.glb", "Lamp")]["mark_later"], "")    # the later Lamp has 3 vertices, this one 6: another part
+        self.assertEqual(self.by[("Espana/ship.glb", "Hull")]["mark_later"], "")    # split here; its children are other nodes
+        self.assertEqual(self.by[("Espana/ship_split.glb", "Gear")]["mark_later"], "")   # the later file itself carries the mark, not mark_later
+        self.assertTrue(any(l == "LATER Espana/ship.glb: 1 unmarked part(s) carry the X a later stage file gave them (mark_later)" for l in self.report), self.report)
+
+    def test_the_delete_population_counts_the_carried_deletion(self):
+        truth = {(r["file"], r["name"]): r["truth"] for r in evaluate.population("delete", self.parts)}
+        self.assertEqual(truth[("Espana/ship.glb", "Gear")], "X")
+        self.assertEqual(truth[("Espana/ship.glb", "Rivet")], "")
+        self.assertEqual(truth[("Espana/ship_split.glb", "Lamp")], "X")
+
+    def test_list_names_the_files_the_corpus_reads(self):
+        files = corpus.list_files(self.models, self.recipes)
+        self.assertEqual(sorted(os.path.basename(f) for f in files), ["ship.glb", "ship_split.glb"])
+
+    def test_the_csv_round_trips_the_new_columns(self):
+        parts, _ = evaluate.load_corpus(self.out)
+        row = [r for r in parts if r["file"] == "Espana/ship.glb" and r["name"] == "Gear"][0]
+        self.assertEqual((row["vis"], row["vis_from"], row["mark_later"]), ("0", "probe", "X"))
+
+    def test_a_repeated_file_line_and_a_probe_node_the_file_lacks_are_reported(self):
+        # a table appended to twice: the later run's rows replace the earlier, and the report says so; a probe node the
+        # file's rows do not have means the table was made from another file - not silent either
+        raw_key = self.raw.replace("\\", "/")
+        st = os.stat(self.raw)
+        table = os.path.join(self.tmp, "probe2.tsv")
+        with io.open(table, "w", encoding="utf-8") as f:
+            f.write("FILE\t%s\t%d\t%d\n" % (raw_key, st.st_size, st.st_mtime_ns // 100 + corpus.WINDOWS_EPOCH_TICKS))
+            f.write("PART\t%s\t0\tHull\t3\t0\t1\t\n" % raw_key)
+            f.write("FILE\t%s\t%d\t%d\n" % (raw_key, st.st_size, st.st_mtime_ns // 100 + corpus.WINDOWS_EPOCH_TICKS))
+            f.write("PART\t%s\t99\tGhost\t3\t1\t0\t\n" % raw_key)
+        report = []
+        entry = corpus.read_probe(table, report)[corpus.norm_path(self.raw)]
+        self.assertEqual(sorted(entry["nodes"]), [99])
+        self.assertTrue(any(l.startswith("PROBE table: FILE line repeated for") for l in report), report)
+        rows = [{"node_index": 0, "vis": "", "flip": "", "bone": "", "vis_from": ""}]
+        corpus.apply_probe(rows, entry, "Espana/ship.glb", report)
+        self.assertEqual(rows[0]["vis_from"], "")
+        self.assertTrue(any(l.startswith("PROBE Espana/ship.glb: 1 probe node(s) the file's rows do not have (99)") for l in report), report)
+        self.assertTrue(any(l.startswith("PROBE Espana/ship.glb: 1 node(s) without a probe row") for l in report), report)
+
+    def test_an_empty_table_still_writes_the_summary(self):
+        empty = os.path.join(self.tmp, "empty.tsv")
+        io.open(empty, "w").close()
+        _, _, report = corpus.build(self.models, self.recipes, os.path.join(self.tmp, "out-empty"), use_cache=False, log=lambda *_: None, probe_path=empty)
+        self.assertIn("PROBE summary: files probed 0, files stale 0, files not in the table 2, recipe vis agree 0, recipe vis differ 0, recipe vis unclassified 0", report)
+
+    def test_a_relative_models_root_lists_and_joins_the_same_absolute_paths(self):
+        # --list prints absolute paths, the probe table keys them, --probe must find them again whatever the user typed
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(self.tmp)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(corpus.main(["--list", "--models", "models", "--recipes", "recipes"]), 0)
+        self.assertEqual(sorted(out.getvalue().split()), sorted(p.replace("\\", "/") for p in (self.raw, self.split)))
+        _, _, report = corpus.build("models", "recipes", os.path.join(self.tmp, "out-rel"), use_cache=False, log=lambda *_: None, probe_path=self.probe)
+        self.assertTrue(any(l.startswith("PROBE summary: files probed 1, files stale 1, files not in the table 0") for l in report), report)
+
+
+class LaterMarkRules(unittest.TestCase):
+    """corpus.carry_later_marks: which later file counts, which part is the same part, and what a conflict is."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="advisor-later-")
+        cls.models = os.path.join(cls.tmp, "models")
+        cls.recipes = os.path.join(cls.tmp, "recipes")
+        os.makedirs(os.path.join(cls.models, "Espana"))
+        os.makedirs(os.path.join(cls.models, "Other"))
+        os.makedirs(cls.recipes)
+        NAMES = ["Gear", "Rivet", None, "Lamp", "Mast", "Deck", "Keel"]   # node 2 unnamed; every part one triangle, so only the name tells them apart
+
+        def glb(names, marks):
+            nodes = [({"name": n, "mesh": 0} if n else {"mesh": 0}) for n in names]
+            return make_glb(nodes=nodes, meshes=[[(0, 0)]], positions=[ONE_TRI], index_lists=[[0, 1, 2]]), marks
+
+        files = {
+            # the raw file, with a Flag no later file lists; its sidecar's one line names a node the file lacks (a stale sidecar: no mark resolves)
+            "Espana/HMS.glb": glb(NAMES + ["Flag"], "S|9|Ghost\n"),
+            # the cut file marks Gear X and splits the Deck
+            "Espana/hms_cut.glb": glb(NAMES, "X|0|Gear\nS|5|Deck\n"),
+            # the split file lists Gear unmarked again (a conflict with the cut's X), marks Rivet, the unnamed node and the Deck X
+            "Espana/hms_cut_split.glb": glb(NAMES, "X|1|Rivet\nX|2|node 2\nX|5|Deck\n"),
+            # a second export of the split stage: marks the Mast X, lists Rivet and Deck unmarked (conflicts at the same stage)
+            "Espana/hms_cut_split2.glb": glb(NAMES, "X|4|Mast\n"),
+            # another model whose stem extends this one's with something that is not a stage token: its marks do not carry
+            "Espana/hms_v2_split.glb": glb(NAMES, "X|3|Lamp\n"),
+            # the same chain name in another folder: another model
+            "Other/hms_cut_split.glb": glb(NAMES, "X|6|Keel\n"),
+        }
+        for name, (data, marks) in files.items():
+            path = os.path.join(cls.models, name)
+            with open(path, "wb") as f:
+                f.write(data)
+            with io.open(path + ".marks.txt", "w", encoding="utf-8") as f:
+                f.write("#fuse-groups v2\n" + marks)
+        cls.parts, _, cls.report = corpus.build(cls.models, cls.recipes, os.path.join(cls.tmp, "out"), use_cache=False, log=lambda *_: None)
+        cls.by = {(r["file"], r["name"]): r for r in cls.parts}
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def later(self, file, name):
+        return self.by[(file, name)]["mark_later"]
+
+    def test_only_stage_tokens_extend_a_stem_and_the_case_does_not_matter(self):
+        self.assertEqual(self.later("Espana/HMS.glb", "Rivet"), "X")     # HMS -> hms_cut_split
+        self.assertEqual(self.later("Espana/HMS.glb", "Mast"), "X")      # HMS -> hms_cut_split2
+        self.assertEqual(self.later("Espana/HMS.glb", "Lamp"), "")       # hms_v2_split is another model
+        self.assertEqual(self.later("Espana/hms_cut.glb", "Rivet"), "X")
+
+    def test_another_folder_and_an_absent_part_do_not_carry(self):
+        self.assertEqual(self.later("Espana/HMS.glb", "Keel"), "")       # Other/hms_cut_split.glb is another model
+        self.assertEqual(self.later("Espana/HMS.glb", "Flag"), "")       # no later file lists it: not inferred deleted
+        self.assertEqual(self.later("Other/hms_cut_split.glb", "Keel"), "")   # marked there itself, not carried
+
+    def test_a_file_of_the_same_stage_is_not_a_later_file(self):
+        self.assertEqual(self.later("Espana/hms_cut_split.glb", "Mast"), "")   # hms_cut_split2 is the same stage
+
+    def test_an_unnamed_node_is_never_the_same_part(self):
+        self.assertEqual(self.later("Espana/HMS.glb", "node 2"), "")
+        self.assertEqual(self.later("Espana/hms_cut.glb", "node 2"), "")
+
+    def test_a_part_marked_here_is_not_touched(self):
+        self.assertEqual(self.by[("Espana/hms_cut.glb", "Gear")]["mark"], "X")
+        self.assertEqual(self.later("Espana/hms_cut.glb", "Gear"), "")   # X here already
+        self.assertEqual(self.by[("Espana/hms_cut.glb", "Deck")]["mark"], "S")
+        self.assertEqual(self.later("Espana/hms_cut.glb", "Deck"), "")   # split here; the split file's X on the Deck is not this row's
+
+    def test_a_later_x_carries_and_an_unmarked_listing_at_that_stage_or_later_is_a_conflict(self):
+        # Gear: X at cut, unmarked at split. Rivet and Deck: X at split, unmarked at split2. Mast: X at split2, unmarked at
+        # split (two exports of one stage have no order the corpus knows: a conflict line is a prompt to look, not a verdict)
+        self.assertEqual(self.later("Espana/HMS.glb", "Gear"), "X")
+        self.assertEqual(self.later("Espana/HMS.glb", "Deck"), "X")
+        self.assertIn("LATER Espana/HMS.glb: 4 unmarked part(s) carry the X a later stage file gave them (mark_later)", self.report)
+        self.assertIn("LATER conflict at Espana/HMS.glb: 4 part(s) marked X at one later stage file and listed unmarked at another of the same or a higher stage; the X carries", self.report)
+        self.assertIn("LATER Espana/hms_cut.glb: 2 unmarked part(s) carry the X a later stage file gave them (mark_later)", self.report)
+        self.assertIn("LATER conflict at Espana/hms_cut.glb: 2 part(s) marked X at one later stage file and listed unmarked at another of the same or a higher stage; the X carries", self.report)
+        self.assertFalse(any(l.startswith("LATER") and "hms_cut_split" in l.split(":")[0] for l in self.report), self.report)
+
+    def test_a_file_judged_only_at_a_later_stage_is_in_the_delete_population(self):
+        # the raw file's own sidecar resolved to nothing, so without the carried X it would not count as judged
+        self.assertEqual(self.by[("Espana/HMS.glb", "Gear")]["mark"], "")
+        truth = {(r["file"], r["name"]): r["truth"] for r in evaluate.population("delete", self.parts)}
+        self.assertEqual(truth[("Espana/HMS.glb", "Gear")], "X")
+        self.assertEqual(truth[("Espana/HMS.glb", "Lamp")], "")
+
+
+class DeleteProposer(unittest.TestCase):
+    """tools/advisor/proposers/delete.py: interior or tiny against the model, thresholds learned on the training rows."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "advisor", "proposers"))
+        import delete  # noqa: E402
+        import common  # noqa: E402
+        cls.delete = delete
+        cls.common = common
+
+    @staticmethod
+    def row(model, i, vis, size, truth="", file=None):
+        return {"model": model, "file": file or model + "/m.glb", "node_index": i, "name": "n%d" % i, "stage": "split", "vis": str(vis),
+                "sx": str(size), "sy": str(size / 2), "sz": str(size / 4), "verts": "9", "mark": "", "truth": truth}
+
+    def training(self):
+        train = [self.row("a", 0, 1, 100.0)]   # the hull: the model's extent
+        for i in range(1, 11):
+            train.append(self.row("a", i, 0, 2.0 + i / 10, "X"))        # interior fittings, 2 % of the model: deleted
+            train.append(self.row("a", 20 + i, 1, 0.02 + i / 1000, "X"))  # exterior rivets, 0.02 %: deleted
+            train.append(self.row("a", 40 + i, 1, 1.0 + i / 10))         # exterior fittings, 1 %: kept
+            train.append(self.row("a", 60 + i, 0, 30.0 + i))             # a big interior part (a deck under the hull): kept
+        return train
+
+    def test_the_rule_is_learned_and_applied_without_truth(self):
+        a, b = self.delete.learn(self.training())
+        self.assertGreaterEqual(a, 0.03)       # the interior fittings are in ...
+        self.assertLess(a, 0.3)                # ... the big interior deck is not
+        self.assertGreaterEqual(b, 0.0003)     # the rivets are in ...
+        self.assertLess(b, 0.01)               # ... the exterior fittings are not
+        test = [{k: v for k, v in r.items() if k != "truth"} for r in
+                (self.row("b", 0, 1, 50.0), self.row("b", 1, 0, 1.0), self.row("b", 2, 1, 0.01), self.row("b", 3, 1, 0.6), self.row("b", 4, 0, 20.0))]
+        preds = self.delete.propose("delete-hand", test, self.training(), {"model": "b", "category": "ship", "files": ""}, [])
+        self.assertEqual(preds, {("b/m.glb", 0): "", ("b/m.glb", 1): "X", ("b/m.glb", 2): "X", ("b/m.glb", 3): "", ("b/m.glb", 4): ""})
+        self.assertEqual(self.delete.LAST_RULE["model"], "b")
+        self.assertEqual(self.delete.propose("split", test, self.training(), {}, []), {})
+
+    def test_the_size_is_relative_to_each_file(self):
+        # the same absolute size is tiny on a battleship and a whole part on a canoe
+        ext = self.delete.file_extents([self.row("a", 0, 1, 100.0), self.row("a", 1, 1, 0.5, file="a/canoe.glb"), self.row("a", 2, 1, 0.05, file="a/canoe.glb")])
+        self.assertEqual(ext, {"a/m.glb": 100.0, "a/canoe.glb": 0.5})
+        self.assertAlmostEqual(self.delete.relative_size(self.row("a", 2, 1, 0.05, file="a/canoe.glb"), ext), 0.1)
+
+    def test_ties_go_to_the_stricter_rule_and_no_training_deletion_abstains(self):
+        self.assertIsNone(self.delete.learn([]))
+        self.assertIsNone(self.delete.learn([self.row("a", 0, 1, 100.0), self.row("a", 1, 0, 1.0)]))
+        self.assertEqual(self.delete.propose("delete", [self.row("b", 1, 0, 1.0)], [self.row("a", 0, 1, 100.0)], {"model": "b"}, []), {})
+        # one deleted interior part and nothing else: every a >= its share scores the same, the smallest wins
+        a, b = self.delete.learn([self.row("a", 0, 1, 100.0), self.row("a", 1, 0, 2.0, "X")])
+        self.assertEqual((a, b), (0.02, 0.0))
+        # a training deletion no grid rule reaches (an exterior part half the model's size): abstain, not the "none" rule
+        unreachable = [self.row("a", 0, 1, 100.0), self.row("a", 1, 1, 50.0, "X"), self.row("a", 2, 0, 1.0)]
+        self.assertIsNone(self.delete.learn(unreachable))
+        self.assertEqual(self.delete.propose("delete", [self.row("b", 1, 0, 1.0)], unreachable, {"model": "b"}, []), {})
+        self.assertIn("no grid rule", self.delete.LAST_RULE["abstained"])
+
+    def test_rows_without_the_features_or_without_any_verdict_fail_loudly(self):
+        with self.assertRaises(ValueError):
+            self.delete.propose("delete", [{"file": "f", "node_index": 1, "sx": "1"}], [], {}, [])
+        # the column is there, the verdict is on no row at all: the corpus was exported without --probe
+        test = [self.row("b", 1, "", 1.0)]
+        train = [dict(r, vis="") for r in self.training()]
+        with self.assertRaises(ValueError) as cm:
+            self.delete.propose("delete", test, train, {"model": "b"}, [])
+        self.assertIn("--probe", str(cm.exception))
+        for c in self.delete.NEEDED:
+            self.assertIn(c, evaluate.PART_FEATURES)
+
+    def test_a_model_without_a_verdict_abstains_and_the_other_folds_run(self):
+        # one model's files are stale or failed in the probe table and have no recipe: its fold proposes nothing and says
+        # why; it does not abort the whole evaluation
+        test = [self.row("b", 1, "", 1.0), self.row("b", 2, "", 0.001)]
+        self.assertEqual(self.delete.propose("delete", test, self.training(), {"model": "b"}, []), {})
+        self.assertIn("no visibility verdict", self.delete.LAST_RULE["abstained"])
+        self.assertNotIn("a", self.delete.LAST_RULE)
+        # the Lab's -1 (unclassified) is no verdict either
+        unclassified = [self.row("b", 1, -1, 1.0), self.row("b", 2, -1, 0.001)]
+        self.assertEqual(self.delete.propose("delete", unclassified, self.training(), {"model": "b"}, []), {})
+        self.assertIn("abstained", self.delete.LAST_RULE)
+        # under the evaluator the fold is named with its reason and its positives, so the recall number is readable
+        parts = []
+        for r in self.training() + [self.row("b", 1, "", 1.0, "X"), self.row("b", 2, "", 50.0)]:
+            parts.append(dict({c: "" for c in corpus.PART_COLUMNS}, **{k: v for k, v in r.items() if k != "truth"}))
+            parts[-1].update(mark=r["truth"], category="ship")
+        models = [{"model": m, "category": "ship", "files": "", "dials_parsed": {}} for m in ("a", "b")]
+        text = "\n".join(evaluate.evaluate(parts, models, {t: ([("delete", self.delete.propose)] if t == "delete" else []) for t in evaluate.TASKS}))
+        self.assertIn("fold b: abstained - no visibility verdict on the held-out rows (stale or failed in the probe table, no recipe); its 1 positive(s) of 2 rows count as missed", text)
+
+    def test_an_abstention_on_one_task_is_not_reported_under_another(self):
+        # the delete proposer serves no split task: it returns nothing for it, and the note its delete fold left must
+        # not read as the split fold's - the proposer clears first, and the evaluator clears before every fold
+        self.delete.propose("delete", [self.row("b", 1, "", 1.0)], self.training(), {"model": "b"}, [])
+        self.assertIn("abstained", self.delete.LAST_RULE)
+        self.assertEqual(self.delete.propose("split", [self.row("b", 1, "", 1.0)], self.training(), {"model": "b"}, []), {})
+        self.assertEqual(self.delete.LAST_RULE, {})
+        self.delete.LAST_RULE["abstained"] = "a note left by another proposer's fold"
+        notes = []
+        rows = [dict(r, truth="S", category="ship") for r in self.training()[:3]]
+        models = [{"model": "a", "category": "ship", "files": "", "dials_parsed": {}}]
+        self.assertEqual(evaluate.leave_one_model_out("split", rows, models, self.delete.propose, notes), {})
+        self.assertEqual(notes, [])
+        # some rows without a verdict (one file stale beside a probed one): the fold runs, the blank rows are not interior
+        mixed = [self.row("b", 0, 1, 50.0), self.row("b", 1, "", 1.0), self.row("b", 2, 0, 1.0)]
+        self.assertEqual(self.delete.propose("delete", mixed, self.training(), {"model": "b"}, []), {("b/m.glb", 0): "", ("b/m.glb", 1): "", ("b/m.glb", 2): "X"})
+        self.assertNotIn("abstained", self.delete.LAST_RULE)
+
+    def test_ties_are_exact_not_the_last_bit_of_a_float(self):
+        # two rules with the same F0.5 as a fraction (5/12 each): a = 0.05 proposes 2 training parts (1 right, 1 wrong,
+        # 3 missed), a = 0.1 proposes 11 (4 right, 7 wrong, 0 missed); the stricter one wins the tie
+        train = [self.row("a", 0, 1, 100.0)]
+        train += [self.row("a", 1, 0, 3.0, "X"), self.row("a", 2, 0, 3.5)]
+        train += [self.row("a", 10 + i, 0, 6.0 + i / 10, "X") for i in range(3)]
+        train += [self.row("a", 20 + i, 0, 7.0 + i / 10) for i in range(6)]
+        self.assertEqual(self.delete.f_beta(1, 1, 3), self.delete.f_beta(4, 7, 0))
+        self.assertEqual(self.delete.learn(train), (0.05, 0.0))
+
+    def test_a_part_whose_size_is_not_known_is_never_small(self):
+        # a blocked mesh's box is empty in the corpus (it was nan and -inf once, and -inf is under every threshold):
+        # not a candidate under any rule, and not the file's extent either
+        for sx in ("", "nan", "-inf", "inf"):
+            unknown = dict(self.row("b", 1, 0, 1.0), sx=sx, sy=sx, sz=sx)
+            ext = self.delete.file_extents([self.row("b", 0, 1, 50.0), unknown])
+            self.assertEqual(ext, {"b/m.glb": 50.0}, sx)
+            self.assertIsNone(self.delete.relative_size(unknown, ext), sx)
+            self.assertFalse(self.delete.candidate(unknown, None, 1.0, 0.02), sx)
+        preds = self.delete.propose("delete", [self.row("b", 0, 1, 50.0), dict(self.row("b", 1, 0, 1.0), sx="-inf", sy="nan", sz="")],
+                                    self.training(), {"model": "b"}, [])
+        self.assertEqual(preds, {("b/m.glb", 0): "", ("b/m.glb", 1): ""})
+
+    def test_one_unknown_or_negative_axis_does_not_make_a_part_tiny(self):
+        hull = self.row("b", 0, 1, 50.0)
+        for axis in ("sx", "sy", "sz"):
+            for invalid in ("", "nan", "inf", "-inf", "-0.01"):
+                with self.subTest(axis=axis, invalid=invalid):
+                    unknown = dict(self.row("b", 1, 0, 0.001), **{axis: invalid})
+                    self.assertIsNone(self.delete.extent(unknown))
+                    extents = self.delete.file_extents([hull, unknown])
+                    self.assertIsNone(self.delete.relative_size(unknown, extents))
+                    preds = self.delete.propose("delete", [hull, unknown], self.training(), {"model": "b"}, [])
+                    self.assertEqual(preds[("b/m.glb", 1)], "")
+
+    def test_a_zero_threshold_switches_its_clause_off(self):
+        # a zero-extent part (a point, or a row without extents) has relative size 0: a rule that says "none by size
+        # alone" must not propose it, nor "no interior part"
+        point = self.row("b", 1, 1, 0.0)
+        self.assertFalse(self.delete.candidate(point, 0.0, 0.02, 0.0))
+        interior_point = self.row("b", 2, 0, 0.0)
+        self.assertFalse(self.delete.candidate(interior_point, 0.0, 0.0, 0.0))
+        self.assertTrue(self.delete.candidate(interior_point, 0.0, 0.02, 0.0))   # the interior clause is on: a point inside goes
+        self.assertTrue(self.delete.candidate(point, 0.0, 0.0, 0.001))
+
+    def corpus_dir(self, rows):
+        """A corpus folder (parts.csv, models.csv) from rows that carry only some of the columns."""
+        tmp = tempfile.TemporaryDirectory(prefix="advisor-delete-cli-")
+        self.addCleanup(tmp.cleanup)
+        full = [dict({c: "" for c in corpus.PART_COLUMNS}, **{k: v for k, v in r.items() if k != "truth"}) for r in rows]
+        corpus.write_csv(os.path.join(tmp.name, "parts.csv"), corpus.PART_COLUMNS, full)
+        corpus.write_csv(os.path.join(tmp.name, "models.csv"), corpus.MODEL_COLUMNS,
+                         [dict({c: "" for c in corpus.MODEL_COLUMNS}, model=m) for m in sorted(set(r["model"] for r in rows))])
+        return tmp.name
+
+    def test_the_cli_leaves_the_users_decisions_alone_and_writes_beside_the_glb(self):
+        train = [dict(r, mark=r["truth"]) for r in self.training()]   # in the corpus the truth is the mark
+        held = [self.row("b", 0, 1, 50.0), self.row("b", 1, 0, 1.0), self.row("b", 2, 0, 1.1), self.row("b", 3, 0, 1.2),
+                self.row("b", 4, 0, 1.3), self.row("b", 5, 0, 1.4), self.row("b", 6, 1, 0.01)]
+        held[2]["mark"] = "S"              # split by the user: not a candidate
+        held[3]["fuse_letter"] = "A"       # in a fuse group: kept by the user, not a candidate
+        held[4]["mark_later"] = "X"        # deleted at a later stage: proposed and said so
+        held[5]["role"] = "Ignore"         # the recipe ignores it: proposed and said so
+        cdir = self.corpus_dir(train + held)
+        root = tempfile.TemporaryDirectory(prefix="advisor-delete-root-")
+        self.addCleanup(root.cleanup)
+        os.makedirs(os.path.join(root.name, "b"))
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = self.delete.main(["--corpus", cdir, "--model", "b", "--models-root", root.name, "--write"])
+        self.assertEqual(rc, 0, out.getvalue())
+        text = out.getvalue()
+        self.assertIn("b/m.glb: 4 proposal(s)", text)
+        self.assertNotIn("X|2|n2", text)
+        self.assertNotIn("X|3|n3", text)
+        self.assertIn("X|4|n4  9 verts, vis 0 (marked X at a later stage)", text)
+        self.assertIn("X|5|n5  9 verts, vis 0 (role Ignore in the recipe)", text)
+        lines, _ = corpus.read_sidecar(os.path.join(root.name, "b", "m.glb.marks.proposed.txt"))
+        self.assertEqual(lines, [("X", 1, "n1"), ("X", 4, "n4"), ("X", 5, "n5"), ("X", 6, "n6")])
+        # a models root without the model's folder is refused before anything is written, with the flag named
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = self.delete.main(["--corpus", cdir, "--model", "b", "--models-root", os.path.join(root.name, "nope"), "--write"])
+        self.assertEqual(rc, 1)
+        self.assertIn("--models-root", out.getvalue())
+        # a held-out model without a verdict: no proposals, the reason printed, exit 0, and --write leaves the earlier
+        # proposals as they are (an abstention is not a judgement)
+        cdir2 = self.corpus_dir(train + [dict(r, vis="") for r in held])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = self.delete.main(["--corpus", cdir2, "--model", "b", "--models-root", root.name, "--write"])
+        self.assertEqual(rc, 0)
+        self.assertIn("no proposals: no visibility verdict", out.getvalue())
+        self.assertIn("left as they are", out.getvalue())
+        self.assertNotIn("written:", out.getvalue())
+        self.assertEqual(corpus.read_sidecar(os.path.join(root.name, "b", "m.glb.marks.proposed.txt"))[0], lines)
+        # a file the merge refuses (not UTF-8) fails the write with the file named
+        with open(os.path.join(root.name, "b", "m.glb.marks.proposed.txt"), "wb") as f:
+            f.write(b"#fuse-groups v2\nS|7|Ma\xe9t\n")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            rc = self.delete.main(["--corpus", cdir, "--model", "b", "--models-root", root.name, "--write"])
+        self.assertEqual(rc, 1)
+        self.assertIn("not UTF-8", out.getvalue())
+
+    def test_the_proposals_file_keeps_hand_added_group_names_and_refuses_another_code_page(self):
+        tmp = tempfile.TemporaryDirectory(prefix="advisor-proposals-")
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, "m.glb.marks.proposed.txt")
+        with io.open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("#fuse-groups v2\n#name|A|Rigging\nA|3|Ma\u00e9t\nX|9|stale\n")
+        self.common.merge_proposals(path, ("X",), ["X|1|rivet"], "delete.py")
+        lines, _ = corpus.read_sidecar(path)
+        self.assertEqual([(l, i, n) for l, i, n in lines], [("A", 3, "Ma\u00e9t"), ("X", 1, "rivet")])
+        with io.open(path, encoding="utf-8") as f:
+            self.assertIn("#name|A|Rigging\n", f.read())
+        # hand-edited and saved in cp1252: a name read with a replacement character would match no part, so the merge
+        # is refused and the file left as it is
+        with open(path, "wb") as f:
+            f.write(b"#fuse-groups v2\nA|3|Ma\xe9t\n")
+        with self.assertRaises(ValueError) as cm:
+            self.common.merge_proposals(path, ("X",), ["X|1|rivet"], "delete.py")
+        self.assertIn("not UTF-8", str(cm.exception))
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"#fuse-groups v2\nA|3|Ma\xe9t\n")
+
+    def test_proposals_of_two_proposers_share_one_file_by_letter(self):
+        tmp = tempfile.TemporaryDirectory(prefix="advisor-proposals-")
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, "m.glb.marks.proposed.txt")
+        with io.open(path, "w", encoding="utf-8") as f:
+            f.write("#fuse-groups v2\n#proposed by split.py\nS|3|mast\nX|9|stale\n")
+        self.common.merge_proposals(path, ("X",), ["X|1|rivet", "X|2|gear"], "delete.py")
+        lines, _ = corpus.read_sidecar(path)
+        self.assertEqual(lines, [("S", 3, "mast"), ("X", 1, "rivet"), ("X", 2, "gear")])   # the S kept, the stale X replaced
+        self.common.merge_proposals(path, ("S",), [], "split.py")
+        self.assertEqual(corpus.read_sidecar(path)[0], [("X", 1, "rivet"), ("X", 2, "gear")])   # an empty S proposal clears only the S
+        self.assertEqual(self.common.merge_proposals(os.path.join(tmp.name, "new.glb.marks.proposed.txt"), ("X",), ["X|1|a"], "delete.py"), ["X|1|a"])
+
+    def test_conflicting_actions_for_one_node_are_refused_in_both_run_orders(self):
+        tmp = tempfile.TemporaryDirectory(prefix="advisor-proposals-")
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, "m.glb.marks.proposed.txt")
+        for first, second in (("S", "X"), ("X", "S"), ("T", "X"), ("A", "X")):
+            with self.subTest(first=first, second=second):
+                before = ("#fuse-groups v2\n%s|003|mast|tip\n" % first).encode("utf-8")
+                with open(path, "wb") as f:
+                    f.write(before)
+                with self.assertRaises(ValueError) as cm:
+                    self.common.merge_proposals(path, (second,), ["%s|+3|mast|tip" % second], "test")
+                self.assertIn("conflicting", str(cm.exception))
+                with open(path, "rb") as f:
+                    self.assertEqual(f.read(), before)
+
+    def test_a_failed_write_preserves_the_other_proposers_file(self):
+        tmp = tempfile.TemporaryDirectory(prefix="advisor-proposals-")
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, "m.glb.marks.proposed.txt")
+        before = b"#fuse-groups v2\nS|3|mast\nX|9|old\n"
+        with open(path, "wb") as f:
+            f.write(before)
+        # A real encoding failure after writing the header and kept lines must not truncate the old proposals.
+        with self.assertRaises(UnicodeEncodeError):
+            self.common.merge_proposals(path, ("X",), ["X|1|invalid\ud800"], "delete.py")
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), before)
+        self.assertEqual(os.listdir(tmp.name), [os.path.basename(path)])
 
 
 if __name__ == "__main__":

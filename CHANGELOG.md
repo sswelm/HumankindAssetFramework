@@ -10,6 +10,66 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PR #275 review (2026-11-10).** Deletion sizes require all three dimensions to be finite and nonnegative: one
+  missing, nonfinite or negative axis must not turn a long part into a tiny deletion candidate. Shared proposal
+  writes refuse conflicting letters for one node in either proposer order, instead of letting the last sidecar
+  line silently win. Atomic replacement preserves the previous file if writing fails. Three regression cases
+  reproduce these failures before the fixes; the advisor suite now has 79 cases.
+- **THE VISIBILITY VERDICT FOR EVERY FILE, AND THE DELETION PROPOSER (2026-11-09; Phase 1 of `docs/Workshop-Advisor-Plan.md`).**
+  `tools/advisor/probe_vis.sh` compiles `tools/advisor/ProbeVis.cs` against the editor sources and runs the Vehicle Lab's own
+  probe (`VehicleProbe.Run`: escape rays over one BVH of the whole file, the inside-out count) over every GLB the corpus reads
+  (`corpus.py --list`), as a 64-bit process: 53 files in about 40 s (38 and 44 s wall on two runs). `corpus.py --probe` joins the verdicts by glTF node (a
+  single-mesh file's loose parts fold onto their node), checks each file's size and write time against the table (stale: reported,
+  falls back to the recipe's verdict, named in `vis_from`), and checks the join against the recipes: 1,126 of 1,128 verdicts
+  agree, the other 2 are the Lab's -1. The deletion truth was understated: the user splits at the raw file and deletes at the
+  split file, so 3,432 rows a later stage file marks X read as kept (the Espana's raw file 2,000, the Dragon's 1,290); `carry_later_marks`
+  carries the X back as `mark_later` by name and vertex count (3,432 of 3,432, no conflict) and the delete tasks count it.
+  `tools/advisor/proposers/delete.py` proposes X for an interior part up to A of the model's largest extent or any part up to
+  B, A/B learned on the other models at F0.5 with ties to the stricter rule: leave-one-model-out on the 27,354 hand-judged
+  parts, 86 % precision and 52 % recall (5,180 proposed, 4,443 right) against 84 % / 13 % for every interior part and
+  39 % / 15 % for the smallest tenth; the rule is interior up to 10 %, anything up to 0.05 % on 23 of 26 folds. Where it is
+  wrong: the Romanic's tiny parts the user fused instead of deleting (all its 494 carry a fuse letter; 603 of the 737 wrong do);
+  where it misses: 3,696 exterior parts, four in five between 0.07 % and 2.7 % of the model, Phase 4's question. Proposers share one
+  `<file>.glb.marks.proposed.txt` by letter (`proposers/common.py`). 58 unit cases in the gate.
+- **PR #275 review, round 1 (2026-11-09).** Independent reviewers verifying by execution. Both proposers score their
+  grid as exact fractions: the float F-beta put two rules with different counts at the same score a last bit apart,
+  so the documented tie rules could not run for them (the real corpus learns the same rule either way, 23 of 26
+  folds). A zero threshold now switches its
+  clause off (a zero-extent part is not "under 0"). A held-out model without a verdict abstains with its reason instead
+  of aborting the whole evaluation. The delete CLI leaves the user's fuse-group parts alone beside S and T, says which
+  proposals the user already deleted later or ignored, and under `--write` refuses a models root without the model's folder. The
+  evaluator counts a file judged only at a later stage. The corpus takes the models root absolute (a relative one listed
+  absolute paths and then joined none of them), carries a later X only along stage tokens and never onto an unnamed
+  node, reports a conflict (X at one later stage file, unmarked at another of the same or a higher stage), a repeated FILE line, and a probe node
+  the file lacks; `--list` writes UTF-8 and the C# host flattens tabs and line breaks out of names and messages. The
+  proposals file keeps hand-added `#name|` lines. 70 unit cases.
+- **PR #275 review, round 2 (2026-11-09).** Planted defects against the new tests (every round-1 fix was caught; six
+  behaviours had no fixture and have one now: the write-time half of the staleness check, the abstention when no
+  grid rule reaches a training deletion, the carry-back's same-folder, stage-order and self-mark rules, a fold with
+  some blank verdicts). The evaluator names a fold the proposer abstained on, with the reason and the positives it
+  holds, instead of scoring it as silent misses. The delete CLI leaves the proposals files alone when it could not
+  look (no verdict on the model's rows); looked-and-found-nothing still clears its lines, as the Split proposer's
+  merged rule has it. The proposals file is read strictly: a file saved in another code page is refused by name and
+  left as it is, where round 1 had read it with replacement characters that match no part. The Lab's -1 is no
+  verdict. Both CLIs print UTF-8 on a redirected stdout. The docs' claims were measured again: F1 does NOT learn the
+  same rule (every interior part and anything up to 0.1 %, on 24 of 26 folds); the 3,696 misses are every exterior
+  miss, four in five between 0.07 % and 2.7 % of the model, not "between 0.1 % and 3 %"; the probe's 30,740 rows fold
+  onto 30,053 corpus rows with 1,681 interior. 73 unit cases.
+- **PR #275 review, round 3 (2026-11-09).** The documented workflow run end to end on a scratch tree (list, probe,
+  join, a file changed after probing, the evaluator, both proposers' writes in both orders, a model without a verdict,
+  a proposals file in another code page, a relative and a trailing-slash models root, a folder with a space and a
+  non-ASCII letter): one defect, round 2's own. A proposer returns nothing for a task it does not serve before
+  clearing its last-rule note, so the delete proposer's abstention on one task was printed under the split task's
+  table for models that had verdicts; both proposers clear first now and the evaluator clears before every fold. The
+  split CLI refuses a models root without the model's folder as the delete CLI does, instead of a traceback. The delete
+  CLI's docstring says which abstention clears the X lines (no rule learned, as the Split proposer's merged rule) and
+  which leaves them (no verdict); the proposals file's header names both proposers' letters. A blind read of the whole
+  diff found an older defect the proposer inherited: a blocked mesh (a non-TRIANGLES primitive) under a translated node
+  had nan for its centre and -inf for its size in parts.csv (1,246 rows of the export; an empty loop over vertices the
+  analysis never read), and -inf is under every size threshold, so the delete CLI proposed every such part - the
+  CoastalMonitor's 10 proposals were all of them, one a 369-vertex external part. The corpus leaves a blocked mesh's box
+  empty now (features cache v5) and the proposer never calls an unknown size small. A probe table row cut short (a host
+  killed mid-line) is reported rather than dropped. 76 unit cases.
 - **PR #276 review (2026-11-09).** The deploy timing wrapper now returns the runtime's actual exit status after
   printing its logs and wall time, refuses missing oracles and failed warm-ups, and allocates separate artifacts
   for every invocation instead of deleting shared output directories. It honors `HAF_UNITY_PROJECT` consistently

@@ -56,11 +56,11 @@ TASKS = ("role", "delete", "delete-hand", "split", "group", "dials")
 PART_FEATURES = frozenset(("model", "category", "file", "stage", "node_index", "name", "file_name", "mesh_index",
                            "mesh_shared", "parent_index", "depth", "verts", "tris", "islands", "islands_merged", "island_top_pct",
                            "island_second_pct", "islands_big", "cx", "cy", "cz", "sx", "sy", "sz", "blocked", "triangle_free",
-                           "vis", "flip", "bone"))
+                           "vis", "flip", "bone", "vis_from"))
 # Every other column of the corpus is a label or a join record and stays out of the held-out rows. A new corpus column
 # must be placed in one set or the other (Tests/test_advisor_corpus.py holds the partition), so a feature a proposer
 # needs is never silently stripped: the first Split proposer proposed nothing because its columns were not listed here.
-PART_LABELS = frozenset(("mark", "auto_mark", "fuse_letter", "fuse_group_name", "fused_into", "fused_letter", "role", "role_id",
+PART_LABELS = frozenset(("mark", "auto_mark", "mark_later", "fuse_letter", "fuse_group_name", "fused_into", "fused_letter", "role", "role_id",
                          "placed", "recipe", "recipe_verts", "recipe_name", "name_join", "role_via_fuse", "recipe_via_fuse"))
 MODEL_FEATURES = frozenset(("model", "category", "files"))
 
@@ -102,21 +102,29 @@ def files_with(parts, column, values=None):
     return out
 
 
+def deleted(r):
+    """The part was deleted: marked X at this file, marked X at a later stage file of the same model, or given the
+    Lab's Ignore role."""
+    return r["mark"] == "X" or r.get("mark_later", "") == "X" or r["role"] == "Ignore"
+
+
 def population(task, parts):
     """The rows a task is scored on, with the truth filled in under 'truth'."""
     if task == "role":
         rows = [dict(r, truth=r["role"]) for r in parts if r["role"]]
     elif task == "delete":
         # every file the user judged counts: a Fuse writes the marks sidecar only when something is marked, so a
-        # lettered file without one is a file where the user looked and deleted nothing - a true negative, not a gap
-        judged = files_with(parts, "mark") | files_with(parts, "fuse_letter") | files_with(parts, "role")
-        rows = [dict(r, truth="X" if r["mark"] == "X" or r["role"] == "Ignore" else "") for r in parts
+        # lettered file without one is a file where the user looked and deleted nothing - a true negative, not a gap.
+        # A part deleted at a LATER stage file (corpus.carry_later_marks: the user splits at the raw file and deletes at
+        # the split file) is a deletion here too; without it the Espana's raw rows read 2,000 deletions as "kept".
+        judged = files_with(parts, "mark") | files_with(parts, "fuse_letter") | files_with(parts, "role") | files_with(parts, "mark_later")
+        rows = [dict(r, truth="X" if deleted(r) else "") for r in parts
                 if r["file"] in judged and r["stage"] != "recipe-only"]
     elif task == "delete-hand":
         # the same files, without the parts the Workshop marks X itself on first load (two triangles or fewer, no
         # group or split of their own): what is left is the user's own deletion judgement
-        judged = files_with(parts, "mark") | files_with(parts, "fuse_letter") | files_with(parts, "role")
-        rows = [dict(r, truth="X" if r["mark"] == "X" or r["role"] == "Ignore" else "") for r in parts
+        judged = files_with(parts, "mark") | files_with(parts, "fuse_letter") | files_with(parts, "role") | files_with(parts, "mark_later")
+        rows = [dict(r, truth="X" if deleted(r) else "") for r in parts
                 if r["file"] in judged and r["stage"] != "recipe-only" and str(r.get("auto_mark", "")) != "1"]   # int from build(), str from the CSV
     elif task == "split":
         # splitting happens on the raw and cut files; a _split file's marks are deletions, its parts are the splits;
@@ -255,8 +263,10 @@ BASELINES = {
 
 # ---------------------------------------------------------------- scoring
 
-def leave_one_model_out(task, rows, models, proposer):
-    """Pooled predictions {row key: label} over every fold; for dials {model: {dial: pct}}."""
+def leave_one_model_out(task, rows, models, proposer, notes=None):
+    """Pooled predictions {row key: label} over every fold; for dials {model: {dial: pct}}. A fold the proposer abstains
+    on (its module's LAST_RULE carries "abstained" after the call) is named in `notes` with the reason and the positives
+    it holds, so a recall number is readable: those are scored as missed."""
     by_model = defaultdict(list)
     for r in rows:
         by_model[r["model"]].append(r)
@@ -275,8 +285,15 @@ def leave_one_model_out(task, rows, models, proposer):
         tms = [o for o in models if o["model"] != model]
         # A proposer may normalize its arguments in place. No fold may mutate scoring truth or a later fold's input.
         # Part records contain scalar CSV cells; model records also contain nested dials_parsed dictionaries.
+        last_rule = getattr(proposer, "__globals__", {}).get("LAST_RULE")
+        if isinstance(last_rule, dict):
+            last_rule.clear()   # a note left by another task's fold (a proposer returns {} for a task it does not serve) is not this fold's
         preds.update(proposer(task, [features(r, PART_FEATURES) for r in test], [dict(r) for r in train],
                               features(tm, MODEL_FEATURES), deepcopy(tms)))
+        reason = (last_rule or {}).get("abstained")
+        if reason and notes is not None:
+            notes.append("fold %s: abstained - %s; its %d positive(s) of %d rows count as missed"
+                         % (model, reason, sum(1 for r in test if r["truth"]), len(test)))
     return preds
 
 
@@ -376,7 +393,8 @@ def evaluate(parts, models, proposers, target=30000.0):
             lines.append("No rows; nothing to score.")
             continue
         for name, fn in proposers.get(task, []):
-            preds = leave_one_model_out(task, rows, models, fn)
+            notes = []
+            preds = leave_one_model_out(task, rows, models, fn, notes)
             lines.append("")
             lines.append("**%s**" % name)
             lines.append("")
@@ -405,6 +423,9 @@ def evaluate(parts, models, proposers, target=30000.0):
                     cats.append("%s %s/%s" % (cat, pct(cp), pct(cr)))
                 lines.append("")
                 lines.append("Per category (precision/recall): " + "; ".join(cats))
+                for note in notes:
+                    lines.append("")
+                    lines.append(note)
             else:
                 g = rand_index(rows, preds)
                 lines.append("| together precision | together recall | pairs proposed together | pairs truly together | all pairs agreeing | pairs |")
