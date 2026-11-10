@@ -250,28 +250,47 @@ public static class BackupRules
 
     public const string DeletedPrefix = "_deleted_";
 
+    static readonly HashSet<string> RigRoleFolders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        { "anim", "anim_move", "anim_after", "anim_attack", "anim_combat", "anim_premove", "anim_idle", "anim_idlealt", "anim_idlealt2" };
+
     /// <summary>
     /// The animated bake's REGENERATED rig assets: what the rig import writes under <c>Assets/FactorySource/&lt;name&gt;/anim/</c>
     /// (or a role folder <c>anim_&lt;role&gt;/</c>) and deletes first on every bake - the rig prefab, the rig meshes, a material
-    /// per source material, the clip containers (<c>.prefab</c>, <c>.asset</c>, <c>.mat</c>). The delete guard skips them
+    /// per source material, the clip containers. Match the producer's resource-specific filenames, not all files with
+    /// a prefab/asset/material extension: hand-authored assets in these folders are not regenerated. Directories are
+    /// never exempt; callers supply the AssetDatabase's folder fact. The delete guard skips these generated files
     /// for the reason it skips preview scratch and test fixtures: they rebuild from the source on the next bake, and the
     /// T-62's hundred materials cost a bake 105 guard snapshots, each a folder, a copy, a manifest and a stack-traced
     /// Console line (2026-11-09). ONE rule for the guard and for the bake's own delete loop, so neither can drift from the
     /// other: what the bake deletes here is exactly what the guard lets go. The source (.glb/.fbx/.obj, the albedos, the
     /// recorded arguments) sits beside <c>anim/</c>, not in it, and stays guarded.
     /// </summary>
-    public static bool IsRegeneratedRigAsset(string assetPath)
+    public static bool IsRegeneratedRigAsset(string assetPath, bool isFolder)
     {
-        if (string.IsNullOrEmpty(assetPath)) return false;
+        if (isFolder || string.IsNullOrEmpty(assetPath)) return false;
         string p = assetPath.Replace('\\', '/');
         var seg = p.Split('/');
         // Assets / FactorySource / <name> / anim[_role] / <leaf> - exactly five segments, nothing deeper
         if (seg.Length != 5 || seg[0] != "Assets" || !seg[1].Equals("FactorySource", StringComparison.OrdinalIgnoreCase)) return false;
-        string folder = seg[3];
-        if (!(folder.Equals("anim", StringComparison.OrdinalIgnoreCase) || folder.StartsWith("anim_", StringComparison.OrdinalIgnoreCase))) return false;
+        string resource = seg[2];
+        if (resource.Length == 0 || resource.Any(c => !(char.IsLetterOrDigit(c) || c == '_' || c == '-'))) return false;
+        if (!RigRoleFolders.Contains(seg[3])) return false;
         string leaf = seg[4];
-        return leaf.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase) || leaf.EndsWith(".asset", StringComparison.OrdinalIgnoreCase)
-            || leaf.EndsWith(".mat", StringComparison.OrdinalIgnoreCase);
+        if (leaf.Equals(resource + "_anim.prefab", StringComparison.OrdinalIgnoreCase)) return true;
+        bool Numbered(string kind, string extension)
+        {
+            string prefix = resource + kind;
+            if (!leaf.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || !leaf.EndsWith(extension, StringComparison.OrdinalIgnoreCase)) return false;
+            int end = leaf.Length - extension.Length;
+            if (end <= prefix.Length) return false;
+            for (int i = prefix.Length; i < end; i++) if (leaf[i] < '0' || leaf[i] > '9') return false;
+            return true;
+        }
+        if (Numbered("_rigmesh", ".asset") || Numbered("_rigmesh_atlas", ".asset") || Numbered("_rigmat", ".mat")) return true;
+        // The roles sidecar may carry custom role identifiers; ImportGlbRig writes a container for every one.
+        string clip = "_" + resource + "_Clip_";
+        return leaf.StartsWith(clip, StringComparison.OrdinalIgnoreCase) && leaf.EndsWith(".asset", StringComparison.OrdinalIgnoreCase)
+            && leaf.Length > clip.Length + ".asset".Length;
     }
 
     /// <summary>

@@ -66,7 +66,7 @@ class HafDeleteGuard : UnityEditor.AssetModificationProcessor
             // a manifest and a stack-traced Console line - most of the rig-import stage's 7.4 s, for files the bake rewrites
             // seconds later from the source beside them. The rule is the bake's own (BackupRules.IsRegeneratedRigAsset,
             // also what its delete loop uses), so the guard lets go exactly what the bake deletes and nothing more.
-            if (BackupRules.IsRegeneratedRigAsset(p)) return AssetDeleteResult.DidNotDelete;
+            if (BackupRules.IsRegeneratedRigAsset(p, AssetDatabase.IsValidFolder(p))) return AssetDeleteResult.DidNotDelete;
             string dest = EditorPrefs.GetString("HAF.Backup.Dest", "D:/HAF_Backups");
             string projRoot = Directory.GetParent(Application.dataPath).FullName;
             string abs = Path.Combine(projRoot, p);

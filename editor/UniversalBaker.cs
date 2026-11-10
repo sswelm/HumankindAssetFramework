@@ -1288,7 +1288,7 @@ public static class UniversalBaker
         // the one rule shared with the delete guard (BackupRules.IsRegeneratedRigAsset): the rig prefab, meshes, materials and
         // clip containers under anim/ - regenerated below, so the guard does not snapshot them (2026-11-09)
         string old = AssetDatabase.GUIDToAssetPath(guid);
-        if (BackupRules.IsRegeneratedRigAsset(old)) AssetDatabase.DeleteAsset(old);
+        if (BackupRules.IsRegeneratedRigAsset(old, AssetDatabase.IsValidFolder(old))) AssetDatabase.DeleteAsset(old);
     }
 
     // A native rig is an editable prefab asset. Atlas remapping assigns transient mesh clones;

@@ -132,8 +132,13 @@ role folder `anim_<role>/`) and deletes them first on every bake. The T-62 has a
 snapshots per bake**, each a folder, a copy, a manifest and a stack-traced Console line - most of the rig-import stage's
 7.4 seconds, for files the bake rewrites seconds later from the source beside them. The rule is the bake's own,
 `BackupRules.IsRegeneratedRigAsset`, used by the guard AND by the bake's delete loop, so the guard lets go exactly what
-the bake deletes: `.prefab`, `.asset` and `.mat` directly under `anim*/`, nothing beside it (the source model, the
-albedos, the recorded arguments), above it or below it. Blender's slim `.fbx` in the same folder stays guarded.
+the bake deletes: `<name>_anim.prefab`, `<name>_rigmeshN.asset`, `<name>_rigmesh_atlasN.asset`,
+`<name>_rigmatN.mat` and `_<name>_Clip_<role>.asset` directly under `anim/` or the bake's named role folders.
+`N` is a nonempty sequence of ASCII digits; a clip role must be nonempty (custom roles from the sidecar are supported).
+The resource name must match the folder. Other materials, assets and prefabs in those folders remain guarded and
+are left alone by the bake's cleanup. Directories are always guarded, even when named like a generated file.
+Nothing beside the rig folder (the source model, the albedos, the recorded arguments), above it or below it is
+exempt. Blender's slim `.fbx` in the same folder stays guarded.
 
 **Retention (2026-08-23).** This was the one layer with none — every other layer rotates. Guard snapshots older than
 **N days** are pruned by the daily auto-version; the field sits under the *Delete guard* toggle (default **14**,

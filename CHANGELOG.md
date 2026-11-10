@@ -10,6 +10,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PR #277 review (2026-11-10).** The regenerated-rig exemption matches the baker's resource-specific filenames,
+  numbered mesh/material suffixes and supported role folders instead of every prefab, asset or material there.
+  Hand-authored files remain guarded and are not swept by the bake. Both callers supply the AssetDatabase's folder
+  fact: directories stay guarded and out of the cleanup even when their names resemble generated files. Regressions
+  cover hand-authored files, malformed and foreign names, atlas meshes, custom clip roles and matching folder names.
 - **The delete guard lets the bake's regenerated rig assets go; the rig import laps itself (2026-11-09).** The first bake
   with PR #276's timing lines: 11.5 s, of which the rig import 7.4 s. The Editor.log census of that stage: the asset-
   database batching had worked (211 refresh cycles -> 4), and what remained was the delete guard - 105 snapshots per bake,
