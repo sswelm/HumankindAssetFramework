@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **A second tread: Rigid links, beside the conveyor (2026-11-10; Vehicle Lab *Tread type*, recipe `treadMode`, the
+  script's `treadmode=links`).** "Can we learn how the Universal Tank's track functions and use it for the Jagdpanzer,
+  where it worked so badly I disabled it?" Measured both: the T-62 has 30 separate links per side on a bone each,
+  travelling a full circuit; the Lab's conveyor keeps one band whose faces straddle its cells (about 2,900 edges per
+  track between two bones, up to 420 stretching over a tenth of a link per frame) on a 15-frame loop that snaps back.
+  The new kind copies one complete, flat link of the ground run onto every place of the loop, one bone each, pins on
+  the path and the link on the chord, one full circuit per clip. The Jagdpanzer: 27 links per track, 84 bones, 540
+  frames, zero stretch, exact loop closure. The conveyor is unchanged and stays the default; a recipe without the
+  field gives the argument line it always gave. A prototype in the Blender script, to be judged in the game; see
+  [Animated models](docs/Animated-Models.md).
 - **PR #277 review (2026-11-10).** The regenerated-rig exemption matches the baker's resource-specific filenames,
   numbered mesh/material suffixes and supported role folders instead of every prefab, asset or material there.
   Hand-authored files remain guarded and are not swept by the bake. Both callers supply the AssetDatabase's folder

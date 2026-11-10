@@ -20,6 +20,10 @@ public sealed class VehicleRigArgs
     public string srcFile = "", outGlb = "", previewFbx = "";
     public int frames = 15, axisChoice, minVerts = 1; public float degrees = -360f;
     public int treadAdvCells = 3; public float treadCellsPerLink = 4f; public bool tracksStatic, spinEnabled = true;
+    /// <summary>The tread's kind: 0 = the hybrid conveyor (link bones on the wraps, shuttles on the straights, a short loop),
+    /// 1 = rigid links (every link a copy of one template link on its own bone, a full circuit - the T-62's shape).
+    /// Reaches the script as the tagged argument <c>treadmode=links</c>, only when the tracks run at all.</summary>
+    public int treadMode;
     public bool waveEnabled; public float rockDegrees; public int rockFrames = 120, rockAxisChoice; public float rockHeading, rockPitchDeg = 2.4f;
     public int rockPitchCycles = 1, rockRollCycles = 1; public float rockPitchPhase = 90f;
     public float modelRotX, modelRotY, modelRotZ;
@@ -87,6 +91,7 @@ public static class VehicleRigArgLine
         if (a.gunReducePct > 0f) Q("gunreduce=" + F1(a.gunReducePct));
         if (a.turretReducePct > 0f) Q("turretreduce=" + F1(a.turretReducePct));
         Q("windowreduce=" + Names(a, "window") + "|" + F1(a.windowReducePct));
+        if (a.treadMode == 1 && !a.tracksStatic && a.spinEnabled) Q("treadmode=links");   // absent = the conveyor, as every recipe before 2026-11-10
         if (a.partTxFile != null) Q("parttx=@" + a.partTxFile);
         return t;
     }
@@ -157,6 +162,7 @@ public static class VehicleRigArgLine
         a.frames = Int(o, "frames", 0); a.axisChoice = Int(o, "axisChoice", 0); a.minVerts = Int(o, "minVerts", 0); a.degrees = Flt(o, "degrees", 0f);
         int tac = Int(o, "treadAdvCells", 3); a.treadAdvCells = tac > 0 ? tac : 3;
         float tcl = Flt(o, "treadCellsPerLink", 4f); a.treadCellsPerLink = tcl > 0f ? tcl : 4f;
+        a.treadMode = Int(o, "treadMode", 0) == 1 ? 1 : 0;
         var mr = Vec(o, "modelRot", 0, 0, 0); a.modelRotX = mr[0]; a.modelRotY = mr[1]; a.modelRotZ = mr[2];
         a.tracksStatic = Bool(o, "tracksStatic", false); a.spinEnabled = Bool(o, "spinEnabled", true); a.doubleSided = Bool(o, "doubleSided", false); a.fixInsideOut = Bool(o, "fixInsideOut", false);
         a.oarSweepDeg = Flt(o, "oarSweepDeg", 24f); a.oarDipDeg = Flt(o, "oarDipDeg", 18f); a.oarFrames = Int(o, "oarFrames", 24);
