@@ -267,7 +267,9 @@ push_step run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/Humanki
 # belong to the parity mode, where the record machinery is used.
 push_step run_lane "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
 push_step run_lane "deploy timing wrapper tests (runtime failures, oracles and isolated artifacts)" python "$ROOT/Tests/test_deploy_time.py"
-run_lane "temp sweep tests (our patterns go when old, decoys and young ones stay, the gate removes its own directory)" python "$ROOT/Tests/test_temp_sweep.py"
+# push-only like the gate regression tests above it (2026-11-10): it times bash-heavy sweeps with a 120 s limit and took
+# 113-206 s under the thirteen parity drills - two parity runs withheld a valid stamp over it; the push runs it alone in 27-46 s
+push_step run_lane "temp sweep tests (our patterns go when old, decoys and young ones stay, the gate removes its own directory)" python "$ROOT/Tests/test_temp_sweep.py"
 push_step run_lane "FBX model coverage tests (lost inputs and skipped fixtures cannot pass)" python "$ROOT/Tests/test_fbx_model_verdict.py"
 # THE PARITY STAMP'S DIGEST IS TAKEN HERE, before any parity drill starts: the verdict's write refuses a different one,
 # so a covered file edited during the run - which the drills did not test - gets no stamp (the review of PR #228).

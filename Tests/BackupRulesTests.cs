@@ -33,6 +33,61 @@ public class BackupRulesTests
 
     // THE DELETE-GUARD PRUNE (2026-10-31): it never ran once - the worker read the retention pref off the main thread and
     // the Task faulted in silence. The rule is pure now and the worker gets the days from the main thread.
+    /// <summary>The one rule the delete guard and the bake's own delete loop share: the rig import's regenerated assets under
+    /// anim/ (or a role folder) - and nothing beside them, above them or below them.</summary>
+    [Theory]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_anim.prefab", true)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_rigmesh0.asset", true)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_rigmat54.mat", true)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/_UniversalTanks_Clip_primary.asset", true)]
+    [InlineData("Assets\\FactorySource\\UniversalTanks\\anim\\UniversalTanks_rigmat0.mat", true)]
+    [InlineData("Assets/FactorySource/TowedGunHowitzers/anim_move/_TowedGunHowitzers_Clip_move.asset", true)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_rigmesh_atlas0.asset", true)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/_UniversalTanks_Clip_idlealt2.asset", true)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/HandPainted.mat", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/HandEditedAnimation.asset", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/ReferenceRig.prefab", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/OtherTank_rigmesh0.asset", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_rigmesh.asset", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_rigmesh_notes.asset", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_rigmesh_atlas.asset", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_rigmat_backup.mat", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/_UniversalTanks_Clip_custom.asset", true)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/_UniversalTanks_Clip_.asset", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim_/UniversalTanks_anim.prefab", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim_notes/UniversalTanks_anim.prefab", false)]
+    [InlineData("Assets/FactorySource//anim/UniversalTanks_anim.prefab", false)]
+    [InlineData("Assets/FactorySource/../anim/UniversalTanks_anim.prefab", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_anim.fbx", false)]              // Blender's slim FBX stays guarded
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/UniversalTanks_anim.prefab.meta", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/UniversalTanks.obj", false)]                        // the source beside anim/
+    [InlineData("Assets/FactorySource/UniversalTanks/deploy_converted.glb", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/UniversalTanks_Preview.prefab", false)]
+    [InlineData("Assets/FactorySource/UniversalTanks/animals/Horse.asset", false)]                       // a folder merely starting with "anim"
+    [InlineData("Assets/FactorySource/UniversalTanks/anim/deeper/UniversalTanks_rigmesh0.asset", false)] // nothing deeper
+    [InlineData("Assets/Resources/UniversalTanks_Skeleton.asset", false)]
+    [InlineData("Assets/Databases/anim/Thing.asset", false)]
+    [InlineData("Assets/FactorySource/anim/Thing.asset", false)]                                          // no resource name
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void The_regenerated_rig_assets_are_the_rig_import_outputs_under_anim_and_nothing_else(string path, bool regenerated)
+    {
+        Assert.Equal(regenerated, BackupRules.IsRegeneratedRigAsset(path, isFolder: false));
+    }
+
+    [Theory]
+    [InlineData("Tank_anim.prefab")]
+    [InlineData("Tank_rigmesh0.asset")]
+    [InlineData("Tank_rigmesh_atlas0.asset")]
+    [InlineData("Tank_rigmat0.mat")]
+    [InlineData("_Tank_Clip_primary.asset")]
+    public void A_folder_named_like_a_generated_asset_is_guarded_and_not_deleted_by_the_baker(string leaf)
+    {
+        string path = "Assets/FactorySource/Tank/anim/" + leaf;
+        Assert.True(BackupRules.IsRegeneratedRigAsset(path, isFolder: false));
+        Assert.False(BackupRules.IsRegeneratedRigAsset(path, isFolder: true));
+    }
+
     [Fact]
     public void A_guard_expires_by_age_and_nothing_else_ever_does()
     {

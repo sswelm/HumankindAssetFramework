@@ -10,6 +10,22 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **PR #277 review (2026-11-10).** The regenerated-rig exemption matches the baker's resource-specific filenames,
+  numbered mesh/material suffixes and supported role folders instead of every prefab, asset or material there.
+  Hand-authored files remain guarded and are not swept by the bake. Both callers supply the AssetDatabase's folder
+  fact: directories stay guarded and out of the cleanup even when their names resemble generated files. Regressions
+  cover hand-authored files, malformed and foreign names, atlas meshes, custom clip roles and matching folder names.
+- **The delete guard lets the bake's regenerated rig assets go; the rig import laps itself (2026-11-09).** The first bake
+  with PR #276's timing lines: 11.5 s, of which the rig import 7.4 s. The Editor.log census of that stage: the asset-
+  database batching had worked (211 refresh cycles -> 4), and what remained was the delete guard - 105 snapshots per bake,
+  one per rig material, mesh and clip container the bake deletes first and rewrites seconds later, each a folder, a copy,
+  a manifest and a stack-traced Console line. The guard now skips them under the rule it already applies to preview scratch
+  and test fixtures (it protects what cannot be rebuilt): `BackupRules.IsRegeneratedRigAsset`, the bake's own rule, used by
+  the guard AND by its delete loop so neither drifts (a unit test pins the shape: `.prefab`/`.asset`/`.mat` directly under
+  `FactorySource/<name>/anim*/`, nothing beside, above or below; Blender's slim `.fbx` stays guarded). The rig import prints
+  its own sub-stages (`rig import timing:` read + build, fold, delete, create, prefab) so the next number has a name.
+  Also: the gate's temp-sweep tests are push-only now, like the gate regression tests beside them - under the thirteen
+  parity drills they took 113-206 s against a 120 s subprocess limit and twice withheld a valid parity stamp.
 - **PR #275 review (2026-11-10).** Deletion sizes require all three dimensions to be finite and nonnegative: one
   missing, nonfinite or negative axis must not turn a long part into a tiny deletion candidate. Shared proposal
   writes refuse conflicting letters for one node in either proposer order, instead of letting the last sidecar

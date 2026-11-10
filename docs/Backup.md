@@ -13,7 +13,7 @@ thing" to "the machine burned down."
 | --- | --- | --- | --- |
 | **Manual version** | *Back up now* button | Timestamped folder of the toggled groups + manifest | Never auto-deleted |
 | **Daily auto-version** | First editor load of a day (>24 h since last; toggle, default ON) | Full backup of ALL groups — assets *and* configuration — on a background thread, same core as the button | Newest **3** `_auto_` versions kept; rotation logged |
-| **Delete guard** | Any asset deletion under a protected root (toggle, default ON) — **excluding preview scratch and bake-test fixtures** | `_deleted_<timestamp>_<name>/` copy of the asset (+ `.meta`) *before* the delete proceeds | **Pruned after N days** by the daily auto-version (field under the toggle; default 14, **0 = keep forever**) |
+| **Delete guard** | Any asset deletion under a protected root (toggle, default ON) — **excluding preview scratch, bake-test fixtures and the animated bake's regenerated rig assets under `anim/`** | `_deleted_<timestamp>_<name>/` copy of the asset (+ `.meta`) *before* the delete proceeds | **Pruned after N days** by the daily auto-version (field under the toggle; default 14, **0 = keep forever**) |
 | **Offsite zip** | Rides along with any manual/auto backup (optional: set the *Offsite folder*) | ONE `HAF_<timestamp>.zip` per backup, in a second — ideally cloud-synced — folder. **Skipped entirely when nothing changed** since the last upload (see *Space*) | Never overwritten |
 | **Factory remove-undo** | The Model Factory's **Remove** (always) | `_removed_<timestamp>_<name>/` with the entry's JSON + the exact baked-output whitelist, taken BEFORE anything is deleted; restore via the **Undo remove** button next to Remove OR the window's *Factory remove snapshots* section — both do the full restore (baked assets + registry entry) through one shared implementation | Never auto-deleted |
 
@@ -125,6 +125,20 @@ alone accounting for 1.9 GB as eight copies of the same 232 MB fixture. None of 
 those assets exist to be deleted — and the volume made the window's restorable list unreadable, which is the real
 cost: *a safety net nobody can see into is not a safety net.* The exclusion references each suite's **own prefix
 constant** rather than a copy of the string, so a suite renaming its fixtures cannot silently restart the hoarding.
+
+**The animated bake's regenerated rig assets are excluded too (2026-11-09).** The rig import writes a rig prefab, the rig
+meshes, a material per source material and a clip container per role under `Assets/FactorySource/<name>/anim/` (or a
+role folder `anim_<role>/`) and deletes them first on every bake. The T-62 has a hundred materials: **105 guard
+snapshots per bake**, each a folder, a copy, a manifest and a stack-traced Console line - most of the rig-import stage's
+7.4 seconds, for files the bake rewrites seconds later from the source beside them. The rule is the bake's own,
+`BackupRules.IsRegeneratedRigAsset`, used by the guard AND by the bake's delete loop, so the guard lets go exactly what
+the bake deletes: `<name>_anim.prefab`, `<name>_rigmeshN.asset`, `<name>_rigmesh_atlasN.asset`,
+`<name>_rigmatN.mat` and `_<name>_Clip_<role>.asset` directly under `anim/` or the bake's named role folders.
+`N` is a nonempty sequence of ASCII digits; a clip role must be nonempty (custom roles from the sidecar are supported).
+The resource name must match the folder. Other materials, assets and prefabs in those folders remain guarded and
+are left alone by the bake's cleanup. Directories are always guarded, even when named like a generated file.
+Nothing beside the rig folder (the source model, the albedos, the recorded arguments), above it or below it is
+exempt. Blender's slim `.fbx` in the same folder stays guarded.
 
 **Retention (2026-08-23).** This was the one layer with none — every other layer rotates. Guard snapshots older than
 **N days** are pruned by the daily auto-version; the field sits under the *Delete guard* toggle (default **14**,
