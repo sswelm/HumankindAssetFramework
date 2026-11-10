@@ -22,10 +22,10 @@ in the sidecar's v2 format. It never touches the live `<file>.glb.marks.txt`: th
 when they agree with it.
 """
 import argparse
-import io
 import itertools
 import os
 import sys
+from fractions import Fraction
 
 K_GRID = (2, 3, 4, 5, 6, 8, 12)
 T_GRID = (0, 100, 200, 500, 1000, 2000, 5000, 10000, 20000)
@@ -44,13 +44,13 @@ def candidate(row, k, t, b):
     return (not row.get("blocked")) and num(row.get("islands_merged")) >= k and num(row.get("tris")) >= t and num(row.get("islands_big")) >= b
 
 
-def f_beta(tp, fp, fn, beta=1.0):
+def f_beta(tp, fp, fn, beta=1):
+    """Exact: (1 + beta^2) tp / ((1 + beta^2) tp + beta^2 fn + fp) as a Fraction, so two rules with the same score tie
+    and the tie rules decide, instead of the last bit of a float."""
     if tp == 0:
-        return 0.0
-    p = tp / (tp + fp)
-    r = tp / (tp + fn)
-    b2 = beta * beta
-    return (1 + b2) * p * r / (b2 * p + r)
+        return Fraction(0)
+    b2 = Fraction(beta) * Fraction(beta)
+    return (1 + b2) * tp / ((1 + b2) * tp + b2 * fn + fp)
 
 
 def learn(train):
@@ -77,6 +77,7 @@ NEEDED = ("islands_merged", "islands_big", "tris", "blocked")
 
 
 def propose(task, test, train, test_model, train_models):
+    LAST_RULE.clear()   # before the task check: a note from an earlier call must not read as this task's
     if task != "split":
         return {}
     for r in test[:1] + train[:1]:
@@ -84,8 +85,8 @@ def propose(task, test, train, test_model, train_models):
         if missing:   # loud, not an empty proposal: an export older than the features, or a row stripped of them
             raise ValueError("split proposer: rows lack %s - rebuild the corpus (tools/advisor/corpus.py) or list the columns in evaluate.PART_FEATURES" % ", ".join(missing))
     rule = learn(train)
-    LAST_RULE.clear()
     if rule is None:
+        LAST_RULE["abstained"] = "no grid rule finds a training split"
         return {}
     k, t, b = rule
     LAST_RULE.update({"k": k, "t": t, "b": b, "model": test_model.get("model", "")})
@@ -93,15 +94,20 @@ def propose(task, test, train, test_model, train_models):
 
 
 def main(argv=None):
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, os.path.join(here, ".."))
+    sys.path.insert(0, here)
     import evaluate  # noqa: E402
+    import common  # noqa: E402
 
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--corpus", required=True)
+    ap.add_argument("--corpus", required=True, help="the folder corpus.py exported (parts.csv, models.csv)")
     ap.add_argument("--model", required=True, help="the model folder to propose for; every other model trains the rule")
-    ap.add_argument("--models-root", default="D:/3DModels")
+    ap.add_argument("--models-root", default="D:/3DModels", help="where the model folders are; the proposals file is written beside each GLB (default D:/3DModels)")
     ap.add_argument("--write", action="store_true", help="write <glb>.marks.proposed.txt beside each raw/cut GLB of the model")
     a = ap.parse_args(argv)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")   # part names outside the console's code page print instead of crashing
     parts, models = evaluate.load_corpus(a.corpus)
     population = evaluate.population("split", parts)
     train = [r for r in population if r["model"] != a.model]
@@ -110,12 +116,15 @@ def main(argv=None):
     if not test:
         print("no raw or cut parts of model '%s' in the corpus" % a.model)
         return 1
+    if a.write and not os.path.isdir(os.path.join(a.models_root, a.model)):
+        print("model folder not found under --models-root: %s" % os.path.join(a.models_root, a.model).replace("\\", "/"))
+        return 1
     preds = propose("split", test, train, {"model": a.model}, [])
-    if LAST_RULE:
+    if "k" in LAST_RULE:
         print("rule learned on %d parts of %d models: islands after merge >= %d, triangles >= %d, islands of 1%% or more >= %d"
               % (len(train), len(set(r["model"] for r in train)), LAST_RULE["k"], LAST_RULE["t"], LAST_RULE["b"]))
     else:
-        print("no rule found a training split; no split proposals")
+        print("no split proposals: %s" % LAST_RULE.get("abstained", "no rule"))
     by_file = {}
     for r in test:
         rows = by_file.setdefault(r["file"], [])
@@ -128,12 +137,14 @@ def main(argv=None):
             agree = " (marked %s)" % r["mark"] if r.get("mark") in ("S", "T") else (" (marked X)" if r.get("mark") == "X" else "")
             print("  S|%s|%s  %s tris, %s islands after merge%s" % (r["node_index"], r["name"], r["tris"], r["islands_merged"], agree))
         if a.write:
+            # the S lines of the one proposals file; another proposer's letters (delete.py's X) stay
             path = os.path.join(a.models_root, rel) + ".marks.proposed.txt"
-            with io.open(path, "w", encoding="utf-8", newline="\n") as f:
-                f.write("#fuse-groups v2\n#proposed by tools/advisor/proposers/split.py; rename to .marks.txt or merge by hand\n")
-                for r in rows:
-                    f.write("S|%s|%s\n" % (r["node_index"], r["name"]))
-            print("  written: %s" % path)
+            try:
+                common.merge_proposals(path, ("S",), ["S|%s|%s" % (r["node_index"], r["name"]) for r in rows], "split.py")
+            except ValueError as e:
+                print("  %s" % e)
+                return 1
+            print("  written: %s" % path.replace("\\", "/"))
     return 0
 
 

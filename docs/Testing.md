@@ -4098,6 +4098,40 @@ the feature/label partition of every corpus column (the allowlist had silently s
 failure on rows without the features, F1 and F0.5 by hand. PR #273 review adds abstention when no grid rule finds a
 training split (including empty training data), and CLI reruns that clear stale proposals for small or blocked parts,
 refresh an old positive file after the rule stops firing, and leave live marks untouched: 45 cases.
+The visibility step (`tools/advisor/probe_vis.sh` + `ProbeVis.cs`: the Lab's probe over every corpus file, joined by
+`corpus.py --probe`) adds a second folder fixture with a probe table written against the fixture's own file identity:
+the table read with its FILE/PART/FAIL lines, a node's loose parts folding to one verdict (external when any escapes,
+flips summed, the bone carried), a stale file (size or write time changed) falling back and reported, the recipe's
+verdict checking the join without overwriting the probe's (agree / differ / the Lab's -1 counted), a deletion at the
+split file carried back to the same-named same-sized part at the raw file as `mark_later` (not to a part the raw file
+splits, not to a later part of another size, not to the later file itself), the delete population counting it, the
+`--list` of files, the CSV round trip of the new columns. The deletion proposer's: the two thresholds learned from
+interior fittings and exterior rivets against kept fittings and a kept interior deck and applied without truth, the
+size relative to each file, ties to the stricter rule and abstention, a loud failure on rows without the features or
+without a verdict (a corpus exported without `--probe`), and the one proposals file two proposers share by letter: 58 cases.
+The review of the PR (rounds of independent reviewers verifying by execution, then planting each fix's defect against
+the tests) added 15: the carry-back rules on a third fixture of six files in two folders (only stage tokens extend a
+stem, `HMS` to `hms_cut_split` but not to `hms_v2_split` nor to another folder's chain; a file of the same stage is not a
+later file; an unnamed `node N` is never the same part; a part absent later is not inferred deleted; a part marked here
+is not touched; a part marked X at one later stage file and listed unmarked at another of the same or a higher stage
+carries the X and is reported as a conflict; a file judged only at a later stage is in the delete population), a
+relative `--models` root listing and joining the same absolute paths, a repeated FILE line and a probe node the file
+lacks reported, an empty table still writing the summary; and on the proposer: ties scored as exact fractions (two rules
+at 5/12 each, the stricter one wins; the float formula put the looser one a last bit ahead), a zero threshold switching
+its clause off (a zero-extent part is not "under 0"), a held-out model without a verdict (or only the Lab's -1)
+abstaining with its reason instead of aborting every fold - and the evaluator naming that fold with its positives - a
+fold with some blank verdicts still running, the abstention when a training deletion exists but no grid rule reaches
+it, the write-time half of the staleness check, the CLI leaving the user's S, T and fuse-group parts alone, saying which
+proposals the user already deleted, under `--write` refusing a models root without the model's folder and leaving the
+proposals files alone when it could not look, and the proposals file keeping hand-added `#name|` lines and refusing one
+saved in another code page: 73 cases. Round 3 (the workflow run end to end on a scratch tree) added the one case its
+defect needed: a proposer's abstention note on one task is not printed under another task's table (the delete
+proposer serves no split task; its last-rule note from the delete fold leaked there), and a blind read of the diff two
+more: a blocked mesh's box is empty cells (it was nan and -inf under a translated node), and a part whose size is not
+known - empty, nan or an infinity - is never a deletion candidate nor its file's extent: 76 cases.
+The 2026-11-10 review adds three cases (79 total): each individual dimension must be finite and nonnegative;
+conflicting letters for the same canonical node index are refused in either proposer order with the old file
+unchanged; and an encoding failure during a write preserves all previous proposals and leaves no temporary file.
 
 The critical review of PR #195 added a high-valence cone, tiny loose parts and non-polygon primitives. Matching every
 pair of edges in one lower-vertex bucket made a 32,000-face fan take 3.90 s against 9 ms before the parallelization.
