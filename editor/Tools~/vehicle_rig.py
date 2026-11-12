@@ -1026,6 +1026,16 @@ try:
     window_names = namelist(_wnames) if _wnames.strip() else []
 except Exception as _e:
     print("VEHICLE ERROR: malformed windowreduce argument: %s" % _e); sys.exit(1)
+# RAILING (2026-11-12, user: "add Railing as a new reducible classification"): deck railings, stanchions, guard wires and
+# ladders - thin posts and lines by the hundred, each its own tiny island. A SOUP tier like RIGGING and SHROUD (a welded
+# island bottoms out at its minimum topology; the soup pass thins it to the dial), with its own percentage. Never on the
+# Sail bone. Its parts travel nowhere else, so the tag carries the names file, sent at every dial setting like windowreduce=.
+#   railingreduce=@<names file>|<percent>
+try:
+    _rlnames, railing_reduce = _tagged_names_pct(argv, "railingreduce")
+    railing_names = namelist(_rlnames) if _rlnames.strip() else []
+except Exception as _e:
+    print("VEHICLE ERROR: malformed railingreduce argument: %s" % _e); sys.exit(1)
 # SAIL IDLE FOLD (argv[71], 2026-09-09, vanilla-parity request): "1" = at idle the canvas FOLDS at the yard
 # (visible bundled sail, like the vanilla triaconter's brailed-up cloth) instead of the 180-degree strike below
 # the keel. ROTATION-ONLY by construction: the canvas is band-skinned to a Sail->SailF1->SailF2 chain and the
@@ -1268,7 +1278,7 @@ if mode == "rigfast":
 _role_marked = set()
 for _rl in (wheel_names, turret_names, track_names, gun_names, rotor_names, tailrotor_names, trail_names,
             muzzle_names, cradle_names, oar_names, sail_names, rigging_names, structure_names, body_names,
-            flag_names, rudder_names, preserve_names, flip_names, detail_names, shroud_names, window_names):
+            flag_names, rudder_names, preserve_names, flip_names, detail_names, shroud_names, window_names, railing_names):
     _role_marked.update(_rl)
 for _fo in mesh_objects():
     # the import-time Icosphere purge is conservative (skips skinned ones); on THIS path all skinning is
@@ -1462,7 +1472,7 @@ _lap("prep")
 _by_name = {}
 for _o in objs:
     _by_name.setdefault(_o.name, _o)   # first wins, matching find_opt's linear-scan order
-for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RIGGING", rigging_names, rigging_reduce), ("SHROUD", shroud_names, shroud_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce), ("TURRET", turret_names, turret_reduce), ("GUN", gun_names, gun_reduce), ("WINDOW", window_names, window_reduce), ("FLIP", flip_names, flip_reduce), ("PRESERVE", preserve_names, preserve_reduce), ("DETAIL", detail_names, detail_reduce)):
+for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RIGGING", rigging_names, rigging_reduce), ("SHROUD", shroud_names, shroud_reduce), ("RAILING", railing_names, railing_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce), ("TURRET", turret_names, turret_reduce), ("GUN", gun_names, gun_reduce), ("WINDOW", window_names, window_reduce), ("FLIP", flip_names, flip_reduce), ("PRESERVE", preserve_names, preserve_reduce), ("DETAIL", detail_names, detail_reduce)):
     if not _rnames or _rpct <= 0.5:
         continue
     try:
@@ -1477,7 +1487,7 @@ for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RI
             print("VEHICLE WARN: %s part '%s' not found — skipped" % (_rlabel.lower(), _rn)); continue
         _vraw = len(_ro2.data.vertices)
         _rb = bmesh.new(); _rb.from_mesh(_ro2.data)
-        _weld = _rlabel not in ("RIGGING", "SHROUD")   # both are rope soup: no weld, dissolve + collapse on the raw mesh
+        _weld = _rlabel not in ("RIGGING", "SHROUD", "RAILING")   # all three are rope/post soup: no weld, dissolve + collapse on the raw mesh
         if _weld:
             _dim = max(_ro2.dimensions) or 1.0
             # Weld WITHIN each material only. A ripped hull paints its plating, boot-topping stripe and portholes as

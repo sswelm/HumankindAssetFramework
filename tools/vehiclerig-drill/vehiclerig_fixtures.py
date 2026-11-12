@@ -27,6 +27,7 @@ Stage 2 (step (c), the weld tiers):
                      it; the 8-vertex box beside it sits at its target and keeps its datablock
   fx_c_soup_flat     a flat 6 x 6 grid of triangles in the RIGGING tier at 90: the limited dissolve joins every coplanar face into
                      one n-gon and collapses the straight-run vertices, the triangulate cuts the square, the decimate follows
+  fx_c_soup_railing  the fx_c_soup_L strip and a flat 6 x 6 grid in the RAILING tier at 60 (role 24, names in the railingreduce= tag)
   fx_c_soup_L        a flat L-shaped strip in the SHROUD tier at 50: the dissolve leaves a CONCAVE n-gon, so the ear clipping's
                      kd-tree of concave corners decides the ears; a lone flat quad beside it takes the quad rule
   fx_c_soup_attributes custom normals, vertex colours and two UV layers through the soup operators
@@ -150,7 +151,7 @@ Argument variants (recipes_exit, post-edited by --exits): fx_r_numeric_pct (the 
   fx_x_turret_quote / fx_x_turret_space hold Python's quote choice and non-ASCII whitespace escapes in malformed-tag errors.
 Exits and deaths (recipes_exit, keys renamed by --exits): fx_x_allignored (every part Ignored: the _guard crash), fx_x_bright (bright=1.5|x),
   fx_x_flagfold (flagfold=a|b), fx_x_defaultreduce (no '|'), fx_x_shroudreduce (a percent float() refuses), fx_x_gunreduce (likewise), fx_x_turretreduce (an infinite percent),
-  fx_x_windowreduce (no '|'), fx_x_merge_missing (a second model path that is not there); fx_d_frames (argv[7] "15.0": int() dies),
+  fx_x_windowreduce (no '|'), fx_x_railingreduce (a nan percent), fx_x_merge_missing (a second model path that is not there); fx_d_frames (argv[7] "15.0": int() dies),
   fx_d_merge_offset (merge2 offset "a,0,0": float() dies), fx_d_names (a wheels file that is not there: namelist() dies)
 """
 import json, math, os, sys
@@ -426,7 +427,7 @@ def main(out):
     # the exits and deaths: plain recipes the --exits mode edits into the malformed shapes
     recipe(out, "fx_x_allignored", src, [("A", 3, {}), ("B", 3, {})], sub="recipes_exit")
     recipe(out, "fx_x_bright", src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit", model1Bright=1.5)
-    for k in ("fx_x_flagfold", "fx_x_defaultreduce", "fx_x_shroudreduce", "fx_x_gunreduce", "fx_x_turretreduce", "fx_x_turret_quote", "fx_x_turret_space", "fx_x_windowreduce", "fx_d_frames", "fx_d_names", "fx_d_infinite_count", "fx_d_nan_count", "fx_d_flagfold_infinite", "fx_d_reduce_before_names"):
+    for k in ("fx_x_flagfold", "fx_x_defaultreduce", "fx_x_shroudreduce", "fx_x_gunreduce", "fx_x_turretreduce", "fx_x_turret_quote", "fx_x_turret_space", "fx_x_windowreduce", "fx_x_railingreduce", "fx_d_frames", "fx_d_names", "fx_d_infinite_count", "fx_d_nan_count", "fx_d_flagfold_infinite", "fx_d_reduce_before_names"):
         recipe(out, k, src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit")
     for k in ("fx_x_merge_missing", "fx_d_merge_offset"):
         recipe(out, k, src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit", srcFile2=second)
@@ -487,6 +488,11 @@ def main(out):
     r = Rig(); ma = r.material("Rope", (0.4, 0.3, 0.2))
     r.node("Stay", mesh=flat_grid(r, "Stay", ma, 7, 7, mask=lambda i, j: i < 2 or j < 2)); r.node("Pane", mesh=flat_grid(r, "Pane", ma, 2, 2), translation=[2.0, 0.0, 0.0])
     recipe(out, "fx_c_soup_L", r.write(models, "fx_c_soup_L"), [("Stay", 22, {}), ("Pane", 22, {})], shroudReducePct=50.0)
+    # the RAILING tier (2026-11-12): role 24, its names in the railingreduce= tag; soup like the two above (a weld tier would leave the grid's faces)
+    r = Rig(); ma = r.material("Steel", (0.5, 0.5, 0.5))
+    r.node("Rail", mesh=flat_grid(r, "Rail", ma, 7, 7, mask=lambda i, j: i < 2 or j < 2)); r.node("Post", mesh=flat_grid(r, "Post", ma, 6, 6), translation=[3.0, 0.0, 0.0])
+    r.node("Other", mesh=r.mesh("Other", at=(6.0, 0.0, 0.0), material=ma))
+    recipe(out, "fx_c_soup_railing", r.write(models, "fx_c_soup_railing"), [("Rail", 24, {}), ("Post", 24, {}), ("Other", 0, {})], railingReducePct=60.0)
     r = Rig(); ma = r.material("Rope", (0.4, 0.3, 0.2))
     r.node("Shroud", mesh=flat_grid(r, "Shroud", ma, 61, 41, bump=0.02))
     recipe(out, "fx_c_soup_bumpy", r.write(models, "fx_c_soup_bumpy"), [("Shroud", 15, {})], riggingReducePct=80.0)
@@ -1114,6 +1120,7 @@ EXITS = {
     "fx_x_turret_quote": ("EXIT", lambda a: set_tag(a, "turretreduce", "can't")),
     "fx_x_turret_space": ("EXIT", lambda a: set_tag(a, "turretreduce", "\u00a0inf")),
     "fx_x_windowreduce": ("EXIT", lambda a: set_tag(a, "windowreduce", "nopipe")),
+    "fx_x_railingreduce": ("EXIT", lambda a: set_tag(a, "railingreduce", "|nan")),
     "fx_x_merge_missing": ("EXIT", lambda a: set_tag(a, "merge2", "|".join([a[[t.startswith("merge2=") for t in a].index(True)][7:].split("|")[0] + ".missing.glb"] + a[[t.startswith("merge2=") for t in a].index(True)][7:].split("|")[1:]))),
     "fx_d_frames": ("DIES", lambda a: a.__setitem__(7, "15.0")),
     "fx_d_reduce_before_names": ("DIES", lambda a: (a.__setitem__(52, "half"), a.__setitem__(69, a[69] + ".missing.txt"))),

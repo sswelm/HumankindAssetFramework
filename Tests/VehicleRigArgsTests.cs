@@ -34,8 +34,8 @@ public class VehicleRigArgsTests
         Assert.Equal("@C:/p/ship_rudders.txt", t[60]); Assert.Equal("0", t[61]); Assert.Equal("0", t[62]); Assert.Equal("@C:/p/ship_preserve.txt", t[63]); Assert.Equal("0", t[64]); Assert.Equal("0", t[65]);
         Assert.Equal("@C:/p/ship_flip.txt", t[66]); Assert.Equal("0", t[67]); Assert.Equal("0", t[68]); Assert.Equal("@C:/p/ship_detail.txt", t[69]); Assert.Equal("0", t[70]);
         Assert.Equal("0", t[71]); Assert.Equal("12", t[72]); Assert.Equal("270", t[73]); Assert.Equal("0", t[74]); Assert.Equal("0", t[75]);
-        // the tagged arguments an untouched recipe sends: shroudreduce and windowreduce only (sent at every dial setting)
-        Assert.Equal(new[] { "shroudreduce=@C:/p/ship_shroud.txt|0", "windowreduce=@C:/p/ship_window.txt|0" }, t.Skip(76).ToArray());
+        // the tagged arguments an untouched recipe sends: shroudreduce, windowreduce and railingreduce only (sent at every dial setting)
+        Assert.Equal(new[] { "shroudreduce=@C:/p/ship_shroud.txt|0", "windowreduce=@C:/p/ship_window.txt|0", "railingreduce=@C:/p/ship_railing.txt|0" }, t.Skip(76).ToArray());
     }
 
     [Fact]
@@ -44,7 +44,7 @@ public class VehicleRigArgsTests
         string line = VehicleRigArgLine.RigArgLine(Sample());
         Assert.StartsWith("rig \"D:/m/ship.glb\" \"D:/m/ship_Spin.glb\" \"C:/p/ship_preview.fbx\" \"@C:/p/ship_wheels.txt\" \"@C:/p/ship_turrets.txt\" AUTO 15 -360 ", line);
         Assert.Contains(" 1 \"0,0,0\" 90 1 ", line);
-        Assert.EndsWith(" 0 12 270 0 0 \"shroudreduce=@C:/p/ship_shroud.txt|0\" \"windowreduce=@C:/p/ship_window.txt|0\"", line);
+        Assert.EndsWith(" 0 12 270 0 0 \"shroudreduce=@C:/p/ship_shroud.txt|0\" \"windowreduce=@C:/p/ship_window.txt|0\" \"railingreduce=@C:/p/ship_railing.txt|0\"", line);
     }
 
     [Fact]
@@ -63,7 +63,8 @@ public class VehicleRigArgsTests
         Assert.Equal("1", t[41]); Assert.Equal("1", t[46]); Assert.Equal("1", t[71]); Assert.Equal("1", t[72]); Assert.Equal("1", t[74]); Assert.Equal("0.46", t[75]);
         Assert.Equal("flagfold=12.3|1", t[76]); Assert.Equal("defaultreduce=@C:/p/ship_default.txt|75", t[77]);
         Assert.Equal("shroudreduce=@C:/p/ship_shroud.txt|0", t[78]); Assert.Equal("gunreduce=42.3", t[79]); Assert.Equal("windowreduce=@C:/p/ship_window.txt|0", t[80]);
-        Assert.Equal(81, t.Count);
+        Assert.Equal("railingreduce=@C:/p/ship_railing.txt|0", t[81]);
+        Assert.Equal(82, t.Count);
     }
 
     [Fact]
@@ -87,7 +88,7 @@ public class VehicleRigArgsTests
         var t = VehicleRigArgLine.RigArgv(a).Select(x => x.value).ToList();
         Assert.Equal("merge2=D:/m/gun.glb|1.5,0,0|0,0,30|" + VehicleLabRules.Merge2ScaleField(2f, 0.5f, 1f), t[76]);
         Assert.Equal("bright=1.2|0.8", t[77]);
-        Assert.Equal("shroudreduce=@C:/p/ship_shroud.txt|0", t[78]); Assert.Equal("windowreduce=@C:/p/ship_window.txt|0", t[79]); Assert.Equal("parttx=@C:/p/ship_parttx.txt", t[80]);
+        Assert.Equal("shroudreduce=@C:/p/ship_shroud.txt|0", t[78]); Assert.Equal("windowreduce=@C:/p/ship_window.txt|0", t[79]); Assert.Equal("railingreduce=@C:/p/ship_railing.txt|0", t[80]); Assert.Equal("parttx=@C:/p/ship_parttx.txt", t[81]);
         // brightness within 0.005 of 1 is "untouched"; a second-model brightness without a second model is not sent
         var b = Sample(); b.model1Bright = 1.004f; b.model2Bright = 0.5f;
         Assert.DoesNotContain(VehicleRigArgLine.RigArgv(b), x => x.value.StartsWith("bright="));

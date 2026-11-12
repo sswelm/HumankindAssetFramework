@@ -214,6 +214,13 @@ public sealed class FbxDocument
                     int n = ds.Read(plain, got, plain.Length - got); if (n <= 0) break; got += n;
                 }
                 if (got != want) throw new InvalidDataException($"FBX record '{owner}': a zlib {t} array inflated to {got} bytes, not {want}");
+                // A read at the input's end WHILE output is still pending proves nothing: Unity's Mono refills its input
+                // whenever it holds none, and a long match can leave output to deliver after the last input byte was
+                // taken (2026-11-12: a Blender preview FBX whose 65,632-byte Materials array - 13 runs, zlib level 1 -
+                // filled the first 65,536-byte read with every input byte consumed; the reader refused a good file).
+                // What a truncated stream cannot do is END: with all the output delivered, only a stream still waiting
+                // for its end-of-block bits asks for more. So the question is put after the output, not during it.
+                ms.ReadPastEnd = false;
                 var one = new byte[1];
                 if (ds.Read(one, 0, 1) > 0) throw new InvalidDataException($"FBX record '{owner}': a zlib {t} array inflates to more than {want} bytes");
                 if (ms.ReadPastEnd || ms.Position != ms.Length) throw new InvalidDataException($"FBX record '{owner}': a zlib {t} array has truncated DEFLATE data or trailing bytes before its checksum");

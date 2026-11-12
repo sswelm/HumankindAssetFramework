@@ -17,6 +17,7 @@ public class VehicleRigNamesFileTests
     [InlineData("defaultreduce")]
     [InlineData("shroudreduce")]
     [InlineData("windowreduce")]
+    [InlineData("railingreduce")]
     public void A_tagged_names_directory_is_the_scripts_error_instead_of_an_unhandled_exception(string tag)
     {
         string path = Path.Combine(Path.GetTempPath(), "haf-names-" + Guid.NewGuid().ToString("N"));
@@ -27,7 +28,7 @@ public class VehicleRigNamesFileTests
             Assert.Null(args.Unsupported);
             string detail = "[Errno 13] Permission denied: '" + path.Replace("\\", "\\\\") + "'";
             Assert.Equal("VEHICLE ERROR: malformed " + tag + " argument: " +
-                (tag == "windowreduce" ? detail : tag + "=@" + path + "|20 (" + detail + ")"), args.TagError);
+                (tag == "windowreduce" || tag == "railingreduce" ? detail : tag + "=@" + path + "|20 (" + detail + ")"), args.TagError);
         }
         finally { Directory.Delete(path); }
     }
@@ -36,6 +37,7 @@ public class VehicleRigNamesFileTests
     [InlineData("defaultreduce")]
     [InlineData("shroudreduce")]
     [InlineData("windowreduce")]
+    [InlineData("railingreduce")]
     public void A_tagged_non_UTF8_names_file_is_left_to_Blender_and_earlier_errors_still_win(string tag)
     {
         string path = Path.GetTempFileName();

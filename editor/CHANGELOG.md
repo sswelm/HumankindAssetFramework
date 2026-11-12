@@ -5,6 +5,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: a Railing role with its own reduce dial** (2026-11-12, user request). Deck railings, stanchions,
+  guard wires and ladders can be marked **Railing** (dropdown, or key **A**) and cut by a **Railing reduce (%)** slider
+  in Vertices control. They are reduced like Rigging and Shroud (dissolve + collapse, no weld), stay rigid with the
+  hull, and have their own Show-only filter. Part names containing `railing`, `handrail` or `stanchion` are now
+  guessed Railing instead of Structure; roles already saved in a recipe are untouched. 0 = untouched.
 - **A bake whose registry save fails is rolled back, not left half-done** (2026-10-31; written 2026-09-28, found
   stranded by the 2026-10-31 review). The unit bake kept a rollback copy of the
   previous assets, but threw it away as soon as the bake itself succeeded, before the registry entry was written.

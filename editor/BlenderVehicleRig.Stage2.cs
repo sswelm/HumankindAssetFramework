@@ -1,10 +1,10 @@
 // BlenderVehicleRig.Stage2.cs - vehicle_rig.py's stage 2, the SOURCE-SIDE reduction tiers (lines 1338-1514), in C# (step (c) of
-// the vehicle_rig port, 2026-10-15; docs/Review-Backlog.md item (5)). Per tier - DEFAULT, RIGGING, SHROUD, STRUCTURE, BODY, OAR,
+// the vehicle_rig port, 2026-10-15; docs/Review-Backlog.md item (5)). Per tier - DEFAULT, RIGGING, SHROUD, RAILING, STRUCTURE, BODY, OAR,
 // SAIL, RUDDER, WHEEL, TURRET, GUN, WINDOW, FLIP, PRESERVE, DETAIL, skipped without names or at a dial of 0.5 % or less - and per named
 // part (the first object of that name; a name the scene has not is a WARN): the mesh into a bmesh; the WELD tiers (all but
-// RIGGING and SHROUD) weld coincident vertices within each material (the vertices whose corners all share one material,
+// RIGGING, SHROUD and RAILING) weld coincident vertices within each material (the vertices whose corners all share one material,
 // grouped in the order the materials are first met, remove_doubles per group at 1e-5 of the part's largest extent) and
-// mark the manifold edges over 40 degrees sharp; the SOUP tiers (RIGGING, SHROUD) run the limited dissolve at 5 degrees
+// mark the manifold edges over 40 degrees sharp; the SOUP tiers (RIGGING, SHROUD, RAILING) run the limited dissolve at 5 degrees
 // instead (BlenderDissolve: one dissolve_limit over every vertex and edge, or past 4,000 faces one per BSP cell of the face
 // centres on the cell's interior edges and vertices, as _dissolve_limited chunks it); triangulate (BlenderPolyfill: nothing to
 // do on triangles, the quads and n-gons the dissolve left cut by BEAUTY); the bmesh back into the mesh, every face smooth on a
@@ -21,7 +21,7 @@ public static partial class BlenderVehicleRig
 {
     static readonly (string label, string role)[] Tiers =
     {
-        ("DEFAULT", "default"), ("RIGGING", "rigging"), ("SHROUD", "shroud"), ("STRUCTURE", "structure"), ("BODY", "bodies"), ("OAR", "oars"), ("SAIL", "sails"),
+        ("DEFAULT", "default"), ("RIGGING", "rigging"), ("SHROUD", "shroud"), ("RAILING", "railing"), ("STRUCTURE", "structure"), ("BODY", "bodies"), ("OAR", "oars"), ("SAIL", "sails"),
         ("RUDDER", "rudders"), ("WHEEL", "wheels"), ("TURRET", "turrets"), ("GUN", "guns"), ("WINDOW", "window"), ("FLIP", "flip"), ("PRESERVE", "preserve"), ("DETAIL", "detail"),
     };
 
@@ -44,7 +44,7 @@ public static partial class BlenderVehicleRig
             if (rnames.Count == 0 || pct <= 0.5) continue;
             // bpy.ops.object.mode_set: the operator call updates the view layer first - every object's bounds_eval is current again
             foreach (var so in s.Objects) { so.EvalMin = null; so.EvalMax = null; }
-            bool weld = label != "RIGGING" && label != "SHROUD";
+            bool weld = label != "RIGGING" && label != "SHROUD" && label != "RAILING";
             var rows = new List<(BlenderRigAnim.SceneObject o, int v0, int vmid, int target, int v1, int vraw, bool weld, string name, float ratio)>();
             foreach (string rn in rnames)
             {
