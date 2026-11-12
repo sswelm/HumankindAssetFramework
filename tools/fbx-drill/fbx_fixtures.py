@@ -124,6 +124,14 @@ def fixtures():
     noname = Node('', [prop('I', 1)], [Node('', [], [Node('leaf', [prop('S', 'x')])])])
     siblings = Node('Siblings', [], [Node('A', [prop('I', 1)]), Node('A', [prop('I', 2)]), Node('B', [], [Node('A', [prop('I', 3)])])])
     long_name = Node('N' * 255, [prop('I', 255)])
+    # A real array (the Jagdpanzer preview's Materials, 2026-11-12): 13 runs, 65,632 bytes, compressed at zlib level 1 as Blender's
+    # exporter does. Inflating it fills a first 65,536-byte read with every input byte already consumed, so Unity's Mono asks for
+    # input at the end while 96 bytes are still to come - a good stream the reader once refused as truncated.
+    runs = [(0, 1809), (1, 18), (2, 62), (3, 2836), (0, 825), (4, 2244), (0, 1780), (5, 575), (6, 26), (0, 5378), (6, 351), (7, 2), (4, 502)]
+    run_values = [v for v, n in runs for _ in range(n)]
+    run_raw = struct.pack('<%di' % len(run_values), *run_values); run_z = zlib.compress(run_raw, 1)
+    pending = Node('Materials', [b'i' + struct.pack('<III', len(run_values), 1, len(run_z)) + run_z])
+    yield 'fx_output_pending_at_input_end', 7400, [pending]
     yield 'fx_types_7400', 7400, [every_type, compressed, empties]
     yield 'fx_types_7500_wide', 7500, [every_type, compressed, empties]
     yield 'fx_types_7700_wide', 7700, [every_type, compressed, empties]

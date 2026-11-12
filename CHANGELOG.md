@@ -10,6 +10,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **The FBX reader refused a good Blender file as truncated (2026-11-12; found by the push gate's FBX reader drill).**
+  A Generate on 2026-11-11 left `jagdpanzer_iv_late_prod2_Spin_preview.fbx` in the project; its 65,632-byte Materials
+  array (13 runs, zlib level 1) inflates so that the first 65,536-byte read has consumed every input byte with 96 bytes
+  still to deliver. Unity's Mono refills its input whenever it holds none, so it asked at the input's end, and the
+  reader took any such read for a truncated stream. The question is now put after the output is complete: only a
+  stream still waiting for its end bits asks then. The 21 malformed fixtures are still refused; the array is a fixture
+  (`fx_output_pending_at_input_end`), failing before the change and passing after. Every push was blocked until then.
 - **A Railing role with its own reduce dial (2026-11-12; Vehicle Lab role *Railing*, key `A`, recipe
   `railingReducePct`, the script's `railingreduce=@names|percent`).** "Could you add Railing as a new reducible
   classification": deck railings, stanchions, guard wires and ladders are a role of their own (enum value 24, appended
