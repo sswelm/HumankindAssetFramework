@@ -10,6 +10,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **A Railing role with its own reduce dial (2026-11-12; Vehicle Lab role *Railing*, key `A`, recipe
+  `railingReducePct`, the script's `railingreduce=@names|percent`).** "Could you add Railing as a new reducible
+  classification": deck railings, stanchions, guard wires and ladders are a role of their own (enum value 24, appended
+  last so saved recipes keep their roles). A SOUP tier like Rigging and Shroud - limited dissolve, then collapse, no
+  weld - that runs right after SHROUD, in the script and in the C# stage 2 alike; the names travel in the tag at every
+  dial setting so a marked part reaches the script's marked set. Part names with `railing`, `handrail` or `stanchion`
+  are now guessed Railing (was Structure). Every recipe's argument line gains the one tag, so each vehicle regenerates
+  once. Drill: `fx_c_soup_railing` (the tier, Blender against C#) and `fx_x_railingreduce` (a nan percent is the
+  script's error).
 - **PR #278 review (2026-11-10).** Rigid links count all existing role bones when sharing the 126-bone capacity;
   trails, recoil and other auxiliaries no longer let the clamp export beyond the wall. Insufficient link capacity and
   an over-budget finished rig refuse export. Five pitched-belt Blender fixtures cover ordinary, dense and tight

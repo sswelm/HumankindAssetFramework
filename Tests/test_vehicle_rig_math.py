@@ -139,6 +139,26 @@ class DissolveOrderGuard(unittest.TestCase):
         self.assertLess(body.index("index_update()"), body.index("_jobs = []"), "indices are refreshed before the cells are gathered")
 
 
+class RailingTierGuard(unittest.TestCase):
+    # 2026-11-12 (user: "add Railing as a new reducible classification"): railingreduce=@<names>|<percent> is parsed right
+    # after windowreduce, its names join _role_marked, and the RAILING tier runs right after SHROUD as a SOUP tier (no weld).
+    # The C# port (BlenderVehicleRig) mirrors the three; this keeps the script's side.
+    def test_railing_is_parsed_after_window_marked_and_a_soup_tier_after_shroud(self):
+        win = SOURCE.index('_tagged_names_pct(argv, "windowreduce")')
+        rai = SOURCE.index('_tagged_names_pct(argv, "railingreduce")')
+        self.assertLess(win, rai)
+        self.assertIn("shroud_names, window_names, railing_names):", SOURCE)
+        loop = SOURCE[SOURCE.index("for _rlabel, _rnames, _rpct in ("):]
+        loop = loop[:loop.index(chr(10))]
+        self.assertIn('("SHROUD", shroud_names, shroud_reduce), ("RAILING", railing_names, railing_reduce), ("STRUCTURE"', loop)
+        self.assertIn('_weld = _rlabel not in ("RIGGING", "SHROUD", "RAILING")', SOURCE)
+
+    def test_railingreduce_tag_carries_the_names_file_and_the_percent(self):
+        tag = NAMESPACE["_tagged_names_pct"]
+        self.assertEqual(("@C:/p/x_railing.txt", 60.0), tag(["rig", "windowreduce=@w.txt|10", "railingreduce=@C:/p/x_railing.txt|60"], "railingreduce"))
+        self.assertEqual(("", 0.0), tag(["rig", "windowreduce=@w.txt|10"], "railingreduce"))
+
+
 class TurretTierGuard(unittest.TestCase):
     # 2026-10-16 (user: "could you add a turret reduce slider"): turretreduce=<percent> is parsed right after gunreduce
     # and the TURRET tier runs in the tier loop right before GUN, on the positional turret_names - both before the

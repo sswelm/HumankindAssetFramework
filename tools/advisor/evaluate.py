@@ -41,7 +41,7 @@ from collections import Counter, defaultdict
 from copy import deepcopy
 
 # The Vehicle Lab's reduce tiers (VehicleLabWindow.Tier(...)): a role not listed is baked unreduced; Ignore is dropped.
-ROLE_DIAL = {"Default": "defaultReducePct", "Rigging": "riggingReducePct", "Shroud": "shroudReducePct", "Structure": "structureReducePct",
+ROLE_DIAL = {"Default": "defaultReducePct", "Rigging": "riggingReducePct", "Shroud": "shroudReducePct", "Railing": "railingReducePct", "Structure": "structureReducePct",
              "Body": "bodyReducePct", "Oar": "oarReducePct", "Sail": "sailReducePct", "Rudder": "rudderReducePct", "Wheel": "wheelReducePct",
              "Flip": "flipReducePct", "Preserve": "preserveReducePct", "Detail": "detailReducePct", "Turret": "turretReducePct",
              "Gun": "gunReducePct", "Window": "windowReducePct"}

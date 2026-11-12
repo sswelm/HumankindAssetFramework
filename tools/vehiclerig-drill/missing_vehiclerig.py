@@ -21,7 +21,7 @@ for d in sys.argv[3:]:
         key0 = block[0].split("\t")[1]
         job0 = next((j for j in jobs if j.split("\t")[1] == key0), None)
         src_ok = job0 is not None and job0.split("\t")[3].lower().rsplit(".", 1)[-1] in ("glb", "gltf")
-        soup = any(l.startswith("LOG\t2\tVEHICLE RIGGING ") or l.startswith("LOG\t2\tVEHICLE SHROUD ") for l in block)
+        soup = any(l.startswith("LOG\t2\tVEHICLE RIGGING ") or l.startswith("LOG\t2\tVEHICLE SHROUD ") or l.startswith("LOG\t2\tVEHICLE RAILING ") for l in block)
         if key0 == "fx_r_wheels" and "STAGE\t3" in block: stage3_lines = block
         if key0 in ("fx_e2_rowing", "fx_e2_stances") and "STAGE\t4" in block: e2_seeds[key0] = block
         if key0 in ("fx_e3_deploy", "fx_e3_offaxis") and "STAGE\t4" in block: e3_seeds[key0] = block

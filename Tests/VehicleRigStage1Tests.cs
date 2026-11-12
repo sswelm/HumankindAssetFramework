@@ -90,6 +90,9 @@ public class VehicleRigStage1Tests
     [InlineData("turretreduce=nan\u00a0", "VEHICLE ERROR: malformed turretreduce argument: not a finite percent: 'turretreduce=nan\\xa0'")]
     [InlineData("windowreduce=nopipe", "VEHICLE ERROR: malformed windowreduce argument: no '|' between the names and the percent: 'windowreduce=nopipe'")]
     [InlineData("windowreduce=|nan", "VEHICLE ERROR: malformed windowreduce argument: not a finite percent: 'windowreduce=|nan'")]
+    [InlineData("railingreduce=nopipe", "VEHICLE ERROR: malformed railingreduce argument: no '|' between the names and the percent: 'railingreduce=nopipe'")]
+    [InlineData("railingreduce=|inf", "VEHICLE ERROR: malformed railingreduce argument: not a finite percent: 'railingreduce=|inf'")]
+    [InlineData("railingreduce=|abc", "VEHICLE ERROR: malformed railingreduce argument: could not convert string to float: 'abc'")]
     public void A_malformed_reduce_tag_is_the_scripts_error_line_after_the_merge(string token, string line)
     {
         var argv = Argv(); argv.Add(token);

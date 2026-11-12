@@ -2399,10 +2399,10 @@ attributes, which the current scene-row format does not record.
 
 **Step (c), stage 2 of item (5), the weld tiers (2026-10-15).** `editor/BlenderVehicleRig.Stage2.cs` + `editor/BlenderWeld.cs`
 are the script's SOURCE-SIDE reduction tiers in C#, held by `vehiclerig.exe --stages 2` after stage 1 on the same rows. Per
-tier (DEFAULT, RIGGING, SHROUD, STRUCTURE, BODY, OAR, SAIL, RUDDER, WHEEL, GUN, WINDOW, FLIP, PRESERVE, DETAIL; skipped without
+tier (DEFAULT, RIGGING, SHROUD, RAILING, STRUCTURE, BODY, OAR, SAIL, RUDDER, WHEEL, GUN, WINDOW, FLIP, PRESERVE, DETAIL; skipped without
 names or at 0.5 % or less, the dials read as `min(95, max(0, float))` - a `nan` is 0, as Python's max keeps its first
 argument) and per named part (the first object of the name; a name the scene has not is the WARN): the mesh into a bmesh;
-the WELD tiers (all but RIGGING and SHROUD) run `remove_doubles` within each material - the vertices whose corners all
+the WELD tiers (all but RIGGING, SHROUD and RAILING) run `remove_doubles` within each material - the vertices whose corners all
 share one material, grouped in the order the materials are first met, at 1e-5 of the part's largest extent -, then mark
 the manifold edges over 40 degrees sharp; triangulate (a no-op on triangles); the bmesh back into the mesh, every face
 smooth; the dial's target `max(8, int(v0 * (1 - pct / 100)))` from the welded count and, above it, the DECIMATE modifier at
