@@ -43,7 +43,9 @@ Three layers exist; custom models land in the pawn layer (`FXMeshLayerIndex = 2`
 ¹ before `DistrictBufferHeadroom`; with the district headroom set it reads e.g. 5,000,000.
 
 **The pawn-layer ceiling is ~1,000,000 vertices / 6,500,000 indices / 2,500 meshes** — 10× the source
-default. Vertices are the binding constraint (69% used vs 22% indices / 28% mesh slots). Layer 0
+default. Vertices are the binding constraint on the vanilla sizes (69% used vs 22% indices / 28% mesh slots);
+once the vertices are raised, the indices become the wall — see
+[How far the pawn pool stretches](#how-far-the-pawn-pool-stretches-measured-2026-11-13). Layer 0
 `Visual` is the shared **building/district** buffer (the district axis draws from it), unrelated to
 your unit models.
 
@@ -72,8 +74,15 @@ BufferOverrides = MeshWithSkeletonParticleIndexBuffer:verts=+1000000,idx=+200000
   there and says so, including a base size enlarged before this hook or an explicit `idx=0` entry. Additions cannot
   wrap into negative sizes, and a subtraction that would create a nonpositive buffer is refused. Malformed signs
   and negative `maxtris` values are reported instead of silently changing the configuration.
-- Cost is VRAM only: pawn vertices are ~28 B packed, so `verts=+1000000` ≈ +28 MB, `idx=+2000000`
-  ≈ +8 MB. The shader reads buffer sizes dynamically, so the change is transparent.
+- Cost is memory on **both** sides, allocated in full at launch whether or not models fill it. A pawn vertex
+  is **36 bytes** (`FxMeshContent.VertexDataPosUVNormalTangentBones`: position 12, UV 8, packed normal 4,
+  packed tangent 4, bone indices 4, bone weights 4 — `Marshal.SizeOf` on the game's own assembly,
+  2026-11-13) and an index is 4 bytes. The layer's buffers are CPU-writable: the engine keeps a managed copy
+  (`WriteContent`) beside the GPU buffer and never releases it, and the plugin's re-uploads depend on it.
+  So `verts=+1000000` = **+36 MB VRAM and +36 MB RAM**, `idx=+2000000` = +8 MB of each. The sizes are
+  computed from the record and the allocation code; the process's memory before and after was not measured.
+  (Until 2026-11-13 this page said ~28 B and VRAM only, and another passage said ~48 MB per million;
+  neither was a measurement.) The shader reads buffer sizes dynamically, so the change is transparent.
 
 **Refusals are reported when registration happens.** `[Buffers][DROPPED]` names the mesh, layer, pre-registration
 fill and reason. A full mesh table throws before the engine returns, so the watcher observes that exception too
@@ -90,6 +99,39 @@ reference assemblies; no Unity installation is needed for this drill.
 With the override above, a **100k-vert hero unit is entirely practical** — the shipped default pool
 already fits one today (~300k free late-game); the override just restores comfortable headroom for
 the rest of the roster.
+
+## How far the pawn pool stretches (measured 2026-11-13)
+
+**The index buffer is the wall, not memory.** The vertex buffer has no packing limit (`StartVertex` is a
+full 32-bit field); the index buffer stops at 16,777,216 (above). How many vertices of models that is
+depends on the roster's indices per vertex:
+
+| roster | vertices used | indices used | indices per vertex |
+|---|---|---|---|
+| vanilla + the early ENC set (the table above) | 694,126 | ~1.48M | ~2.1 |
+| 2026-11-13, with the large ENC models (806 meshes, incl. a 149k-vert battleship) | 3,547,067 | ~6.94M (73% of 9,500,000) | ~1.96 |
+
+At ~1.96 the index ceiling is reached at about **8,500,000 vertices** of models. Past that a larger vertex
+buffer holds nothing more. The largest useful pair on the vanilla sizes (1,000,000 / 6,500,000) is therefore
+
+```ini
+[Buffers]
+BufferOverrides = MeshWithSkeletonParticleIndexBuffer:verts=+7500000,idx=+10277216,meshes=+1000,maxtris=0
+```
+
+| pawn pool | vertices | indices | VRAM | RAM (the CPU copy) |
+|---|---|---|---|---|
+| vanilla | 1,000,000 | 6,500,000 | 36 + 26 = 62 MB | 62 MB |
+| the maximum pair above | 8,500,000 | 16,777,216 | 306 + 67 = 373 MB | 373 MB |
+
+So the whole stretch costs about **+311 MB of VRAM and +311 MB of RAM** over vanilla — small beside the
+game's own use, noticeable on a 4 GB card. What it does **not** change: the 16,320 quads per fragment (the
+per-mesh limit in the map below), and the mesh table (`meshes=`), which has its own count.
+
+Status: the ratio and the fills are read from F8 and the `[Buffers]` log lines of a live session at
+`verts=+3000000,idx=+3000000`. The maximum pair itself was set on 2026-11-13 and **has not been launched
+yet**; on the first start the log should read `baseIndexBufferSize: 6500000 -> 16777216` with no clamp note.
+The ratio is this roster's, not a constant: read your own from F8 before sizing.
 
 ## What actually counts
 
@@ -161,7 +203,7 @@ measured, not assumed:
 > it fills the game stops uploading meshes entirely — **units and districts both stop drawing, with no error**. That
 > day's buffer was already doubled to 2,000,000 by `BufferOverrides` and sat at 1,999,968; one static re-bake of one
 > ship was the straw. Read the fill with **F8** (`L2 … verts %`), and raise the pool with
-> `BufferOverrides = MeshWithSkeletonParticleIndexBuffer:verts=+2000000` (roughly +48 MB VRAM per million) before splitting a second
+> `BufferOverrides = MeshWithSkeletonParticleIndexBuffer:verts=+2000000` (+36 MB VRAM and +36 MB RAM per million) before splitting a second
 > large model. Reducing triangles pays both ceilings at once; splitting pays one by spending the other.
 | **Districts / buildings** | baked static meshes in the shared `Visual` layer | **3,000,000 verts**, ~99% full late-game — the tightest real vertex wall | 255 sub-particles × PPC (PPC dynamic, auto-boosted since 0.5.7) | `DistrictBufferHeadroom` for the pool; `DistrictMeshDensityBoost` floor for the ceiling — [District-Visuals](District-Visuals.md) |
 | **Terrain tiles** | **NO stored vertices at all** — `ProceduralTerrainRenderer` GENERATES the hex geometry on the GPU every frame (visibility kernel → repack → draw-procedural + tessellation) and throws it away | n/a — vertices are manufactured per frame | **10,000 visible hexagons** per frame (post-culling) and 800,000 draw commands, both plain ints on the technical-settings asset | `[Terrain] TerrainHexagonBufferMultiplier` (0.5.7, experimental — section below) |
