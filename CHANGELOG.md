@@ -10,6 +10,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Docs: what the pawn buffer costs and how far it stretches (2026-11-13; "make sure it's properly documented").**
+  Vertex-Budget quoted three different costs for `BufferOverrides` (~28 B per vertex, VRAM only; ~48 MB per million),
+  none measured. The pawn vertex record is 36 bytes (`Marshal.SizeOf` on the game's assembly), and the engine keeps
+  a CPU copy, so a million vertices cost 36 MB of VRAM **and** 36 MB of RAM. New section: the index buffer's
+  16,777,216 ceiling is the wall (about 8.5 million vertices at this roster's ~1.96 indices per vertex), with the
+  largest useful override and its cost (+311 MB of each over vanilla). Not launched at that size yet. The
+  `DistrictBufferHeadroom` description's "~48MB" per million is left as it is: the `Visual` layer's vertex format
+  was not read from a live session (its quantized record would be 20 bytes).
 - **Model Factory: *Reduce to ~tris* goes to 250,000 (2026-11-13; was 200,000).** "I need to be able to raise above
   200000." The slider's range only; nothing downstream caps the target. The shared pawn buffer is still the budget
   (F8, Mesh Budget).
