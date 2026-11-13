@@ -1274,7 +1274,7 @@ public class ModelFactoryWindow : EditorWindow
                 "keep. Default 24000 is a good roster citizen; 50k+ is fine for a hero unit. It's a CEILING, not a quota: a " +
                 "model already under it passes through untouched (never upscaled). Toggling Double-sided automatically HALVES " +
                 "the effective target (it doubles the baked geometry). Preserves thin parts (per-object). 0 = no reduction. " +
-                "Needs Blender (auto-detected)."), cur.targetTris, 0, 200000);
+                "Needs Blender (auto-detected)."), cur.targetTris, 0, 250000);   // 250,000 since 2026-11-13 (was 200,000; user: the HMS Roberts needs more). The slider's range only: nothing downstream caps the target
             GUILayout.Space(14);
             float lw = EditorGUIUtility.labelWidth;
             EditorGUIUtility.labelWidth = 96;

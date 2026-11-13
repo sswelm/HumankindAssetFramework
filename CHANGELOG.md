@@ -10,6 +10,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Model Factory: *Reduce to ~tris* goes to 250,000 (2026-11-13; was 200,000).** "I need to be able to raise above
+  200000." The slider's range only; nothing downstream caps the target. The shared pawn buffer is still the budget
+  (F8, Mesh Budget).
 - **The FBX reader refused a good Blender file as truncated (2026-11-12; found by the push gate's FBX reader drill).**
   A Generate on 2026-11-11 left `jagdpanzer_iv_late_prod2_Spin_preview.fbx` in the project; its 65,632-byte Materials
   array (13 runs, zlib level 1) inflates so that the first 65,536-byte read has consumed every input byte with 96 bytes
