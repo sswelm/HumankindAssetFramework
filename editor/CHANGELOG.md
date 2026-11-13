@@ -5,6 +5,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Factory: *Reduce to ~tris* now goes up to 250,000** (2026-11-13, user request; was 200,000). The shared
+  pawn buffer is still the real budget: check F8 ▸ Mesh Budget in game.
 - **Vehicle Lab: a Railing role with its own reduce dial** (2026-11-12, user request). Deck railings, stanchions,
   guard wires and ladders can be marked **Railing** (dropdown, or key **A**) and cut by a **Railing reduce (%)** slider
   in Vertices control. They are reduced like Rigging and Shroud (dissolve + collapse, no weld), stay rigid with the
