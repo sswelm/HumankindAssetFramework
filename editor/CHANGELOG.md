@@ -5,8 +5,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
-- **Vehicle Lab: a fresh rig plays** (2026-11-14, user report). Generate now starts the preview's clip even when the
-  preview was paused before, and the Console says which clips the preview holds and which one plays.
+- **Vehicle Lab: the preview plays again after Generate** (2026-11-14, user report). With the C# backend the
+  preview's wheels, propellers and rotors stood still although Play was on: the skinned meshes were drawn in their
+  first pose. Fixed in the in-process rig, which the Clip Range picker shares. Generate also starts the clip even
+  when the preview was paused, and the Console says which clips the preview holds.
 - **Vehicle Lab: a Two-sided role** (2026-11-14, user request). For a part that mixes closed solids with single
   sheets (a conning tower with periscopes and a one-sheet wall): mark it **Two-sided** and only the faces whose back
   can be seen are doubled, instead of Rudder's doubling of every face. The copy sits exactly on the original; faces

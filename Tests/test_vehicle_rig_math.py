@@ -268,5 +268,16 @@ class TwoSidedRoleGuard(unittest.TestCase):
         self.assertIn("bmesh.ops.reverse_faces(_twb, faces=[_g for _g in _ret['geom'] if isinstance(_g, bmesh.types.BMFace)])", body)
 
 
+class PreviewRigGuard(unittest.TestCase):
+    # 2026-11-14: the in-process rig (HafModelRig) is sampled and rendered in one editor frame. Without this flag Unity draws the
+    # skin of the first pose for ever - the Vehicle Lab's Generate preview stood still while its bones turned. Unity itself is the
+    # only judge of the picture (a batch render at four clip times: identical without the flag, different with it); this keeps
+    # the line from being dropped.
+    def test_the_rig_skins_at_every_render(self):
+        rig = (SCRIPT.parents[1] / "HafModelRig.cs").read_text(encoding="utf-8")
+        self.assertEqual(1, rig.count("smr.forceMatrixRecalculationPerRender = true;"))
+        self.assertLess(rig.index("var smr = host.AddComponent<SkinnedMeshRenderer>();"), rig.index("smr.forceMatrixRecalculationPerRender = true;"))
+
+
 if __name__ == "__main__":
     unittest.main()

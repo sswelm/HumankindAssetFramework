@@ -2506,10 +2506,10 @@ public class VehicleLabWindow : EditorWindow
                 { imp.animationType = ModelImporterAnimationType.Generic; imp.importAnimation = true; imp.SaveAndReimport(); }
                 BuildPreview(prevRel);
             }
-            // A FRESH RIG PLAYS (2026-11-14, user: "play doesn't work anymore" on a submarine's propeller). The pause is a saved
-            // window setting, so a pause left on while marking parts - where the probe's turntable has nothing to play - held the
-            // new rig on its first frame, and nothing said which of the two it was. Generate starts the clip, and the Console
-            // says what the preview holds.
+            // A FRESH RIG PLAYS (2026-11-14, user: "play doesn't work anymore" on a submarine's propeller). The cause was the
+            // skin not following the pose (HafModelRig: forceMatrixRecalculationPerRender); this line is what found it - it
+            // said the preview held a clip and was playing while the picture stood still. Kept, with the pause cleared: the
+            // pause is a saved window setting, and a fresh rig held on its first frame reads as the same fault.
             if (inst != null)
             {
                 previewPaused = false; spinT = 0f;
