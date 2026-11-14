@@ -80,6 +80,13 @@ public static class HafModelRig
                 smr.bones = sk.Joints.Select(j => j >= 0 && j < tr.Length ? tr[j] : root.transform).ToArray();
                 smr.rootBone = sk.Skeleton >= 0 && sk.Skeleton < tr.Length ? tr[sk.Skeleton] : (sk.Joints.Length > 0 && sk.Joints[0] < tr.Length ? tr[sk.Joints[0]] : root.transform);
                 smr.updateWhenOffscreen = true;   // the bounds follow the pose: the picker frames and culls by them
+                // THE PICTURE FOLLOWS THE POSE (2026-11-14, user: "play doesn't work anymore"). A preview samples a clip onto the
+                // bones and renders at once, with no player loop in between - and Unity then draws the skin it computed for the
+                // FIRST pose. Measured in a batch Unity on the Ribauldequin (wheels on Wheel_00/01): the bones turned at every clip
+                // time and four renders were pixel-identical; with this flag each differed. The Lab's Generate preview has been
+                // this rig since the C# route became its default (2026-10-27); the Blender route's preview is an imported FBX
+                // prefab, which Unity animates itself, so it played.
+                smr.forceMatrixRecalculationPerRender = true;
                 smr.sharedMaterials = mb.mats;
                 r.MeshOf[i] = host.transform;
                 r.SkinnedMeshes++;

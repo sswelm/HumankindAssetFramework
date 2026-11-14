@@ -269,6 +269,50 @@ public static class UnityVehicleGenerateTests
         foreach(var filter in root.GetComponentsInChildren<MeshFilter>())points.AddRange(filter.sharedMesh.vertices.Select(v=>filter.transform.TransformPoint(v)));
         return points;
     }
+    static void GeneratedPlayback()
+    {
+        foreach (string backend in new[] { "csharp", "blender" })
+        {
+            var w = ScriptableObject.CreateInstance<VehicleLabWindow>();
+            string clipboard = EditorGUIUtility.systemCopyBuffer;
+            string playback = null;
+            Application.LogCallback capture = (message, trace, type) => { if (message.StartsWith("[VehicleLab] preview:", StringComparison.Ordinal)) playback = message; };
+            Application.logMessageReceived += capture;
+            try
+            {
+                Method("LoadRecipeFromPath").Invoke(w, new object[] { Path.Combine(fixtures, "recipes/fx_r_wheels.json") });
+                string path = Path.GetFullPath("Logs/playback/" + backend + "/fresh.glb");
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                Field("outGlb").SetValue(w, path);
+                Field("generateRoute").SetValue(w, backend);
+                Field("previewPaused").SetValue(w, true);
+                Field("spinT").SetValue(w, 17f);
+                Field("lastTick").SetValue(w, EditorApplication.timeSinceStartup - 120.0);
+                double started = EditorApplication.timeSinceStartup;
+                Method("Vehicleize").Invoke(w, null);
+                var go = (GameObject)Field("inst").GetValue(w);
+                var clip = (AnimationClip)Field("spinClip").GetValue(w);
+                Check(backend + " Generate builds a playable preview", go != null && clip != null && File.Exists(path), (string)Field("status").GetValue(w));
+                if (go == null || clip == null) continue;
+                Check(backend + " Generate resumes and rewinds", !(bool)Field("previewPaused").GetValue(w) && (float)Field("spinT").GetValue(w) == 0f, "old pause and playhead cleared");
+                Check(backend + " Generate logs the actual preview clip", playback != null && playback.Contains("playing '" + clip.name + "'"), playback ?? "no preview diagnostic");
+                double clock = (double)Field("lastTick").GetValue(w);
+                Check(backend + " Generate rebases the preview clock", clock >= started, "clock is " + (EditorApplication.timeSinceStartup - clock).ToString("0.###") + " seconds old");
+                Method("Tick").Invoke(w, null);
+                float time = (float)Field("spinT").GetValue(w);
+                Check(backend + " first tick starts at the fresh clip", time >= 0f && time < 1f, "playhead " + time.ToString("0.###") + " seconds");
+                clip.SampleAnimation(go, 0f); var rest = Rendered(go);
+                clip.SampleAnimation(go, clip.length * .25f); var moving = Rendered(go);
+                Check(backend + " generated preview actually moves", rest.Count == moving.Count && rest.Zip(moving, (a, b) => (a - b).sqrMagnitude).Any(d => d > 1e-8f), "sampled skinned vertices change");
+            }
+            finally
+            {
+                Application.logMessageReceived -= capture;
+                EditorGUIUtility.systemCopyBuffer = clipboard;
+                Method("DestroyPreview").Invoke(w, null); UnityEngine.Object.DestroyImmediate(w);
+            }
+        }
+    }
     static void Preview(string key)
     {
         string recipe=Path.Combine(fixtures,"recipes",key+".json");
@@ -413,7 +457,7 @@ public static class UnityVehicleGenerateTests
     public static void RunPreview()
     {
         output=Arg("-hafGenerateOutput");fixtures=Arg("-hafGenerateFixtures");
-        try { SecondSourceFingerprint(); foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key); }
+        try { GeneratedPlayback(); SecondSourceFingerprint(); foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key); }
         catch(Exception e){Check("exception",false,e.ToString());}
         Row("TOTAL failed "+failed);EditorApplication.Exit(failed==0?0:1);
     }
@@ -433,7 +477,7 @@ public static class UnityVehicleGenerateTests
             var keys=new[]{"fx_e2_stances","fx_e3_deploy","fx_f_global","fx_f_layers","fx_f_merge_textures","fx_f_uv_inactive","fx_f_signed_zero"};
             var jobs=keys.Select(k=>Path.Combine(fixtures,"recipes",k+".json")).ToArray();
             ParallelNormals();NativeRigMeshPersistence();ImageEncodingParity();Availability();SecondSourceFingerprint();Persistence(jobs[0]);StaleBaseline();Recipes("fixtures",jobs,"Tools/fixture_goldens");
-            foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
+            GeneratedPlayback(); foreach(string key in new[]{"fx_e2_stances","fx_e3_deploy","fx_f_layers"})Preview(key);
             string saved=Arg("-hafGenerateRecipes");if(Directory.Exists(saved))Recipes("saved",Directory.GetFiles(saved,"*.json"),"Tools/lab_golden");else Check("saved recipes",false,"recipes not found");
         }
         catch(Exception e){Check("exception",false,e.ToString());}
