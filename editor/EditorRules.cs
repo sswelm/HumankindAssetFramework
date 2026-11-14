@@ -772,6 +772,13 @@ public static class NaturalOrder
 /// <summary>Vehicle Lab decisions over the Blender probe's stdout contract (VehicleLabWindow calls these; VehicleLabRulesTests locks them).</summary>
 public static class VehicleLabRules
 {
+    /// <summary>Geometry-only Generate work, which is unavailable on the source-skeleton fast path.</summary>
+    public static bool HasGeometryWork(bool fastPath, bool facingRequested, bool flipMarked, bool twoSidedMarked, bool reductionRequested)
+        => !fastPath && (facingRequested || flipMarked || twoSidedMarked || reductionRequested);
+
+    public static string TwoSidedFastPathRefusal(bool fastPath, bool marked)
+        => fastPath && marked ? "Two-sided needs mesh parts. Disable Use source skeleton to repair the marked faces." : null;
+
     // THE SOURCE GUARD (review 2026-09-27): Generate's Output GLB is never one of its source models - the raw one or the
     // second (merged) one. The comparison is GlbDisconnectedParts.GuardPaths' (full paths, case-insensitive), repeated
     // here because the drills compile these rules without the GLB core. Returns the Lab's refusal, or null. A malformed

@@ -2397,6 +2397,27 @@ with all animation keys emitted. Color layers are also retained in their own poi
 corner colors move with mirrored faces, and mesh copies own their color buffers; focused unit tests cover these
 attributes, which the current scene-row format does not record.
 
+**The Two-sided role's export pass (2026-11-14) is held in Blender alone.** The C# leaves a job that carries `twosided=` by name
+(`BlenderVehicleRig.TwoSidedLeave`), so no stage comparison reaches the pass. `tools/vehiclerig-drill/blender_two_sided_check.py`
+runs the production script on the fixture `fx_two_sided` (`recipes_twosided`: one Tower mesh of a closed cube wound outward, a
+closed cube wound inside-out, a free-standing sheet, an authored opposite pair, and a sheet under a cover in a walled well that no
+straight line reaches from outside) and holds the result to the INPUT: the log's counts (16 doubled, 16 left, 4 twins, 16 new
+vertices); the pieces' face counts (12, 24, 4, 4, 4); the outward cube untouched; every doubled face with exactly one partner on
+its own position, wound the other way; the pair untouched. The review of PR #283 adds `fx_two_sided_small` and
+`fx_two_sided_thin`: a closed cube of side 0.001 and a slab of thickness 0.0001 beside a box 1,000 units away. Both must
+keep all 12 original triangles and 8 vertices, with no doubled faces. The ray bias must not skip an intervening wall;
+backward rays pull its origin back until this is true. The small-cube case also verifies that a direct `rigfast` call
+refuses the Two-sided repair instead of silently ignoring it. Three `TWOSIDED PASS` rows are required. Planted once, each refused: the
+pass skipped, the twin rule off, the open-pocket test off (the well's sheet is then missed), the front side tested instead of the
+back, every face doubled, the copy not reversed, the copy moved.
+Pure tests also hold ray-origin retreat across several walls in both directions, and the Lab's Generate gate treats
+Two-sided alone as geometry work while refusing it on the source-skeleton fast path.
+
+The pass's design was decided by a see-through census on the U-boat part it was written for (rays from 301 outside directions
+the pass does not use; a ray counts when it meets a culled back with nothing drawn within 1.5 insets behind): the source 4,529
+of 506,759 rays; Rudder's all-doubled 23,516; a first per-face version that also reversed faces and inset its copies 2,189
+(297 from reversals, 1,241 from copies sticking out); coincident copies, no reversal and the pocket test 8.
+
 **Step (c), stage 2 of item (5), the weld tiers (2026-10-15).** `editor/BlenderVehicleRig.Stage2.cs` + `editor/BlenderWeld.cs`
 are the script's SOURCE-SIDE reduction tiers in C#, held by `vehiclerig.exe --stages 2` after stage 1 on the same rows. Per
 tier (DEFAULT, RIGGING, SHROUD, RAILING, STRUCTURE, BODY, OAR, SAIL, RUDDER, WHEEL, GUN, WINDOW, FLIP, PRESERVE, DETAIL; skipped without

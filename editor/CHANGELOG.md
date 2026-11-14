@@ -5,6 +5,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: a Two-sided role** (2026-11-14, user request). For a part that mixes closed solids with single
+  sheets (a conning tower with periscopes and a one-sheet wall): mark it **Two-sided** and only the faces whose back
+  can be seen are doubled, instead of Rudder's doubling of every face. The copy sits exactly on the original; faces
+  that already have an opposite twin are kept; nothing is reversed. The Generate log reports the counts. Show-only
+  filter included; no reduce dial yet.
 - **Model Factory: *Reduce to ~tris* now goes up to 250,000** (2026-11-13, user request; was 200,000). The shared
   pawn buffer is still the real budget: check F8 ▸ Mesh Budget in game.
 - **Vehicle Lab: a Railing role with its own reduce dial** (2026-11-12, user request). Deck railings, stanchions,

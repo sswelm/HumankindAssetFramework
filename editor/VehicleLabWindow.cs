@@ -74,7 +74,7 @@ public class VehicleLabWindow : EditorWindow
     // geometry on a sailing ship and want a harder cut than the running rigging. Unlike Rigging it never rides the
     // Sail bone: it holds the mast up, so it stays standing while the canvas gathers. ALWAYS APPENDED LAST: Part.role
     // is serialized as its integer, so inserting a value anywhere else renumbers every saved recipe's roles.
-    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase, Caterpillar, Gun, Rotor, TailRotor, Trail, Muzzle, Cradle, Oar, Sail, Rigging, Structure, Flag, Rudder, Preserve, Flip, Detail, Shroud, Window, Railing }   // Window (2026-09-25, user: "add the reducable part type Window"): glazing as a weld reduce tier of its own; appended last, see above. Railing (2026-11-12, user: "add Railing as a new reducible classification"): deck railings, stanchions, guard wires, ladders - a SOUP tier like Rigging and Shroud with its own dial; appended last
+    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase, Caterpillar, Gun, Rotor, TailRotor, Trail, Muzzle, Cradle, Oar, Sail, Rigging, Structure, Flag, Rudder, Preserve, Flip, Detail, Shroud, Window, Railing, TwoSided }   // TwoSided (2026-11-14, user: "the double walling should be applied discriminately"): a face whose back can be seen is doubled, every other face left - for a part that mixes closed solids with single sheets; appended last. Window (2026-09-25, user: "add the reducable part type Window"): glazing as a weld reduce tier of its own; appended last, see above. Railing (2026-11-12, user: "add Railing as a new reducible classification"): deck railings, stanchions, guard wires, ladders - a SOUP tier like Rigging and Shroud with its own dial; appended last
     [Serializable] class Part { public string name; public int verts; public Vector3 center, size; public Role role;
         public int vis = -1;   // probe's escape-ray verdict: 1 = external (visible from outside), 0 = interior (never visible — strippable), -1 = unclassified (pre-visibility probe)
         public string bone = "";   // rigged sources: the bone this shard is weighted to (probe 2026-08-20) — lets a BONE row highlight its shards
@@ -86,7 +86,7 @@ public class VehicleLabWindow : EditorWindow
     static bool IsPlaced(Part p) => p.offset.sqrMagnitude > 1e-10f || (p.scale - Vector3.one).sqrMagnitude > 1e-10f;
 
     // The Generate-time fix skips these roles entirely (authored winding wins there) — the ⟲ row tag must agree.
-    static bool FixSkipsRole(Role r) => r == Role.Sail || r == Role.Oar || r == Role.Flag || r == Role.Rudder || r == Role.Preserve;
+    static bool FixSkipsRole(Role r) => r == Role.Sail || r == Role.Oar || r == Role.Flag || r == Role.Rudder || r == Role.Preserve || r == Role.TwoSided;
 
     // Everything an assignment session builds is [SerializeField]: a DOMAIN RELOAD (any recompile) must never eat
     // the marked roles again — the field incident that motivated recipes in the first place.
@@ -309,7 +309,7 @@ public class VehicleLabWindow : EditorWindow
         flatShareFor = inst;
     }
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
-    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar", "Gun", "Rotor", "Tail rotor", "Trail", "Muzzle", "Cradle", "Oar", "Sail", "Rigging", "Structure", "Flag", "Rudder", "Preserve", "Flip", "Detail", "Shroud", "Window", "Railing" };
+    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar", "Gun", "Rotor", "Tail rotor", "Trail", "Muzzle", "Cradle", "Oar", "Sail", "Rigging", "Structure", "Flag", "Rudder", "Preserve", "Flip", "Detail", "Shroud", "Window", "Railing", "Two-sided" };
     bool MatchesFilter(Role r) => partFilter == 1 ? (r == Role.Default || r == Role.Edgecase)
                                 : partFilter == 2 ? r == Role.Default
                                 : partFilter == 3 ? r == Role.Wheel
@@ -335,7 +335,8 @@ public class VehicleLabWindow : EditorWindow
                                 : partFilter == 23 ? r == Role.Detail
                                 : partFilter == 24 ? r == Role.Shroud
                                 : partFilter == 25 ? r == Role.Window
-                                : partFilter == 26 ? r == Role.Railing : true;
+                                : partFilter == 26 ? r == Role.Railing
+                                : partFilter == 27 ? r == Role.TwoSided : true;
     // Roles that SPIN (get a bone + the Spin action): wheels and both rotor kinds. Used for the Generate-enable gate,
     // the spin-section summary, Verify, and the "inside the wheel" test — so a rotorcraft with no Wheel parts still rigs.
     static bool IsSpinner(Role r) => r == Role.Wheel || r == Role.Rotor || r == Role.TailRotor;
@@ -1384,13 +1385,16 @@ public class VehicleLabWindow : EditorWindow
             // even though the mesh path handles a motion-less rig fine. Fast path excluded: geometry work is
             // inert there (the info box above says so).
             bool TierActive(Role rr, float pct) => pct > 0.5f && list.Any(x => x.role == rr);
-            bool geometryWork = !FastPath && (doubleSided || fixInsideOut || list.Any(x => x.role == Role.Flip)
-                || TierActive(Role.Rigging, riggingReducePct) || TierActive(Role.Structure, structureReducePct)
+            bool reduceWork = TierActive(Role.Rigging, riggingReducePct) || TierActive(Role.Structure, structureReducePct)
                 || TierActive(Role.Body, bodyReducePct) || TierActive(Role.Oar, oarReducePct)
                 || TierActive(Role.Sail, sailReducePct) || TierActive(Role.Rudder, rudderReducePct)
                 || TierActive(Role.Wheel, wheelReducePct) || TierActive(Role.Flip, flipReducePct)
                 || TierActive(Role.Preserve, preserveReducePct) || TierActive(Role.Detail, detailReducePct)
-                || TierActive(Role.Default, defaultReducePct) || TierActive(Role.Shroud, shroudReducePct) || TierActive(Role.Turret, turretReducePct) || TierActive(Role.Gun, gunReducePct) || TierActive(Role.Window, windowReducePct) || TierActive(Role.Railing, railingReducePct));
+                || TierActive(Role.Default, defaultReducePct) || TierActive(Role.Shroud, shroudReducePct) || TierActive(Role.Turret, turretReducePct) || TierActive(Role.Gun, gunReducePct) || TierActive(Role.Window, windowReducePct) || TierActive(Role.Railing, railingReducePct);
+            bool twoSidedMarked = list.Any(x => x.role == Role.TwoSided);
+            bool geometryWork = VehicleLabRules.HasGeometryWork(FastPath, doubleSided || fixInsideOut,
+                list.Any(x => x.role == Role.Flip), twoSidedMarked, reduceWork);
+            string fastTwoSided = VehicleLabRules.TwoSidedFastPathRefusal(FastPath, twoSidedMarked);
             bool wantSailFold = sailFoldIdle && list.Any(x => x.role == Role.Sail);
             bool fastSailFold = FastPath && wantSailFold;
             bool hasModel2 = !string.IsNullOrWhiteSpace(srcFile2);   // a merge is real geometry work: two static hulls may need no spinner at all
@@ -1398,7 +1402,7 @@ public class VehicleLabWindow : EditorWindow
             bool wantBright = Mathf.Abs(model1Bright - 1f) > 0.005f || (hasModel2 && Mathf.Abs(model2Bright - 1f) > 0.005f);   // PR #34 review P4: the documented standalone brightness must satisfy the gate
             bool wantFlagFold = flagFoldOn && list.Any(x => x.role == Role.Flag);   // the flag fold needs the generated Flag bone + Furl clip
             bool fastFlagFold = FastPath && wantFlagFold;
-            bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && fastFlip == 0 && !fastWave && !fastSailFold && !fastModel2 && !fastFlagFold && fastWheels > 0)
+            bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && fastFlip == 0 && fastTwoSided == null && !fastWave && !fastSailFold && !fastModel2 && !fastFlagFold && fastWheels > 0)
                                    : (wheels > 0 || oars > 0 || wantWave || geometryWork || wantSailFold || hasModel2 || wantBright || wantFlagFold);
             // The rest of Vertices control (facing fixes + reduce dials) is INERT on the fast path — rigfast
             // exports the source mesh untouched. Not a reject (dials are passive), but say it (PR #28 review:
@@ -1419,6 +1423,8 @@ public class VehicleLabWindow : EditorWindow
             if (fastFlip > 0)
                 EditorGUILayout.HelpBox("Flip (winding surgery) doesn't run on the source-skeleton fast path — rigfast " +
                     "exports the source geometry as-is. Disable Use source skeleton to flip mesh parts.", MessageType.Warning);
+            if (fastTwoSided != null)
+                EditorGUILayout.HelpBox(fastTwoSided, MessageType.Warning);
             if (fastWave)
                 EditorGUILayout.HelpBox("Wave rock doesn't run on the source-skeleton fast path — disable Use source " +
                     "skeleton to rig the mesh with a rocking hull.", MessageType.Warning);
@@ -1442,11 +1448,12 @@ public class VehicleLabWindow : EditorWindow
                         fastPathOars ? "Disable the source-skeleton fast path before recovering oars from merged mesh geometry."
                         : fastRotors > 0 ? "Mark the spinning source bone as Wheel, or disable the source-skeleton fast path."
                         : fastFlip > 0 ? "Disable the source-skeleton fast path to flip mesh-part winding."
+                        : fastTwoSided != null ? fastTwoSided
                         : fastWave ? "Disable the source-skeleton fast path to use Wave rock."
                         : fastSailFold ? "Disable the source-skeleton fast path to use Fold sail at idle."
                         : fastModel2 ? "Disable the source-skeleton fast path to merge a second model."
                         : !canRig ? (FastPath ? "Mark at least one source bone as Wheel — the fast path spins wheel bones."
-                                              : "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar, set a Wave rock amplitude — or request geometry work (Flip, a facing fix, an active reduce dial): a Generate can be pure geometry surgery.")
+                                              : "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar, set a Wave rock amplitude — or request geometry work (Flip, Two-sided, a facing fix, an active reduce dial): a Generate can be pure geometry surgery.")
                         : "Generates the rig, actions, GLB and preview with the selected backend."), GUILayout.Height(28)))
                     Vehicleize();
         }
@@ -2259,6 +2266,8 @@ public class VehicleLabWindow : EditorWindow
     void Vehicleize()
     {
         lastStdout = ""; lastGenerateRoute = ""; lastGenerateFallback = "";
+        string twoSidedRefusal = VehicleLabRules.TwoSidedFastPathRefusal(FastPath, ActiveParts.Any(p => p.role == Role.TwoSided));
+        if (twoSidedRefusal != null) { status = twoSidedRefusal; return; }
         if (FastPath && ActiveParts.Any(p => p.role == Role.Oar))
         {
             status = "Oar recovery needs mesh parts. Disable Use source skeleton, Probe parts, then mark the merged oar meshes.";
@@ -2395,6 +2404,9 @@ public class VehicleLabWindow : EditorWindow
         // RAILING (2026-11-12): deck railings' own soup tier - tagged like windowreduce=, the names always sent (see above).
         string railingFile = Path.Combine(projRoot, prevDir, baseName + "_railing.txt").Replace('\\', '/');
         File.WriteAllLines(railingFile, src.Where(p => p.role == Role.Railing).Select(p => p.name).ToArray());
+        // TWO-SIDED (2026-11-14): the file is always written, the tag sent only when a part is marked (VehicleRigArgs.twoSidedMarked).
+        string twoSidedFile = Path.Combine(projRoot, prevDir, baseName + "_twosided.txt").Replace('\\', '/');
+        File.WriteAllLines(twoSidedFile, src.Where(p => p.role == Role.TwoSided).Select(p => p.name).ToArray());
         // DETAIL (2026-09-08): a plain reduction tier of its own — welds to the hull like Body.
         string detailFile = Path.Combine(projRoot, prevDir, baseName + "_detail.txt").Replace('\\', '/');
         File.WriteAllLines(detailFile, src.Where(p => p.role == Role.Detail).Select(p => p.name).ToArray());
@@ -2409,7 +2421,7 @@ public class VehicleLabWindow : EditorWindow
             { "wheels", wheelsFile }, { "turrets", turretsFile }, { "ignore", ignoreFile }, { "tracks", tracksFile }, { "guns", gunsFile }, { "rotors", rotorsFile },
             { "tailrotors", tailrotorsFile }, { "trails", trailsFile }, { "muzzles", muzzlesFile }, { "cradles", cradlesFile }, { "oars", oarsFile }, { "sails", sailsFile },
             { "rigging", riggingFile }, { "structure", structureFile }, { "bodies", bodiesFile }, { "flags", flagsFile }, { "rudders", ruddersFile }, { "preserve", preserveFile },
-            { "flip", flipFile }, { "detail", detailFile }, { "default", defaultFile }, { "shroud", shroudFile }, { "window", windowFile }, { "railing", railingFile },
+            { "flip", flipFile }, { "detail", detailFile }, { "default", defaultFile }, { "shroud", shroudFile }, { "window", windowFile }, { "railing", railingFile }, { "twosided", twoSidedFile },
         }, PartTxFile(projRoot, prevDir, baseName));
         lastRigArgLine = VehicleRigArgLine.RigArgLine(rigArgs);
         string stdout;
@@ -2561,6 +2573,7 @@ public class VehicleLabWindow : EditorWindow
         oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct,
         riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct,
         wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, shroudReducePct = shroudReducePct, turretReducePct = turretReducePct, gunReducePct = gunReducePct,
+        twoSidedMarked = ActiveParts.Any(p => p.role == Role.TwoSided),
         windowReducePct = windowReducePct, railingReducePct = railingReducePct, defaultReducePct = defaultReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag,
         flagFoldOn = flagFoldOn, flagFoldDeg = flagFoldDeg, flagFoldFrames = flagFoldFrames, srcFile2 = srcFile2, model2OffX = model2Off.x, model2OffY = model2Off.y, model2OffZ = model2Off.z,
         model2RotX = model2Rot.x, model2RotY = model2Rot.y, model2RotZ = model2Rot.z, model2ScaleX = model2Scale.x, model2ScaleY = model2Scale.y, model2ScaleZ = model2Scale.z,

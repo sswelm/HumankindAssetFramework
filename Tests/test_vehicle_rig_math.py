@@ -11,7 +11,7 @@ import unittest
 SCRIPT = Path(__file__).parents[1] / "editor" / "Tools~" / "vehicle_rig.py"
 SOURCE = SCRIPT.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE, filename=str(SCRIPT))
-PURE_NAMES = {"_fitted_cycle_count", "_oar_recovery_metrics", "_merge2_scale", "_tagged_reduce_pct", "_tagged_names_pct", "_rigid_link_budget"}
+PURE_NAMES = {"_fitted_cycle_count", "_oar_recovery_metrics", "_merge2_scale", "_tagged_reduce_pct", "_tagged_names_pct", "_rigid_link_budget", "_two_sided_origin"}
 PURE_DEFS = [node for node in TREE.body if isinstance(node, ast.FunctionDef) and node.name in PURE_NAMES]
 if {node.name for node in PURE_DEFS} != PURE_NAMES:
     raise RuntimeError("Vehicle Lab pure helper contract changed; update this test deliberately")
@@ -20,6 +20,28 @@ exec(compile(ast.Module(body=PURE_DEFS, type_ignores=[]), str(SCRIPT), "exec"), 
 
 
 class VehicleRigMathTests(unittest.TestCase):
+    def test_two_sided_ray_bias_never_skips_an_intervening_wall(self):
+        class Planes:
+            def __init__(self, positions):
+                self.positions = positions
+
+            def ray_cast(self, origin, direction, limit):
+                hits = [((p - origin) / direction, i, p) for i, p in enumerate(self.positions)
+                        if 0 <= (p - origin) / direction <= limit]
+                if not hits:
+                    return (None, None, None, None)
+                distance, index, point = min(hits)
+                return (point, None, index, distance)
+
+        origin = NAMESPACE["_two_sided_origin"]
+        for sign in (-1.0, 1.0):
+            walls = Planes([0.0, sign * 1e-5, sign * 1e-4, sign * 1e-3])
+            start = origin(walls, 0.0, sign, 0.01, list(range(4)), 0)
+            self.assertGreater(sign * start, 0.0)
+            self.assertLess(sign * start, 1e-5)
+            # A single sheet has no wall to jump: keep the original bias, on either side.
+            self.assertEqual(sign * 0.01, origin(Planes([0.0]), 0.0, sign, 0.01, [0], 0))
+
     def test_rigid_links_respect_all_role_bones_and_exhausted_capacity(self):
         budget = NAMESPACE["_rigid_link_budget"]
         for existing, removable, tracks, expected in ((23, 18, 2, 60), (93, 18, 2, 25),
@@ -147,7 +169,7 @@ class RailingTierGuard(unittest.TestCase):
         win = SOURCE.index('_tagged_names_pct(argv, "windowreduce")')
         rai = SOURCE.index('_tagged_names_pct(argv, "railingreduce")')
         self.assertLess(win, rai)
-        self.assertIn("shroud_names, window_names, railing_names):", SOURCE)
+        self.assertIn("shroud_names, window_names, railing_names,", SOURCE)
         loop = SOURCE[SOURCE.index("for _rlabel, _rnames, _rpct in ("):]
         loop = loop[:loop.index(chr(10))]
         self.assertIn('("SHROUD", shroud_names, shroud_reduce), ("RAILING", railing_names, railing_reduce), ("STRUCTURE"', loop)
@@ -212,6 +234,38 @@ class BoneBudgetGuard(unittest.TestCase):
         self.assertIn("past the 126-bone budget (bone indices break past 127 in-game", stage5)
         for text in (SOURCE, rig_anim, port, stage5):
             self.assertNotIn("> 240", text); self.assertNotIn("= 240", text)
+
+
+class TwoSidedRoleGuard(unittest.TestCase):
+    # 2026-11-14 (user: "the double walling should be applied discriminately"): twosided=@<names> marks parts whose faces are
+    # doubled or left one by one at export. The pass itself needs Blender (tools/vehiclerig-drill/
+    # blender_two_sided_check.py, in the vehicle_rig drill); this keeps the wiring around it.
+    def test_the_tag_is_optional_and_its_names_are_marked(self):
+        self.assertIn('_tsarg = next((a for a in argv if a.startswith("twosided=")), None)', SOURCE)
+        self.assertIn('twosided_names = namelist(_tsarg[9:]) if _tsarg is not None and _tsarg[9:].strip() else []', SOURCE)
+        marked = SOURCE[SOURCE.index("_role_marked = set()"):]
+        self.assertIn("twosided_names):", marked[:marked.index("_role_marked.update(_rl)")])
+
+    def test_a_marked_part_keeps_its_own_mesh_and_both_older_passes_leave_it(self):
+        self.assertIn('_k = "__two__" + o.name', SOURCE)
+        fix = SOURCE[SOURCE.index("if fix_inside_out:\n    # NOT a blind recalc"):]
+        self.assertIn('_fo.name.startswith("Mesh___two__")', fix[:fix.index("_fb = bmesh.new()")])
+        targets = SOURCE[SOURCE.index("_dtargets = (["):]
+        self.assertIn('not o.name.startswith("Mesh___two__")', targets[:targets.index("if double_sided else")])
+
+    def test_the_pass_measures_the_model_before_any_face_is_doubled(self):
+        self.assertLess(SOURCE.index("    _two_sided_pass(_two_targets, _dall)"), SOURCE.index("_dtargets = (["))
+        self.assertLess(SOURCE.index("VEHICLE FLIP applied"), SOURCE.index("    _two_sided_pass(_two_targets, _dall)"))
+
+    def test_only_an_opposite_face_on_the_same_vertices_is_a_twin(self):
+        body = SOURCE[SOURCE.index("def _two_sided_pass(targets, everything):"):SOURCE.index("_dall = [o for o in bpy.context.scene.objects")]
+        self.assertIn("if any(_n2.dot(_n) < 0.0 for _n2 in _twin.get(", body)
+        # the back side only, a pocket test on the longest blocked ray, a coincident copy and no reversal in place
+        self.assertIn("if _d.dot(_n) > -1e-3:", body)
+        self.assertIn("any(_bvh.ray_cast(_mid, _d2)[0] is None for _d2 in _dirs)", body)
+        self.assertNotIn("_loff", body); self.assertNotIn("_flip", body)
+        self.assertEqual(1, body.count("bmesh.ops.reverse_faces("))
+        self.assertIn("bmesh.ops.reverse_faces(_twb, faces=[_g for _g in _ret['geom'] if isinstance(_g, bmesh.types.BMFace)])", body)
 
 
 if __name__ == "__main__":
