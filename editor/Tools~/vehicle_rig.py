@@ -1036,6 +1036,15 @@ try:
     railing_names = namelist(_rlnames) if _rlnames.strip() else []
 except Exception as _e:
     print("VEHICLE ERROR: malformed railingreduce argument: %s" % _e); sys.exit(1)
+# TWO-SIDED (tagged, 2026-11-14, user: "the double walling should be applied discriminately"): parts that mix closed
+# solids with single sheets in ONE welded mesh (a conning tower: thick walls, periscope tubes, and a wall that is one
+# sheet). Sail/Flag/Rudder double EVERY face and inset the copy by a fraction of the whole model, which fattens or
+# shreds the thin closed parts. This role doubles, at export, only the faces whose BACK can be seen (the pass
+# is _two_sided_pass below). The tag carries the names file and is sent only when a part is marked, so an unmarked
+# recipe's argument line is unchanged.
+#   twosided=@<names file>
+_tsarg = next((a for a in argv if a.startswith("twosided=")), None)
+twosided_names = namelist(_tsarg[9:]) if _tsarg is not None and _tsarg[9:].strip() else []
 # SAIL IDLE FOLD (argv[71], 2026-09-09, vanilla-parity request): "1" = at idle the canvas FOLDS at the yard
 # (visible bundled sail, like the vanilla triaconter's brailed-up cloth) instead of the 180-degree strike below
 # the keel. ROTATION-ONLY by construction: the canvas is band-skinned to a Sail->SailF1->SailF2 chain and the
@@ -1196,6 +1205,9 @@ if mode == "rigfast":
     if flip_names:
         print("VEHICLE ERROR: Flip (winding surgery) is not supported on the source-skeleton fast path — rigfast exports the source geometry as-is; disable the fast path to flip mesh parts")
         sys.exit(1)
+    if twosided_names:
+        print("VEHICLE ERROR: Two-sided needs mesh parts — disable the source-skeleton fast path to repair the marked faces")
+        sys.exit(1)
     if sail_fold:
         print("VEHICLE ERROR: Fold sail at idle needs the generated Sail fold chain (new bones + band skinning) — the source-skeleton fast path keeps the artist skeleton; disable the fast path or the fold option")
         sys.exit(1)
@@ -1278,7 +1290,8 @@ if mode == "rigfast":
 _role_marked = set()
 for _rl in (wheel_names, turret_names, track_names, gun_names, rotor_names, tailrotor_names, trail_names,
             muzzle_names, cradle_names, oar_names, sail_names, rigging_names, structure_names, body_names,
-            flag_names, rudder_names, preserve_names, flip_names, detail_names, shroud_names, window_names, railing_names):
+            flag_names, rudder_names, preserve_names, flip_names, detail_names, shroud_names, window_names, railing_names,
+            twosided_names):
     _role_marked.update(_rl)
 for _fo in mesh_objects():
     # the import-time Icosphere purge is conservative (skips skinned ones); on THIS path all skinning is
@@ -2012,6 +2025,17 @@ if sail_found and rigging_names:
         rigging_on_sail.add(_rgo8.name)
     if rigging_on_sail:
         print("VEHICLE RIGGING: %d part(s) ride the Sail bone — struck/raised with the canvas, SINGLE-sided (own mesh, never doubled with Mesh_Sail)" % len(rigging_on_sail))
+
+# ---- TWO-SIDED parts: resolved to a name set, like rudders - own mesh through the join (the export pass finds them by
+# name, the inside-out fix and the global doubling leave them alone), skinned to the body ----
+twosided_by_name = set()
+for _fn3t in twosided_names:
+    _fo3t = find_opt(_fn3t)
+    if _fo3t is None:
+        print("VEHICLE WARN: two-sided part '%s' not found — skipped" % _fn3t); continue
+    twosided_by_name.add(_fo3t.name)
+if twosided_by_name:
+    print("VEHICLE TWO-SIDED: %d part(s) — a face whose back shows is doubled at export, every other face left" % len(twosided_by_name))
 
 # ---- RUDDER parts: resolved to a name set — they keep their own mesh through the join (identity is needed at
 # export for the double-siding, and at the flip pass for the exclusion), skinned to the body like Body parts ----
@@ -3059,6 +3083,8 @@ def _join_per_bone():
             _k = "__oar__" + o.name
         elif o.name in rudder_by_name:
             _k = "__rud__" + o.name
+        elif o.name in twosided_by_name:
+            _k = "__two__" + o.name   # TWO-SIDED: own mesh, found by name at export
         elif o.name in preserve_by_name:
             _k = "__keep__" + o.name   # PRESERVE: own mesh, so the flip and doubling passes can exempt it by name
         elif o.name in flip_by_name:
@@ -3958,7 +3984,7 @@ if fix_inside_out:
     _fall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
     _fxn = 0; _fxkept = 0
     for _fo in _fall:
-        if any(g.name.startswith("Oar_") or g.name in ("Sail", "Flag") for g in _fo.vertex_groups) or _fo.name.startswith("Mesh___rud__") or _fo.name.startswith("Mesh___keep__"):
+        if any(g.name.startswith("Oar_") or g.name in ("Sail", "Flag") for g in _fo.vertex_groups) or _fo.name.startswith("Mesh___rud__") or _fo.name.startswith("Mesh___keep__") or _fo.name.startswith("Mesh___two__"):
             continue   # (Flip-marked meshes stay IN this pool — the marked reversal below composes with this pass as an XOR)
         _fb = bmesh.new(); _fb.from_mesh(_fo.data); _fb.normal_update()
         _fb.verts.ensure_lookup_table(); _fb.faces.ensure_lookup_table()
@@ -4023,8 +4049,106 @@ if _flip_done:
 # Marked OAR meshes are NEVER doubled — not even under the global switch (review find 2026-09-05: the global
 # path used to include them): the Khalandian's blades ship as authored front/back sheet pairs, already
 # two-sided, and doubling them z-shimmered four near-coincident layers. The role's nature decides, both ways.
+# TWO-SIDED parts (2026-11-14): per FACE, by whether its BACK can be seen. From sample points on the face (the centre and
+# 60 % toward each corner), rays leave the back side in a fixed set of directions against the WHOLE model:
+#   a ray that hits nothing        -> the back is seen from outside
+#   no ray escapes, but the air    -> the back is seen from a pocket open to the outside (a cockpit's inner wall, seen only
+#   beside the face sees the sky      through a slot no fixed direction lines up with): the midpoint of the LONGEST back ray
+#                                     casts the same directions, and one escaping is enough
+# A face whose back is seen gets a reversed copy ON ITS OWN POSITIONS - an authored twin, as game rips ship them. Nothing
+# is ever reversed in place and the copy is not inset. Both were measured on the U-boat's conning tower (a see-through
+# census of 506,759 rays): reversing a face whose front the sampling missed opened new holes (297 rays), and a copy inset
+# by the doubling's 0.15 % of the model stuck out at edges and folds (1,241 rays, 3,270 with the pocket test); coincident
+# copies and no reversal left 8 rays, the source 4,529. A face that already has a twin (another face on exactly its
+# vertices, wound the other way) is left alone; a plain duplicate (same winding) is judged like any face. Runs BEFORE
+# the doubling below, so the model it measures against holds no copies. Decided on the rest geometry.
+def _two_sided_dirs(n):
+    _out = []
+    for _k in range(n):                                     # a Fibonacci sphere: fixed, even, no randomness
+        _z = 1.0 - 2.0 * (_k + 0.5) / n
+        _r = math.sqrt(max(0.0, 1.0 - _z * _z)); _ph = _k * math.pi * (3.0 - math.sqrt(5.0))
+        _out.append(Vector((_r * math.cos(_ph), _r * math.sin(_ph), _z)))
+    return _out
+
+def _two_sided_newell(pw):
+    _n = Vector((0.0, 0.0, 0.0))
+    for _i in range(len(pw)):
+        _a = pw[_i]; _b = pw[(_i + 1) % len(pw)]
+        _n += Vector(((_a.y - _b.y) * (_a.z + _b.z), (_a.z - _b.z) * (_a.x + _b.x), (_a.x - _b.x) * (_a.y + _b.y)))
+    return _n
+
+def _two_sided_origin(bvh, sample, direction, epsilon, owners, own):
+    # The initial bias may span a small closed solid in a much larger model. Walk it back until the
+    # segment from the face crosses no other surface; a backward ray must meet this face first.
+    step = epsilon
+    while True:
+        origin = sample + direction * step
+        if origin == sample:
+            return sample
+        hit = bvh.ray_cast(origin, -direction, step * 1.01)
+        if hit[0] is None or owners[hit[2]] == own:
+            return origin
+        step = max(0.0, min(step * 0.25, (step - hit[3]) * 0.25))
+
+def _two_sided_pass(targets, everything):
+    from mathutils.bvhtree import BVHTree
+    _vs = []; _ts = []; _owners = []; _twin = {}
+    for _o in everything:
+        _m = _o.data; _m.calc_loop_triangles(); _base = len(_vs); _mw = _o.matrix_world
+        _vs.extend(_mw @ _v.co for _v in _m.vertices)
+        _ts.extend(tuple(_base + _i for _i in _lt.vertices) for _lt in _m.loop_triangles)
+        _owners.extend((_o, _lt.polygon_index) for _lt in _m.loop_triangles)
+        for _p in _m.polygons:
+            _pw = [_vs[_base + _i] for _i in _p.vertices]
+            _twin.setdefault(frozenset(tuple(_q) for _q in _pw), []).append(_two_sided_newell(_pw))
+    _bvh = BVHTree.FromPolygons(_vs, _ts)
+    _dim = max((max(_p[_i] for _p in _vs) - min(_p[_i] for _p in _vs)) for _i in range(3)) if _vs else 1.0
+    _eps = max(1e-7, _dim * 1e-5)
+    _dirs = _two_sided_dirs(64)
+    for _o in targets:
+        _m = _o.data; _mw = _o.matrix_world
+        _both = []; _twinned = 0
+        for _p in _m.polygons:
+            _pw = [_mw @ _m.vertices[_i].co for _i in _p.vertices]
+            _n = _two_sided_newell(_pw)                           # in world space
+            if _n.length < 1e-20:
+                continue                                          # a degenerate face has no side
+            if any(_n2.dot(_n) < 0.0 for _n2 in _twin.get(frozenset(tuple(_q) for _q in _pw), ())):
+                _twinned += 1; continue
+            _n.normalize()
+            _c = sum(_pw, Vector((0.0, 0.0, 0.0))) / len(_pw)
+            _back = False
+            for _s in [_c] + [_c + (_q - _c) * 0.6 for _q in _pw]:
+                _far = 0.0; _mid = None
+                for _d in _dirs:
+                    if _d.dot(_n) > -1e-3:
+                        continue                                  # the back side's directions only
+                    _org = _two_sided_origin(_bvh, _s, _d, _eps, _owners, (_o, _p.index))
+                    _hit = _bvh.ray_cast(_org, _d)
+                    if _hit[0] is None:
+                        _back = True; break
+                    if _hit[3] > _far:
+                        _far = _hit[3]; _mid = _org + _d * (_far * 0.5)
+                if not _back and _mid is not None and any(_bvh.ray_cast(_mid, _d2)[0] is None for _d2 in _dirs):
+                    _back = True
+                if _back:
+                    break
+            if _back:
+                _both.append(_p.index)
+        _v0 = len(_m.vertices); _nf = len(_m.polygons)
+        if _both:
+            _twb = bmesh.new(); _twb.from_mesh(_m); _twb.faces.ensure_lookup_table()
+            _ret = bmesh.ops.duplicate(_twb, geom=[_twb.faces[_i] for _i in _both])
+            bmesh.ops.reverse_faces(_twb, faces=[_g for _g in _ret['geom'] if isinstance(_g, bmesh.types.BMFace)])
+            _twb.to_mesh(_m); _twb.free()
+        print("VEHICLE two-sided '%s': %d face(s) doubled (the back shows), %d left; %d authored twin(s) kept; %d -> %d verts"
+              % (_o.name, len(_both), _nf - len(_both), _twinned, _v0, len(_m.vertices)))
+
 _dall = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.data.polygons]
-_dtargets = ([o for o in _dall if not any(g.name.startswith("Oar_") for g in o.vertex_groups) and not o.name.startswith("Mesh___keep__")]
+_two_targets = [o for o in _dall if o.name.startswith("Mesh___two__")]
+if _two_targets:
+    _two_sided_pass(_two_targets, _dall)
+_dtargets = ([o for o in _dall if not any(g.name.startswith("Oar_") for g in o.vertex_groups) and not o.name.startswith("Mesh___keep__") and not o.name.startswith("Mesh___two__")]
              if double_sided else
              [o for o in _dall
               if (any(g.name in ("Sail", "Flag") for g in o.vertex_groups) or o.name.startswith("Mesh___rud__"))

@@ -110,6 +110,7 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Flag** | Banners/pennants — the **opposite of sails**: they fly at anchor and are struck below the keel while the ship moves (one Flag bone, held flipped through `Spin`). Double-sided. On a land unit the same strike makes the part **disappear into the terrain** while moving (a TOW's tripod); tick **Fold mode** in the Deploy section to fold it at its top hinge instead — see *Flag fold* below. |
 | **Rudder** | Double-sided and **always visible**, winding kept — for slabs the inside-out test cannot decide (a half-inverted rudder scores ~0; no flip can repair it). No bone, no clip. |
 | **Preserve** | Shipped as authored: never winding-flipped, never doubled (not even under the global Double-sided switch). Its **Preserve reduce (%)** dial (default 0 = byte-identical, the original promise) can opt reduction in. For parts every automatic pass keeps getting wrong. |
+| **Two-sided** | For a part that **mixes closed solids with single sheets** in one piece (a conning tower: thick walls, periscope tubes, and one wall that is a single sheet). Rudder doubles *every* face and pushes the copy inward by a fraction of the whole model, which fattens or shreds thin closed parts. Two-sided doubles **only the faces whose back can be seen** — from outside, or from an open pocket such as a cockpit — and puts the copy exactly on the original, like the pairs game rips ship. Every other face is left, and a face that already has an authored opposite twin is kept as it is. Nothing is reversed. The Generate log says how many (`VEHICLE two-sided '…'`). Rigid with the hull, no bone, no reduce dial. Runs through Blender (the C# route leaves the job by name). |
 | **Flip** (`F`) | Winding reversed **once** at export, applied on top of the inside-out fix — an XOR **per island**: islands the fix flipped land back on their authored winding, and with the fix off (or on islands the fix left alone) the mark alone reverses them. A part whose islands got *mixed* fix verdicts can't be fully repaired by Flip — split it in the Workshop, or use Rudder (double-sided) there. Own **Flip reduce (%)** dial. Mesh rig only (the fast path refuses it loudly). |
 | **Detail** | A plain reduction tier of its own (**Detail reduce (%)**) for ornament/trim geometry that wants a dial between Structure and Body. No exemptions — the winding fix and doubling treat it like Body. |
 | **Shroud** | The *standing* rigging — shrouds, stays, ratlines. Cut like Rigging (dissolve + collapse on the raw mesh, no weld) by its own **Shroud reduce (%)** dial, because ratlines are the densest geometry on a sailing ship and usually want a harder cut than the running rigging. Unlike Rigging it never rides the Sail bone: it holds the mast up and stays standing while the canvas gathers. Auto-guessed from `shroud` / `ratline` in a part name. |
@@ -117,6 +118,9 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Ignore** (`I`) | Deleted from the generated GLB. Use for genuinely invisible internals or unwanted variants. |
 | **Window** | Glazing — portholes, bridge windows, windshields, skylights — as a reduction tier of its own (**Window reduce (%)**): panes are often dense curved or bevelled sheets that read as a flat glint at game distance. Welded within each material, then collapsed, like Detail. Guessed from `window`, `windshield`, `windscreen`, `glass` in part names. |
 | **Default / Edgecase** (`D` / `E`) | Root-weighted review markers: undecided, or deliberately parked for another pass. Default has its own catch-all dial, **Default reduce (%)** — everything you never marked, cut in one move like Body. |
+
+Marking a part **Two-sided** alone enables Generate. Disable **Use source skeleton** for this repair: it needs mesh
+parts, and the source-skeleton fast path refuses it.
 
 The **Visibility** filter can isolate parts that escape-ray probing found fully enclosed. It is conservative: anything
 visible through an opening counts as external. Review interior parts before marking them Ignore.
@@ -404,6 +408,8 @@ reduction never has to choose what survives**:
 5. **The escape hatches for stubborn parts.** A surface see-through from one side (mirrored halves import with
    inverted winding; bow/stern-facing surfaces sit in the inside-out fix's deliberate blind spot; artists leave
    backfaces behind occluders you may Ignore away) → mark it **Rudder** (always double-sided, winding-proof).
+   If Rudder makes the part look worse — tubes swell, ladder rungs turn into blobs — the part holds closed solids
+   too: mark it **Two-sided** instead, which doubles only the faces that need it.
    A part every automatic pass keeps damaging → **Preserve** (shipped byte-identical). Sail-attached fittings
    must be marked **Sail** or they hang in mid-air when the canvas strikes; mast fittings stay **Structure**.
 6. **Re-point, don't re-classify.** When a Workshop split (or any re-export) produces a new GLB: load the

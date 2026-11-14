@@ -58,4 +58,24 @@ public class VehicleRigNamesFileTests
         }
         finally { File.Delete(path); }
     }
+
+    // 2026-11-14: a job that marks a part Two-sided is left to Blender by name - stage 5 does not model the role's export pass.
+    // An earlier death or malformed tag is still the script's own stop, and a blank tag marks nothing.
+    [Fact]
+    public void A_twosided_tag_leaves_the_job_to_Blender_unless_the_script_stopped_earlier()
+    {
+        var args = BlenderVehicleRig.ParseArgs(Argv("twosided=@C:/p/x_twosided.txt"));
+        Assert.Equal(BlenderVehicleRig.TwoSidedLeave, args.Unsupported); Assert.Null(args.TagError); Assert.Null(args.NamesDie);
+
+        Assert.Null(BlenderVehicleRig.ParseArgs(Argv()).Unsupported);
+        Assert.Null(BlenderVehicleRig.ParseArgs(Argv("twosided=")).Unsupported);
+        Assert.Null(BlenderVehicleRig.ParseArgs(Argv("twosided=  ")).Unsupported);
+
+        args = BlenderVehicleRig.ParseArgs(Argv("defaultreduce=nopipe", "twosided=@C:/p/x_twosided.txt"));
+        Assert.Null(args.Unsupported); Assert.Contains("not enough values to unpack", args.TagError);
+
+        var argv = Argv("twosided=@C:/p/x_twosided.txt"); argv[34] = "bad pivot";
+        args = BlenderVehicleRig.ParseArgs(argv);
+        Assert.Null(args.Unsupported); Assert.Contains("bad pivot", args.NamesDie);
+    }
 }

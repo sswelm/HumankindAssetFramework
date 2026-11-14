@@ -77,6 +77,17 @@ if [ "$rrc" -ne 0 ] || [ "$(grep -c '^RIGID PASS' "$TMPD/rigid.txt")" -ne 5 ] ||
   tail -50 "$TMPD/rigid.txt"; echo "FAIL — rigid tread motion / bone budget"; exit 1
 fi
 grep '^RIGID PASS' "$TMPD/rigid.txt"
+# The Two-sided role is a Blender-only path too (the C# leaves a job carrying twosided= by name), so no stage comparison
+# reaches its export pass. Run the fixture through the complete production script and hold the result to the input.
+"$TMPD/VehicleRigJobs.exe" "$WTMP/fixtures/recipes_twosided" "$WTMP/twosidedwork" --all > "$TMPD/twosided_jobs.txt"; tjrc=$?
+[ "$tjrc" -eq 0 ] || { cat "$TMPD/twosided_jobs.txt"; echo "FAIL — two-sided fixture arguments"; exit 1; }
+oracle_blender two_sided "$TMPD/twosided_raw.txt" --dir twosided_exports --key "$SCRIPT" "$ROOT/tools/vehiclerig-drill/blender_two_sided_check.py" "$WTMP/twosided_jobs.txt" -- --background --python "$(cygpath -m "$ROOT/tools/vehiclerig-drill/blender_two_sided_check.py")" -- "$(cygpath -m "$SCRIPT")" "$WTMP/twosided_jobs.txt" "$WTMP/twosided_exports"
+trc=$?; oracle_check
+tr -d '\r' < "$TMPD/twosided_raw.txt" > "$TMPD/twosided.txt"
+if [ "$trc" -ne 0 ] || [ "$(grep -c '^TWOSIDED PASS' "$TMPD/twosided.txt")" -ne 3 ] || grep -q '^TWOSIDED FAIL' "$TMPD/twosided.txt"; then
+  tail -50 "$TMPD/twosided.txt"; echo "FAIL — the Two-sided role's export pass"; exit 1
+fi
+grep '^TWOSIDED PASS' "$TMPD/twosided.txt"
 # argument fixtures: post-edited (vehiclerig_fixtures.py --exits) into text the Lab's builder never writes. EXIT:/DIES:
 # keys name a required stop; unprefixed keys are valid argument variants and must complete like every positive fixture.
 "$TMPD/VehicleRigJobs.exe" "$WTMP/fixtures/recipes_exit" "$WTMP/fxwork" --all > "$TMPD/fxexit_raw.txt"; ferc=$?

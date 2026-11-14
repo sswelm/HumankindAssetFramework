@@ -397,6 +397,54 @@ def rigid_tread_fixtures(out, models):
         recipe(out, key, r.write(models, key), parts, sub="recipes_rigid", treadMode=1, frames=4)
 
 
+def two_sided_fixtures(out, models):
+    """The Two-sided role (role 25, the twosided= tag): ONE Tower mesh of five pieces along x, above a hull - a closed cube
+    wound outward, a closed cube wound inside-out, one free-standing sheet, an authored pair (a quad and its reverse on
+    their own vertices at the same positions), and a small sheet facing down in a WELL: left, doubled, doubled, kept,
+    doubled. The Well (a Body part) is four walls 2 high around the small sheet and a cover 0.1 above it that stops 0.3
+    to one side: no straight line from the sheet's back clears both the cover and a wall (past the cover's edge a ray
+    climbs at most 0.1 in 0.24, a wall 3 away needs 2 in 3), so only the open-pocket test finds it - the air beside it,
+    past the cover, sees the sky. Blender-only: the C# leaves the job by name (BlenderVehicleRig.TwoSidedLeave)."""
+    r = Rig(); ma = r.material("Steel")
+    r.node("Hull", mesh=r.mesh("Hull", at=(-2, .7, -.8), material=ma), scale=[4, 1, 1.6])
+    pos = []; idx = []
+    def cube(cx, inward):
+        base = len(pos); h = .3
+        pos.extend((cx + sx * h, 3 + sy * h, sz * h) for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1))
+        quads = [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]   # outward
+        for a, b, c, d in quads:
+            tris = [(a, b, c), (a, c, d)]
+            for t in tris:
+                idx.extend(base + i for i in (reversed(t) if inward else t))
+    def quad(cx, both):
+        for flip in ((False, True) if both else (False,)):
+            base = len(pos); h = .3
+            pos.extend([(cx - h, 3 - h, 0.0), (cx + h, 3 - h, 0.0), (cx + h, 3 + h, 0.0), (cx - h, 3 + h, 0.0)])
+            for t in ((0, 1, 2), (0, 2, 3)):
+                idx.extend(base + i for i in (reversed(t) if flip else t))
+    cube(-3.0, False); cube(-1.0, True); quad(1.0, False); quad(3.0, True)
+    base = len(pos); h = .1                                    # the sheet in the well: horizontal, wound to face DOWN
+    pos.extend([(8 - h, 3.0, -h), (8 + h, 3.0, -h), (8 + h, 3.0, h), (8 - h, 3.0, h)])
+    idx.extend(base + i for i in (0, 1, 2, 0, 2, 3))
+    r.node("Tower", mesh=raw_mesh(r, "Tower", ma, pos, idx))
+    wpos = []; widx = []
+    def wquad(a, b, c, d):
+        base = len(wpos); wpos.extend([a, b, c, d]); widx.extend(base + i for i in (0, 1, 2, 0, 2, 3))
+    lo, hi = 2.8, 5.0
+    wquad((5, lo, -1.2), (5, lo, 1.2), (5, hi, 1.2), (5, hi, -1.2)); wquad((11, lo, -1.2), (11, hi, -1.2), (11, hi, 1.2), (11, lo, 1.2))
+    wquad((5, lo, -1.2), (5, hi, -1.2), (11, hi, -1.2), (11, lo, -1.2)); wquad((5, lo, 1.2), (11, lo, 1.2), (11, hi, 1.2), (5, hi, 1.2))
+    wquad((7, 3.1, -1.0), (8.3, 3.1, -1.0), (8.3, 3.1, 1.0), (7, 3.1, 1.0))   # the cover
+    r.node("Well", mesh=raw_mesh(r, "Well", ma, wpos, widx))
+    recipe(out, "fx_two_sided", r.write(models, "fx_two_sided"), [("Hull", 0, {}), ("Tower", 25, {}), ("Well", 0, {})], sub="recipes_twosided", frames=4)
+    # A whole-model ray bias used to jump through these closed solids and double their faces.
+    # The thin slab also catches a bias based only on the face's edge length.
+    for key, scale in (("fx_two_sided_small", [.001, .001, .001]), ("fx_two_sided_thin", [1., 1., .0001])):
+        r = Rig(); ma = r.material("Steel")
+        r.node("Closed", mesh=r.mesh("Closed", material=ma), scale=scale)
+        r.node("Distant", mesh=r.mesh("Distant", material=ma), translation=[1000., 0., 0.])
+        recipe(out, key, r.write(models, key), [("Closed", 25, {}), ("Distant", 0, {})], sub="recipes_twosided", frames=4)
+
+
 def main(out):
     models = os.path.join(out, "models"); os.makedirs(models, exist_ok=True)
     for count in (126, 127):
@@ -741,6 +789,7 @@ def main(out):
         recipe(out, key, r.write(models, key), parts, **fields)
     tracked("fx_r_tracks_fallback"); tracked("fx_r_tracks_recoil", gun=True)
     rigid_tread_fixtures(out, models)
+    two_sided_fixtures(out, models)
     # Stage 4 e3: Deploy direction/elevation and Recoil timing/stance; no frame_set in either action.
     for key, yaw, elev, spread, recoil, lead, recframes, wheel, gun in (
         ("fx_e3_deploy", 0, 32, 35, .25, 5, 10, True, True),

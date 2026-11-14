@@ -21,7 +21,7 @@ from collections import Counter
 
 ROLE_NAMES = {0: "Body", 1: "Wheel", 2: "Turret", 3: "Ignore", 4: "Default", 5: "Edgecase", 6: "Caterpillar", 7: "Gun", 8: "Rotor", 9: "TailRotor",
               10: "Trail", 11: "Muzzle", 12: "Cradle", 13: "Oar", 14: "Sail", 15: "Rigging", 16: "Structure", 17: "Flag", 18: "Rudder",
-              19: "Preserve", 20: "Flip", 21: "Detail", 22: "Shroud", 23: "Window", 24: "Railing"}
+              19: "Preserve", 20: "Flip", 21: "Detail", 22: "Shroud", 23: "Window", 24: "Railing", 25: "TwoSided"}
 
 
 def parse_report(text):
