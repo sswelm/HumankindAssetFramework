@@ -2506,6 +2506,15 @@ public class VehicleLabWindow : EditorWindow
                 { imp.animationType = ModelImporterAnimationType.Generic; imp.importAnimation = true; imp.SaveAndReimport(); }
                 BuildPreview(prevRel);
             }
+            // A FRESH RIG PLAYS (2026-11-14, user: "play doesn't work anymore" on a submarine's propeller). The pause is a saved
+            // window setting, so a pause left on while marking parts - where the probe's turntable has nothing to play - held the
+            // new rig on its first frame, and nothing said which of the two it was. Generate starts the clip, and the Console
+            // says what the preview holds.
+            if (inst != null)
+            {
+                previewPaused = false; spinT = 0f;
+                Debug.Log("[VehicleLab] preview: " + PreviewPlaybackLine(previewClips?.Select(c => c.name).ToList(), spinClip != null ? spinClip.name : null, spinClip != null ? spinClip.length : 0f));
+            }
         }
         // surface the BONE TOTAL prominently (user request): the budget lines are the difference between a
         // clean unit and the bone-index-wall / twitch-ceiling diseases — they were buried in the Console until now
@@ -2838,6 +2847,11 @@ public class VehicleLabWindow : EditorWindow
 
     // ---- turntable preview: the imported preview FBX rendered as a REAL instance (AddSingleGO — Law 4: never
     // hand-rolled mesh draws), its Spin clip sampled on a loop so the wheels visibly turn. Drag orbits, wheel zooms.
+    /// <summary>What a fresh rig preview holds, for the Console: the clips and the one that plays.</summary>
+    internal static string PreviewPlaybackLine(List<string> clips, string playing, float seconds)
+        => clips == null || clips.Count == 0 || playing == null ? "no clip to play (the rig has no animation)"
+         : clips.Count + " clip(s) [" + string.Join(", ", clips) + "], playing '" + playing + "' (" + seconds.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + " s)";
+
     internal void BuildGlbPreview(string glb)
     {
         DestroyPreview(); var owned = new List<UnityEngine.Object>();
