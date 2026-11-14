@@ -12,16 +12,21 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 - **Vehicle Lab: a Two-sided role - doubling decided per face (2026-11-14; "the double walling should be applied
   discriminately").** A U-boat's conning tower is one welded part of thick walls, periscope tubes and a wall that is a
-  single sheet, see-through from one side in the source. Marked Rudder, every face was doubled and the copy inset by
-  0.15 % of the whole model (7.4 units on a part 142 wide): tubes swelled, rungs became blobs, 15,353 -> 30,706
+  single sheet, see-through from one side in the source. Marked Sail or Rudder, every face was doubled and the copy inset
+  by 0.15 % of the whole model (7.4 units on a part 142 wide): tubes swelled, rungs became blobs, 15,353 -> 30,706
   vertices. Measured on that part: 63 % of its faces already carry an authored opposite twin. The new role (enum 25,
-  `twosided=@<names>`, sent only when a part is marked, so no other recipe's argument line changes) decides per face at
-  export: from sample points on the face (centre and 60 % toward each corner) 64 fixed directions are cast against the
-  whole model; a ray that hits nothing is a line of sight onto the front or the back. Back only -> reversed; both ->
-  doubled with the usual inset; otherwise left; an exact opposite twin -> kept. On the U-boat: 9 reversed, 148 doubled,
-  8,772 twins kept, 15,353 -> 15,615 vertices, 3.6 s. Sail, Flag and Rudder are unchanged. The C# route leaves such a
-  job to Blender by name; the pass is held by a Blender-side fixture check in the vehicle_rig drill. Not yet seen in
-  game.
+  `twosided=@<names>`, sent only when a part is marked, so no other recipe's argument line changes) doubles, at export,
+  only the faces whose BACK can be seen: from sample points on the face (centre and 60 % toward each corner) 64 fixed
+  directions leave the back side against the whole model; one that hits nothing is a line of sight from outside, and
+  failing that the midpoint of the longest blocked ray is asked whether it sees the sky (an open pocket: a cockpit's
+  inner wall). The copy lies on the original's own positions, wound the other way; an exact opposite twin is kept.
+  The first version, the same day, also reversed back-only faces and inset its copies, and the user found it "only
+  partial" from along the deck. A see-through census of 506,759 rays put numbers on it: source 4,529, that version
+  2,189 (297 from reversals of faces whose front the sampling had missed, 1,241 from inset copies sticking out at
+  edges), the final rule 8. On the U-boat: 481 faces doubled, 8,772 twins kept, 15,353 -> 16,052 vertices, 6.7 s.
+  Sail, Flag and Rudder are unchanged. The C# route leaves such a job to Blender by name; the pass is held by a
+  Blender-side fixture check in the vehicle_rig drill. Not yet seen in game: whether the game draws a coincident copy
+  as it draws the model's authored pairs is the open point.
 - **Docs: what the pawn buffer costs and how far it stretches (2026-11-13; "make sure it's properly documented").**
   Vertex-Budget quoted three different costs for `BufferOverrides` (~28 B per vertex, VRAM only; ~48 MB per million),
   none measured. The pawn vertex record is 36 bytes (`Marshal.SizeOf` on the game's assembly), and the engine keeps

@@ -216,7 +216,7 @@ class BoneBudgetGuard(unittest.TestCase):
 
 class TwoSidedRoleGuard(unittest.TestCase):
     # 2026-11-14 (user: "the double walling should be applied discriminately"): twosided=@<names> marks parts whose faces are
-    # reversed, doubled or left one by one at export. The pass itself needs Blender (tools/vehiclerig-drill/
+    # doubled or left one by one at export. The pass itself needs Blender (tools/vehiclerig-drill/
     # blender_two_sided_check.py, in the vehicle_rig drill); this keeps the wiring around it.
     def test_the_tag_is_optional_and_its_names_are_marked(self):
         self.assertIn('_tsarg = next((a for a in argv if a.startswith("twosided=")), None)', SOURCE)
@@ -238,7 +238,12 @@ class TwoSidedRoleGuard(unittest.TestCase):
     def test_only_an_opposite_face_on_the_same_vertices_is_a_twin(self):
         body = SOURCE[SOURCE.index("def _two_sided_pass(targets, everything):"):SOURCE.index("_dall = [o for o in bpy.context.scene.objects")]
         self.assertIn("if any(_n2.dot(_n) < 0.0 for _n2 in _twin.get(", body)
-        self.assertIn("(_both if _front else _flip).append(_p.index)", body)
+        # the back side only, a pocket test on the longest blocked ray, a coincident copy and no reversal in place
+        self.assertIn("if _d.dot(_n) > -1e-3:", body)
+        self.assertIn("any(_bvh.ray_cast(_mid, _d2)[0] is None for _d2 in _dirs)", body)
+        self.assertNotIn("_loff", body); self.assertNotIn("_flip", body)
+        self.assertEqual(1, body.count("bmesh.ops.reverse_faces("))
+        self.assertIn("bmesh.ops.reverse_faces(_twb, faces=[_g for _g in _ret['geom'] if isinstance(_g, bmesh.types.BMFace)])", body)
 
 
 if __name__ == "__main__":

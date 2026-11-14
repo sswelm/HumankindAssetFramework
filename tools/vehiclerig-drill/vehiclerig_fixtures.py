@@ -398,9 +398,13 @@ def rigid_tread_fixtures(out, models):
 
 
 def two_sided_fixtures(out, models):
-    """The Two-sided role (role 25, the twosided= tag): ONE Tower mesh of four pieces along x, above a hull - a closed cube
-    wound outward, a closed cube wound inside-out, one free-standing sheet, and an authored pair (a quad and its reverse on
-    their own vertices at the same positions). Blender-only: the C# leaves the job by name (BlenderVehicleRig.TwoSidedLeave)."""
+    """The Two-sided role (role 25, the twosided= tag): ONE Tower mesh of five pieces along x, above a hull - a closed cube
+    wound outward, a closed cube wound inside-out, one free-standing sheet, an authored pair (a quad and its reverse on
+    their own vertices at the same positions), and a small sheet facing down in a WELL: left, doubled, doubled, kept,
+    doubled. The Well (a Body part) is four walls 2 high around the small sheet and a cover 0.1 above it that stops 0.3
+    to one side: no straight line from the sheet's back clears both the cover and a wall (past the cover's edge a ray
+    climbs at most 0.1 in 0.24, a wall 3 away needs 2 in 3), so only the open-pocket test finds it - the air beside it,
+    past the cover, sees the sky. Blender-only: the C# leaves the job by name (BlenderVehicleRig.TwoSidedLeave)."""
     r = Rig(); ma = r.material("Steel")
     r.node("Hull", mesh=r.mesh("Hull", at=(-2, .7, -.8), material=ma), scale=[4, 1, 1.6])
     pos = []; idx = []
@@ -419,8 +423,19 @@ def two_sided_fixtures(out, models):
             for t in ((0, 1, 2), (0, 2, 3)):
                 idx.extend(base + i for i in (reversed(t) if flip else t))
     cube(-3.0, False); cube(-1.0, True); quad(1.0, False); quad(3.0, True)
+    base = len(pos); h = .1                                    # the sheet in the well: horizontal, wound to face DOWN
+    pos.extend([(8 - h, 3.0, -h), (8 + h, 3.0, -h), (8 + h, 3.0, h), (8 - h, 3.0, h)])
+    idx.extend(base + i for i in (0, 1, 2, 0, 2, 3))
     r.node("Tower", mesh=raw_mesh(r, "Tower", ma, pos, idx))
-    recipe(out, "fx_two_sided", r.write(models, "fx_two_sided"), [("Hull", 0, {}), ("Tower", 25, {})], sub="recipes_twosided", frames=4)
+    wpos = []; widx = []
+    def wquad(a, b, c, d):
+        base = len(wpos); wpos.extend([a, b, c, d]); widx.extend(base + i for i in (0, 1, 2, 0, 2, 3))
+    lo, hi = 2.8, 5.0
+    wquad((5, lo, -1.2), (5, lo, 1.2), (5, hi, 1.2), (5, hi, -1.2)); wquad((11, lo, -1.2), (11, hi, -1.2), (11, hi, 1.2), (11, lo, 1.2))
+    wquad((5, lo, -1.2), (5, hi, -1.2), (11, hi, -1.2), (11, lo, -1.2)); wquad((5, lo, 1.2), (11, lo, 1.2), (11, hi, 1.2), (5, hi, 1.2))
+    wquad((7, 3.1, -1.0), (8.3, 3.1, -1.0), (8.3, 3.1, 1.0), (7, 3.1, 1.0))   # the cover
+    r.node("Well", mesh=raw_mesh(r, "Well", ma, wpos, widx))
+    recipe(out, "fx_two_sided", r.write(models, "fx_two_sided"), [("Hull", 0, {}), ("Tower", 25, {}), ("Well", 0, {})], sub="recipes_twosided", frames=4)
 
 
 def main(out):

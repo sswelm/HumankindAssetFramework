@@ -1,10 +1,12 @@
 """Run the production script on the Two-sided fixture and hold the export pass to its contract.
 
-The fixture's Tower is ONE mesh of four pieces, left to right along x (vehiclerig_fixtures.py two_sided_fixtures):
-  a closed cube wound outward      -> every face left
-  a closed cube wound inside-out   -> every face reversed (no new geometry)
-  one free-standing sheet          -> doubled (a reversed copy, inset)
+The fixture's Tower is ONE mesh of five pieces, left to right along x (vehiclerig_fixtures.py two_sided_fixtures):
+  a closed cube wound outward      -> every face left (its backs see only the cube's own inside)
+  a closed cube wound inside-out   -> every face doubled (its backs face the open air)
+  one free-standing sheet          -> doubled
   an authored pair on one quad     -> kept as authored
+  a sheet under a cover in a well  -> doubled, and ONLY by the open-pocket test: no straight line from its back leaves the well
+A copy lies on its original's own positions, wound the other way; nothing is reversed in place.
 The expectations below come from that input and the role's contract, not from the script's output."""
 import bpy
 import contextlib
@@ -37,11 +39,11 @@ for row in open(jobs, encoding="utf-8"):
             exec(compile(source, script, "exec"), g)
         assert os.path.getsize(argv[2]) > 0, "no GLB export"
         text = log.getvalue()
-        line = re.search(r"VEHICLE two-sided 'Mesh___two__Tower': (\d+) face\(s\) reversed .*?, (\d+) doubled .*?, (\d+) left; (\d+) authored twin\(s\) kept; (\d+) -> (\d+) verts", text)
+        line = re.search(r"VEHICLE two-sided 'Mesh___two__Tower': (\d+) face\(s\) doubled \(the back shows\), (\d+) left; (\d+) authored twin\(s\) kept; (\d+) -> (\d+) verts", text)
         assert line, "no per-mesh two-sided line"
-        rev, dbl, left, twins, v0, v1 = (int(x) for x in line.groups())
-        assert (rev, dbl, left, twins) == (12, 2, 16, 4), "reversed/doubled/left/twins = %r, expected (12, 2, 16, 4)" % ((rev, dbl, left, twins),)
-        assert v1 - v0 == 4, "the doubled sheet added %d vertices, expected 4" % (v1 - v0)
+        dbl, left, twins, v0, v1 = (int(x) for x in line.groups())
+        assert (dbl, left, twins) == (16, 16, 4), "doubled/left/twins = %r, expected (16, 16, 4)" % ((dbl, left, twins),)
+        assert v1 - v0 == 16, "the copies added %d vertices, expected 16 (a cube's 8 and two quads' 4 each)" % (v1 - v0)
         o = bpy.data.objects["Mesh___two__Tower"]
         mw = o.matrix_world
         faces = []
@@ -50,22 +52,23 @@ for row in open(jobs, encoding="utf-8"):
             c = sum(pw, pw[0] * 0) / len(pw)
             n = (pw[1] - pw[0]).cross(pw[2] - pw[0]).normalized()
             faces.append((c, n))
-        assert len(faces) == 12 + 12 + 4 + 4, "the Tower holds %d faces, expected 32" % len(faces)
         faces.sort(key=lambda f: f[0].x)
-        groups = [faces[0:12], faces[12:24], faces[24:28], faces[28:32]]
-        for a, b in zip(groups, groups[1:]):
-            assert b[0][0].x - a[-1][0].x > 0.5, "the four pieces are not apart along x"
-        for name, grp in (("the outward cube", groups[0]), ("the inside-out cube", groups[1])):
-            centre = sum((c for c, n in grp), grp[0][0] * 0) / len(grp)
-            assert all(n.dot(c - centre) > 0 for c, n in grp), name + " does not face outward on every face"
-        for name, grp, apart in (("the sheet", groups[2], True), ("the authored pair", groups[3], False)):
-            total = sum((n for c, n in grp), grp[0][1] * 0)
-            assert total.length < 1e-4, name + " is not two-sided (its normals do not cancel)"
-            axis = grp[0][1]
-            ups = [c.dot(axis) for c, n in grp if n.dot(axis) > 0]; downs = [c.dot(axis) for c, n in grp if n.dot(axis) < 0]
-            assert len(ups) == 2 and len(downs) == 2, name + " is not two faces each way"
-            gap = abs(sum(ups) / 2 - sum(downs) / 2)
-            assert (gap > 1e-4) == apart, name + (" has coincident copies" if apart else " was moved (%.6f)" % gap)
+        groups = [[faces[0]]]
+        for prev, f in zip(faces, faces[1:]):
+            if f[0].x - prev[0].x > 0.5: groups.append([])
+            groups[-1].append(f)
+        assert [len(g) for g in groups] == [12, 24, 4, 4, 4], "the pieces hold %r faces, expected [12, 24, 4, 4, 4]" % [len(g) for g in groups]
+        centre = sum((c for c, n in groups[0]), groups[0][0][0] * 0) / 12
+        assert all(n.dot(c - centre) > 0 for c, n in groups[0]), "the outward cube does not face outward on every face"
+        centre = sum((c for c, n in groups[1]), groups[1][0][0] * 0) / 24
+        outward = [f for f in groups[1] if f[1].dot(f[0] - centre) > 0]; inward = [f for f in groups[1] if f[1].dot(f[0] - centre) < 0]
+        assert len(outward) == 12 and len(inward) == 12, "the inside-out cube is not 12 faces each way (%d out, %d in)" % (len(outward), len(inward))
+        for name, grp, each in (("the inside-out cube", groups[1], 12), ("the sheet", groups[2], 2), ("the authored pair", groups[3], 2), ("the sheet in the well", groups[4], 2)):
+            # every face has exactly one partner at its own centre, wound the other way
+            for c, n in grp:
+                partners = [1 for c2, n2 in grp if (c2 - c).length < 1e-5 and n2.dot(n) < -0.999]
+                assert len(partners) == 1, name + ": a face has %d opposite partner(s) on its own position, expected 1" % len(partners)
+            assert len(grp) == 2 * each, name + " holds %d faces" % len(grp)
         print("TWOSIDED PASS\t" + key, flush=True)
     except BaseException:
         failed = True
