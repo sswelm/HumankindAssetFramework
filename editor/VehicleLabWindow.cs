@@ -2513,6 +2513,8 @@ public class VehicleLabWindow : EditorWindow
             if (inst != null)
             {
                 previewPaused = false; spinT = 0f;
+                // Generate blocks editor updates: its elapsed time belongs to the old preview, not the new clip.
+                lastTick = EditorApplication.timeSinceStartup;
                 Debug.Log("[VehicleLab] preview: " + PreviewPlaybackLine(previewClips?.Select(c => c.name).ToList(), spinClip != null ? spinClip.name : null, spinClip != null ? spinClip.length : 0f));
             }
         }

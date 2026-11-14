@@ -3052,6 +3052,12 @@ persistence/reset and the actual window preview. Unity's skinned vertices are co
 independent HafTransforms sampler of Blender's GLB, with action names/order, rest pose and source units checked. Mutated
 GLBs, summary lines, sidecars and preview scale are rejected, and a second-model edit changes the provenance fingerprint.
 
+The PR #284 playback regression runs the real, non-headless Generate entry point on both backends in the isolated
+project, starting paused with an old preview clock. It requires a live clip, a cleared pause and playhead, a freshly
+based tick clock, and a first tick that does not inherit time spent generating. It also checks the Console's selected
+clip and movement of sampled skinned vertices. Restoring the old clock behavior fails both backends; the checks run
+with `HAF_GENERATE_TEST_METHOD=RunPreview bash tools/vehiclerig_unity_generate_drill.sh` and in the full `Run` mode.
+
 On all 25 saved recipes, both route selections generate byte-identical GLBs, diagnostics and sidecars; 22 use C#, two FBX
 sources and Espana's JPEG-alpha export use Blender. The initial run correctly rejected Espana's older primary-source and
 recipe hashes. After reviewing its October 18 re-fusion and recipe, a fresh Espana golden and Global Hawk's missing golden
