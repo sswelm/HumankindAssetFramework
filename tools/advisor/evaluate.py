@@ -55,8 +55,8 @@ TASKS = ("role", "delete", "delete-hand", "split", "group", "dials")
 # so a future label or join column cannot silently become a feature. Visibility/flip/bone are probe observations.
 PART_FEATURES = frozenset(("model", "category", "file", "stage", "node_index", "name", "file_name", "mesh_index",
                            "mesh_shared", "parent_index", "depth", "verts", "tris", "islands", "islands_merged", "island_top_pct",
-                           "island_second_pct", "islands_big", "cx", "cy", "cz", "sx", "sy", "sz", "blocked", "triangle_free",
-                           "vis", "flip", "bone", "vis_from"))
+                           "island_second_pct", "islands_big", "island_shapes", "file_nodes", "cx", "cy", "cz", "sx", "sy", "sz", "blocked",
+                           "triangle_free", "vis", "flip", "bone", "vis_from"))
 # Every other column of the corpus is a label or a join record and stays out of the held-out rows. A new corpus column
 # must be placed in one set or the other (Tests/test_advisor_corpus.py holds the partition), so a feature a proposer
 # needs is never silently stripped: the first Split proposer proposed nothing because its columns were not listed here.
