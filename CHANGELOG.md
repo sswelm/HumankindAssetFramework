@@ -10,12 +10,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
-- **Vehicle Lab: Generate starts the preview's clip (2026-11-14; "play doesn't work anymore").** A submarine's propeller
-  stood still in the Lab after Generate. The file was right (1,153 vertices on `Wheel_00`, 31 rotation keys), and the
-  window's own preview, built and ticked in a separate batch Unity on that file, turned the bone - so the code path
-  plays. What it could not show was the user's window state: the pause is a saved setting, and nothing logged what
-  the preview held. Generate now clears the pause and logs the preview's clips and the one playing. The cause in the
-  user's session is NOT confirmed by this change; the log line is there to decide it.
+- **Vehicle Lab: the Generate preview stood still - the skin did not follow the pose (2026-11-14; "play doesn't work
+  anymore").** A propeller, then a cart's wheels, would not turn in the Lab after Generate. The file was right (the
+  propeller's 1,153 vertices on `Wheel_00`, 31 rotation keys) and the window ticked and sampled: in a separate batch
+  Unity the bone turned at every step. The picture did not: four renders of the Ribauldequin at four clip times were
+  pixel-identical. A preview samples and renders in one editor frame, and Unity then draws the skin of the first
+  pose; `forceMatrixRecalculationPerRender` on the in-process rig's skinned renderers made the four renders differ.
+  The Lab's Generate preview has been that rig since the C# route became the default (2026-10-27); the Blender
+  route's preview is an imported FBX, which played - so jobs left to Blender hid it. Found through a log line added
+  the same day (`[VehicleLab] preview: 1 clip(s) [Spin], playing 'Spin'`), which said the clip was there and running
+  while the user's screenshot stood still. Generate also clears a saved pause now. My first answers blamed the pause;
+  the user had to say it three times.
   The PR #284 review also resets the tick clock: generation blocks editor updates, so the first tick otherwise
   adds the entire generation interval straight back onto the rewound clip. The actual Generate paths are tested
   in isolated Unity on both backends, from a paused window with an old clock, including sampled mesh movement.
