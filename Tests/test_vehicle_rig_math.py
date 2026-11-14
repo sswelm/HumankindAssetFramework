@@ -147,7 +147,7 @@ class RailingTierGuard(unittest.TestCase):
         win = SOURCE.index('_tagged_names_pct(argv, "windowreduce")')
         rai = SOURCE.index('_tagged_names_pct(argv, "railingreduce")')
         self.assertLess(win, rai)
-        self.assertIn("shroud_names, window_names, railing_names):", SOURCE)
+        self.assertIn("shroud_names, window_names, railing_names,", SOURCE)
         loop = SOURCE[SOURCE.index("for _rlabel, _rnames, _rpct in ("):]
         loop = loop[:loop.index(chr(10))]
         self.assertIn('("SHROUD", shroud_names, shroud_reduce), ("RAILING", railing_names, railing_reduce), ("STRUCTURE"', loop)
@@ -212,6 +212,33 @@ class BoneBudgetGuard(unittest.TestCase):
         self.assertIn("past the 126-bone budget (bone indices break past 127 in-game", stage5)
         for text in (SOURCE, rig_anim, port, stage5):
             self.assertNotIn("> 240", text); self.assertNotIn("= 240", text)
+
+
+class TwoSidedRoleGuard(unittest.TestCase):
+    # 2026-11-14 (user: "the double walling should be applied discriminately"): twosided=@<names> marks parts whose faces are
+    # reversed, doubled or left one by one at export. The pass itself needs Blender (tools/vehiclerig-drill/
+    # blender_two_sided_check.py, in the vehicle_rig drill); this keeps the wiring around it.
+    def test_the_tag_is_optional_and_its_names_are_marked(self):
+        self.assertIn('_tsarg = next((a for a in argv if a.startswith("twosided=")), None)', SOURCE)
+        self.assertIn('twosided_names = namelist(_tsarg[9:]) if _tsarg is not None and _tsarg[9:].strip() else []', SOURCE)
+        marked = SOURCE[SOURCE.index("_role_marked = set()"):]
+        self.assertIn("twosided_names):", marked[:marked.index("_role_marked.update(_rl)")])
+
+    def test_a_marked_part_keeps_its_own_mesh_and_both_older_passes_leave_it(self):
+        self.assertIn('_k = "__two__" + o.name', SOURCE)
+        fix = SOURCE[SOURCE.index("if fix_inside_out:\n    # NOT a blind recalc"):]
+        self.assertIn('_fo.name.startswith("Mesh___two__")', fix[:fix.index("_fb = bmesh.new()")])
+        targets = SOURCE[SOURCE.index("_dtargets = (["):]
+        self.assertIn('not o.name.startswith("Mesh___two__")', targets[:targets.index("if double_sided else")])
+
+    def test_the_pass_measures_the_model_before_any_face_is_doubled(self):
+        self.assertLess(SOURCE.index("    _two_sided_pass(_two_targets, _dall)"), SOURCE.index("_dtargets = (["))
+        self.assertLess(SOURCE.index("VEHICLE FLIP applied"), SOURCE.index("    _two_sided_pass(_two_targets, _dall)"))
+
+    def test_only_an_opposite_face_on_the_same_vertices_is_a_twin(self):
+        body = SOURCE[SOURCE.index("def _two_sided_pass(targets, everything):"):SOURCE.index("_dall = [o for o in bpy.context.scene.objects")]
+        self.assertIn("if any(_n2.dot(_n) < 0.0 for _n2 in _twin.get(", body)
+        self.assertIn("(_both if _front else _flip).append(_p.index)", body)
 
 
 if __name__ == "__main__":

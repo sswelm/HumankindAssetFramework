@@ -397,6 +397,32 @@ def rigid_tread_fixtures(out, models):
         recipe(out, key, r.write(models, key), parts, sub="recipes_rigid", treadMode=1, frames=4)
 
 
+def two_sided_fixtures(out, models):
+    """The Two-sided role (role 25, the twosided= tag): ONE Tower mesh of four pieces along x, above a hull - a closed cube
+    wound outward, a closed cube wound inside-out, one free-standing sheet, and an authored pair (a quad and its reverse on
+    their own vertices at the same positions). Blender-only: the C# leaves the job by name (BlenderVehicleRig.TwoSidedLeave)."""
+    r = Rig(); ma = r.material("Steel")
+    r.node("Hull", mesh=r.mesh("Hull", at=(-2, .7, -.8), material=ma), scale=[4, 1, 1.6])
+    pos = []; idx = []
+    def cube(cx, inward):
+        base = len(pos); h = .3
+        pos.extend((cx + sx * h, 3 + sy * h, sz * h) for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1))
+        quads = [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]   # outward
+        for a, b, c, d in quads:
+            tris = [(a, b, c), (a, c, d)]
+            for t in tris:
+                idx.extend(base + i for i in (reversed(t) if inward else t))
+    def quad(cx, both):
+        for flip in ((False, True) if both else (False,)):
+            base = len(pos); h = .3
+            pos.extend([(cx - h, 3 - h, 0.0), (cx + h, 3 - h, 0.0), (cx + h, 3 + h, 0.0), (cx - h, 3 + h, 0.0)])
+            for t in ((0, 1, 2), (0, 2, 3)):
+                idx.extend(base + i for i in (reversed(t) if flip else t))
+    cube(-3.0, False); cube(-1.0, True); quad(1.0, False); quad(3.0, True)
+    r.node("Tower", mesh=raw_mesh(r, "Tower", ma, pos, idx))
+    recipe(out, "fx_two_sided", r.write(models, "fx_two_sided"), [("Hull", 0, {}), ("Tower", 25, {})], sub="recipes_twosided", frames=4)
+
+
 def main(out):
     models = os.path.join(out, "models"); os.makedirs(models, exist_ok=True)
     for count in (126, 127):
@@ -741,6 +767,7 @@ def main(out):
         recipe(out, key, r.write(models, key), parts, **fields)
     tracked("fx_r_tracks_fallback"); tracked("fx_r_tracks_recoil", gun=True)
     rigid_tread_fixtures(out, models)
+    two_sided_fixtures(out, models)
     # Stage 4 e3: Deploy direction/elevation and Recoil timing/stance; no frame_set in either action.
     for key, yaw, elev, spread, recoil, lead, recframes, wheel, gun in (
         ("fx_e3_deploy", 0, 32, 35, .25, 5, 10, True, True),

@@ -173,4 +173,27 @@ public class VehicleRigArgsTests
     public void Invalid_part_lists_are_not_silently_changed_to_empty_recipes(string json)
         => Assert.Throws<System.IO.InvalidDataException>(() => VehicleRigArgLine.RigArgsFromRecipe(json));
 
+    // 2026-11-14, the Two-sided role: the tag travels only when a part is marked, so every other recipe keeps its line.
+    [Fact]
+    public void The_twosided_tag_is_sent_only_when_a_part_is_marked()
+    {
+        var a = Sample();
+        Assert.DoesNotContain(VehicleRigArgLine.RigArgv(a), x => x.value.StartsWith("twosided="));
+        a.twoSidedMarked = true; a.partTxFile = "C:/p/ship_parttx.txt";
+        var t = VehicleRigArgLine.RigArgv(a).ToList();
+        Assert.Equal(("railingreduce=@C:/p/ship_railing.txt|0", true), t[78]);
+        Assert.Equal(("twosided=@C:/p/ship_twosided.txt", true), t[79]);
+        Assert.Equal(("parttx=@C:/p/ship_parttx.txt", true), t[80]);
+    }
+
+    [Theory]
+    [InlineData(25, true)][InlineData(18, false)][InlineData(24, false)]
+    public void A_recipe_with_a_Two_sided_part_asks_for_the_tag(int role, bool expected)
+    {
+        var r = VehicleRigArgLine.RigArgsFromRecipe("{\"srcFile\":\"D:/m/a.glb\",\"outGlb\":\"D:/m/a_Spin.glb\",\"frames\":15,\"parts\":[{\"name\":\"Hull\",\"role\":0},{\"name\":\"Tower\",\"role\":" + role + "}]}");
+        Assert.Equal(expected, r.args.twoSidedMarked);
+        Assert.Equal(expected ? new[] { "Tower" } : new string[0], VehicleRigArgLine.NamesOf(r, "twosided"));
+        Assert.Equal(25, VehicleRigArgLine.RoleOfNamesFile["twosided"]);
+    }
+
 }

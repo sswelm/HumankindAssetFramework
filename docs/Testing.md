@@ -2397,6 +2397,13 @@ with all animation keys emitted. Color layers are also retained in their own poi
 corner colors move with mirrored faces, and mesh copies own their color buffers; focused unit tests cover these
 attributes, which the current scene-row format does not record.
 
+**The Two-sided role's export pass (2026-11-14) is held in Blender alone.** The C# leaves a job that carries `twosided=` by name
+(`BlenderVehicleRig.TwoSidedLeave`), so no stage comparison reaches the pass. `tools/vehiclerig-drill/blender_two_sided_check.py`
+runs the production script on the fixture `fx_two_sided` (`recipes_twosided`: one Tower mesh of a closed cube wound outward, a
+closed cube wound inside-out, a free-standing sheet and an authored opposite pair) and holds the result to the INPUT: the log's
+counts (12 reversed, 2 doubled, 16 left, 4 twins, 4 new vertices), both cubes facing outward on every face, the sheet two faces
+each way with the copies apart, the pair untouched and coincident. One `TWOSIDED PASS` row is required.
+
 **Step (c), stage 2 of item (5), the weld tiers (2026-10-15).** `editor/BlenderVehicleRig.Stage2.cs` + `editor/BlenderWeld.cs`
 are the script's SOURCE-SIDE reduction tiers in C#, held by `vehiclerig.exe --stages 2` after stage 1 on the same rows. Per
 tier (DEFAULT, RIGGING, SHROUD, RAILING, STRUCTURE, BODY, OAR, SAIL, RUDDER, WHEEL, GUN, WINDOW, FLIP, PRESERVE, DETAIL; skipped without

@@ -10,6 +10,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Vehicle Lab: a Two-sided role - doubling decided per face (2026-11-14; "the double walling should be applied
+  discriminately").** A U-boat's conning tower is one welded part of thick walls, periscope tubes and a wall that is a
+  single sheet, see-through from one side in the source. Marked Rudder, every face was doubled and the copy inset by
+  0.15 % of the whole model (7.4 units on a part 142 wide): tubes swelled, rungs became blobs, 15,353 -> 30,706
+  vertices. Measured on that part: 63 % of its faces already carry an authored opposite twin. The new role (enum 25,
+  `twosided=@<names>`, sent only when a part is marked, so no other recipe's argument line changes) decides per face at
+  export: from sample points on the face (centre and 60 % toward each corner) 64 fixed directions are cast against the
+  whole model; a ray that hits nothing is a line of sight onto the front or the back. Back only -> reversed; both ->
+  doubled with the usual inset; otherwise left; an exact opposite twin -> kept. On the U-boat: 9 reversed, 148 doubled,
+  8,772 twins kept, 15,353 -> 15,615 vertices, 3.6 s. Sail, Flag and Rudder are unchanged. The C# route leaves such a
+  job to Blender by name; the pass is held by a Blender-side fixture check in the vehicle_rig drill. Not yet seen in
+  game.
 - **Docs: what the pawn buffer costs and how far it stretches (2026-11-13; "make sure it's properly documented").**
   Vertex-Budget quoted three different costs for `BufferOverrides` (~28 B per vertex, VRAM only; ~48 MB per million),
   none measured. The pawn vertex record is 36 bytes (`Marshal.SizeOf` on the game's assembly), and the engine keeps
