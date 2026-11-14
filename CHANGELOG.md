@@ -21,6 +21,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   becomes 68 % / 86 % (161, 76, 27); the U-boat 7 of 7, none wrong. The node count does most of the work, the shape
   count removes the identical-copies case; the cost and the controls are in
   [Workshop-Advisor-Plan.md](docs/Workshop-Advisor-Plan.md). Three new cases (82), seven planted defects caught.
+  The review of the PR found two defects, both reproduced and fixed with a case each (84; cache v7): flat copies
+  turned a quarter counted as different shapes (thickness 0 against rounding residue), and the grouping scanned
+  every group (5.12 s on a 4,000-island file; a grid of 27 lookups per island now). The scores did not move.
 
 - **Docs: what the pawn buffer costs and how far it stretches (2026-11-13; "make sure it's properly documented").**
   Vertex-Budget quoted three different costs for `BufferOverrides` (~28 B per vertex, VRAM only; ~48 MB per million),

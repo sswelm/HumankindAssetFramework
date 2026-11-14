@@ -4140,7 +4140,15 @@ file is proposed; identical windows, the same bag in a file of thousands, a part
 and a part whose file's node count is not known are not), and a later call's note carries no route from an earlier
 one; ties go to the stricter pair and a node limit of 0 means any file. Seven planted defects (the shape clause
 dropped, a tie taking the route, ties to the looser pair, an unknown node count passing, unsorted extents, the
-triangle count ignored, a wrong node count) each fail a case.
+triangle count ignored, a wrong node count) each fail a case. The review of PR #282 adds two (84 total), both
+reproduced first: fourteen flat windows, half of them stood up with a 1e-7 wobble in the thin axis, are one shape (two
+before: a thickness of exactly 0 against the rotation's rounding fails a purely relative tolerance; an extent near
+zero is now compared against 5 % of the island's size); and the shape count comes from a logarithmic grid of 27
+lookups per island that must equal the plain all-pairs greedy count on 60 random populations sitting on cell edges,
+on the flat floor and at zero, with 20,000 different islands counted inside a time bound (0.08 s measured; scanning
+every group took 5.12 s on the reviewer's 4,000-triangle file). Planted: the flat floor dropped, the neighbouring
+cells not searched, flat extents not clamped into the floor's cell - each fails; cells a quarter as wide change the
+count on 53 of the 60 populations.
 
 The critical review of PR #195 added a high-valence cone, tiny loose parts and non-polygon primitives. Matching every
 pair of edges in one lower-vertex bucket made a 32,000-face fan take 3.90 s against 9 ms before the parallelization.

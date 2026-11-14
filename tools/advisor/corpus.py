@@ -376,9 +376,53 @@ def analyse_mesh(glb, mesh_index):
 # ones; the island count reads the same for both. Two islands (the exact-position weld's, BEFORE the distance merge:
 # a copy is a copy wherever it sits) are the same shape when they have the same triangle count and their boxes'
 # sorted extents agree within SHAPE_TOLERANCE each - sorted, so a copy turned a quarter or mirrored is still a copy.
-# Greedy in descending (triangles, extents) order against each group's first member, so the count does not depend on
-# the file's vertex order. An island without a triangle (a referenced vertex no triangle uses) is not counted.
+# AN EXTENT NEAR ZERO is compared against the island's size, not against itself (review of PR #282: a flat window has
+# a thickness of exactly 0, its quarter-turned copy one of 1e-7 from the rotation's rounding, and a purely relative
+# tolerance called fourteen such windows fourteen shapes): the allowed difference is SHAPE_TOLERANCE of the larger of
+# the two extents and SHAPE_FLAT of the larger island's largest extent.
+# Greedy in descending (triangles, extents) order, an island joining the EARLIEST group whose first member it matches,
+# so the count does not depend on the file's vertex order. An island without a triangle (a referenced vertex no
+# triangle uses) is not counted.
 SHAPE_TOLERANCE = 0.03
+SHAPE_FLAT = 0.05
+_SHAPE_CELL = -math.log(1.0 - SHAPE_TOLERANCE) * (1.0 + 1e-9)   # two matching extents are under one cell apart
+
+
+def same_shape(e, g):
+    """Sorted extents e and g (ascending) of two islands with the same triangle count."""
+    floor = SHAPE_FLAT * max(e[2], g[2])
+    return all(abs(a - b) <= SHAPE_TOLERANCE * max(a, b, floor) for a, b in zip(e, g))
+
+
+def count_shapes(signatures):
+    """The number of shape groups among (triangles, sorted extents) signatures. Each island looks only at the groups
+    in its own and the neighbouring cells of a logarithmic grid over the three extents (an extent under the flat floor
+    sits in the floor's cell), 27 lookups whatever the part holds: scanning every group made a part of 4,000 different
+    islands cost sixteen million comparisons (review of PR #282, 0.31 s to 5.12 s on a 4,000-triangle file)."""
+    groups = {}   # (triangles, cell, cell, cell) -> [(creation order, extents of the first member)]
+    made = 0
+    for t, e in sorted(signatures, reverse=True):
+        size = e[2]
+        if size > 0.0:
+            cell = tuple(int(math.floor(math.log(max(x, SHAPE_FLAT * size)) / _SHAPE_CELL)) for x in e)
+        else:
+            cell = None   # a point: every extent zero; the same thing as every other point of its triangle count
+        best = None
+        if cell is None:
+            for order, g in groups.get((t, None), ()):
+                if same_shape(e, g) and (best is None or order < best):
+                    best = order
+        else:
+            for i in (cell[0] - 1, cell[0], cell[0] + 1):
+                for j in (cell[1] - 1, cell[1], cell[1] + 1):
+                    for k in (cell[2] - 1, cell[2], cell[2] + 1):
+                        for order, g in groups.get((t, i, j, k), ()):
+                            if same_shape(e, g) and (best is None or order < best):
+                                best = order
+        if best is None:
+            groups.setdefault((t, None) if cell is None else (t,) + cell, []).append((made, e))
+            made += 1
+    return made
 
 
 def island_shape_count(unique, tri_ids, dsu):
@@ -403,14 +447,7 @@ def island_shape_count(unique, tri_ids, dsu):
                 l[k] = p[k]
             if p[k] > h[k]:
                 h[k] = p[k]
-    shapes = []   # the first member of each group: (triangles, sorted extents)
-    for t, e in sorted(((tris[r], tuple(sorted(hi[r][k] - lo[r][k] for k in (0, 1, 2)))) for r in tris), reverse=True):
-        for gt, ge in shapes:
-            if gt == t and all(abs(a - b) <= SHAPE_TOLERANCE * max(a, b) for a, b in zip(e, ge)):
-                break
-        else:
-            shapes.append((t, e))
-    return len(shapes)
+    return count_shapes((tris[r], tuple(sorted(hi[r][k] - lo[r][k] for k in (0, 1, 2)))) for r in tris)
 
 
 # THE WORKSHOP'S DISTANCE MERGE (GlbDisconnectedParts.AnalyzeMesh, "DISTANCE MERGE (2026-09-06, the 602-island rope)"):
@@ -795,7 +832,7 @@ def recipe_dials(j):
 
 # Bump when a feature's definition changes: the cache below is keyed on it, so an old export never serves stale
 # features for a file that did not change (the referenced-vertices fix would have been masked by the cache otherwise).
-FEATURES_VERSION = 6   # 3: non-TRIANGLES primitives block the mesh; triangle_free carried. 4: the islands after the Workshop's 1 % distance merge. 5: a blocked mesh's bounds are empty, not nan. 6: island_shapes and file_nodes
+FEATURES_VERSION = 7   # 3: non-TRIANGLES primitives block the mesh; triangle_free carried. 4: the islands after the Workshop's 1 % distance merge. 5: a blocked mesh's bounds are empty, not nan. 6: island_shapes and file_nodes. 7: a near-zero extent is compared against the island's size
 
 
 WINDOWS_EPOCH_TICKS = 621355968000000000   # .NET ticks (100 ns) at 1970-01-01, what FileInfo.LastWriteTimeUtc.Ticks counts from

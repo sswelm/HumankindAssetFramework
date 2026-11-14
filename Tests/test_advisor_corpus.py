@@ -13,6 +13,7 @@ import shutil
 import struct
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "advisor"))
@@ -604,6 +605,54 @@ class DistanceMerge(unittest.TestCase):
                          positions=[[(0, 0, 0), (1, 0, 0)], square(0, 0, 1)], index_lists=[[0, 1], [0, 1, 2, 1, 3, 2]], modes={0: 1})
         rows = corpus.glb_parts(lines)
         self.assertEqual([(r["island_shapes"], r["file_nodes"]) for r in rows], [(0, 2), (1, 2)])
+
+    def test_flat_copies_turned_a_quarter_are_one_shape(self):
+        # review of PR #282: a flat window's thickness is exactly 0, its turned copy's is the rotation's rounding; a
+        # purely relative tolerance called every such pair different. Fourteen windows, alternately in the XY plane
+        # and stood up in XZ with a 1e-7 wobble in the thin axis, are one shape. A plate a tenth as thick as wide
+        # is not a flat window.
+        quads = []
+        for i in range(14):
+            x = 30.0 * i
+            if i % 2 == 0:
+                quads.append([(x, 0, 0), (x + 1, 0, 0), (x, 1, 0), (x + 1, 1, 0)])
+            else:
+                quads.append([(x, 0, 0), (x + 1, 1e-7, 0), (x, 0, 1), (x + 1, 0, 1)])
+        f = self.features(tri_mesh(quads))
+        self.assertEqual((f["islands"], f["island_shapes"]), (14, 1))
+        self.assertTrue(corpus.same_shape((0.0, 1.0, 1.0), (0.0014, 1.0, 1.0)))     # under 3 % of 5 % of the size
+        self.assertFalse(corpus.same_shape((0.0, 1.0, 1.0), (0.1, 1.0, 1.0)))       # a plate, not a flat window
+        self.assertFalse(corpus.same_shape((0.0, 0.01, 1.0), (0.0, 0.02, 1.0)))     # 1 % of the size apart: over the floor's 0.15 %
+        self.assertTrue(corpus.same_shape((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)))        # two points
+
+    def test_the_shape_count_is_the_all_pairs_greedy_one_without_scanning_every_group(self):
+        # the grid must give exactly the count of the plain rule (an island joins the earliest group whose first member
+        # it matches), on shapes chosen to sit on cell edges, on the flat floor and at zero
+        def plain(signatures):
+            firsts = []
+            for t, e in sorted(signatures, reverse=True):
+                if not any(gt == t and corpus.same_shape(e, ge) for gt, ge in firsts):
+                    firsts.append((t, e))
+            return len(firsts)
+        import random
+        rng = random.Random(282)
+        for trial in range(60):
+            sigs = []
+            for _ in range(rng.randint(1, 120)):
+                size = rng.choice((1.0, 1.0, 2.0, 50.0)) * (1.0 + rng.choice((0.0, 0.0299, 0.0301, 0.06, -0.029)) * rng.random())
+                mid = size * rng.choice((1.0, 0.5, 0.05, 0.049, 0.0515, 0.001, 0.0))
+                thin = min(mid, size * rng.choice((0.3, 0.05, 0.0014, 0.0016, 1e-7, 0.0)))
+                sigs.append((rng.choice((2, 2, 12)), (thin, mid, size)))
+            sigs.extend([(2, (0.0, 0.0, 0.0))] * rng.randint(0, 3))
+            self.assertEqual(corpus.count_shapes(sigs), plain(sigs), trial)
+        # 20,000 islands of 20,000 different sizes: sixteen hundred times the comparisons of the reviewed 4,000-triangle
+        # file if every group were scanned (minutes); the grid takes well under the bound on any machine
+        # (each size 5 % over the last, each width 5 % under the last and never below the flat floor: no two alike)
+        many = [(1, (0.0, 1.05 ** a * 1.05 ** -b, 1.05 ** a)) for a in range(400) for b in range(50)]
+        self.assertEqual(plain(many[:1500]), 1500)
+        t0 = time.time()
+        self.assertEqual(corpus.count_shapes(many), 20000)
+        self.assertLess(time.time() - t0, 20.0)
 
     def test_principal_axis_aspect_of_a_dash_and_of_a_square(self):
         _, aspect, _ = corpus.principal_axis(dash(0, 100, 0), [0, 0, 0], [100, 0.02, 0])

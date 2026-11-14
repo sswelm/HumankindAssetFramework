@@ -192,7 +192,8 @@ verdict in the table for every file; grouping is not started.**
   ones the user split (350, 735 and 2,561 triangles, 14 to 22 merged islands), while a fourth of the same size was
   left whole. The user's reason: "it depends on whether they are the same parts" (the part left whole is fourteen
   identical windows). `corpus.py` now counts that as `island_shapes`: the islands before the merge, two of them the
-  same shape when their triangle counts are equal and their boxes' sorted extents agree within 3 %; and carries
+  same shape when their triangle counts are equal and their boxes' sorted extents agree within 3 % (an extent near
+  zero within 3 % of a twentieth of the island's size, so a flat window and its turned copy are one shape); and carries
   `file_nodes`, the file's mesh-node count. On the U-boat the shape count separates all 9 multi-island parts (1 shape:
   left; 2 to 50: split). On the other models only half of it holds: of 3,089 raw/cut parts with two or more merged
   islands, 3 of the 220 one-shape parts were split, but also only 131 of the 397 with ten or more shapes; most of
