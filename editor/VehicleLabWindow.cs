@@ -1385,13 +1385,16 @@ public class VehicleLabWindow : EditorWindow
             // even though the mesh path handles a motion-less rig fine. Fast path excluded: geometry work is
             // inert there (the info box above says so).
             bool TierActive(Role rr, float pct) => pct > 0.5f && list.Any(x => x.role == rr);
-            bool geometryWork = !FastPath && (doubleSided || fixInsideOut || list.Any(x => x.role == Role.Flip)
-                || TierActive(Role.Rigging, riggingReducePct) || TierActive(Role.Structure, structureReducePct)
+            bool reduceWork = TierActive(Role.Rigging, riggingReducePct) || TierActive(Role.Structure, structureReducePct)
                 || TierActive(Role.Body, bodyReducePct) || TierActive(Role.Oar, oarReducePct)
                 || TierActive(Role.Sail, sailReducePct) || TierActive(Role.Rudder, rudderReducePct)
                 || TierActive(Role.Wheel, wheelReducePct) || TierActive(Role.Flip, flipReducePct)
                 || TierActive(Role.Preserve, preserveReducePct) || TierActive(Role.Detail, detailReducePct)
-                || TierActive(Role.Default, defaultReducePct) || TierActive(Role.Shroud, shroudReducePct) || TierActive(Role.Turret, turretReducePct) || TierActive(Role.Gun, gunReducePct) || TierActive(Role.Window, windowReducePct) || TierActive(Role.Railing, railingReducePct));
+                || TierActive(Role.Default, defaultReducePct) || TierActive(Role.Shroud, shroudReducePct) || TierActive(Role.Turret, turretReducePct) || TierActive(Role.Gun, gunReducePct) || TierActive(Role.Window, windowReducePct) || TierActive(Role.Railing, railingReducePct);
+            bool twoSidedMarked = list.Any(x => x.role == Role.TwoSided);
+            bool geometryWork = VehicleLabRules.HasGeometryWork(FastPath, doubleSided || fixInsideOut,
+                list.Any(x => x.role == Role.Flip), twoSidedMarked, reduceWork);
+            string fastTwoSided = VehicleLabRules.TwoSidedFastPathRefusal(FastPath, twoSidedMarked);
             bool wantSailFold = sailFoldIdle && list.Any(x => x.role == Role.Sail);
             bool fastSailFold = FastPath && wantSailFold;
             bool hasModel2 = !string.IsNullOrWhiteSpace(srcFile2);   // a merge is real geometry work: two static hulls may need no spinner at all
@@ -1399,7 +1402,7 @@ public class VehicleLabWindow : EditorWindow
             bool wantBright = Mathf.Abs(model1Bright - 1f) > 0.005f || (hasModel2 && Mathf.Abs(model2Bright - 1f) > 0.005f);   // PR #34 review P4: the documented standalone brightness must satisfy the gate
             bool wantFlagFold = flagFoldOn && list.Any(x => x.role == Role.Flag);   // the flag fold needs the generated Flag bone + Furl clip
             bool fastFlagFold = FastPath && wantFlagFold;
-            bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && fastFlip == 0 && !fastWave && !fastSailFold && !fastModel2 && !fastFlagFold && fastWheels > 0)
+            bool canRig = FastPath ? (!fastPathOars && fastRotors == 0 && fastFlip == 0 && fastTwoSided == null && !fastWave && !fastSailFold && !fastModel2 && !fastFlagFold && fastWheels > 0)
                                    : (wheels > 0 || oars > 0 || wantWave || geometryWork || wantSailFold || hasModel2 || wantBright || wantFlagFold);
             // The rest of Vertices control (facing fixes + reduce dials) is INERT on the fast path — rigfast
             // exports the source mesh untouched. Not a reject (dials are passive), but say it (PR #28 review:
@@ -1420,6 +1423,8 @@ public class VehicleLabWindow : EditorWindow
             if (fastFlip > 0)
                 EditorGUILayout.HelpBox("Flip (winding surgery) doesn't run on the source-skeleton fast path — rigfast " +
                     "exports the source geometry as-is. Disable Use source skeleton to flip mesh parts.", MessageType.Warning);
+            if (fastTwoSided != null)
+                EditorGUILayout.HelpBox(fastTwoSided, MessageType.Warning);
             if (fastWave)
                 EditorGUILayout.HelpBox("Wave rock doesn't run on the source-skeleton fast path — disable Use source " +
                     "skeleton to rig the mesh with a rocking hull.", MessageType.Warning);
@@ -1443,11 +1448,12 @@ public class VehicleLabWindow : EditorWindow
                         fastPathOars ? "Disable the source-skeleton fast path before recovering oars from merged mesh geometry."
                         : fastRotors > 0 ? "Mark the spinning source bone as Wheel, or disable the source-skeleton fast path."
                         : fastFlip > 0 ? "Disable the source-skeleton fast path to flip mesh-part winding."
+                        : fastTwoSided != null ? fastTwoSided
                         : fastWave ? "Disable the source-skeleton fast path to use Wave rock."
                         : fastSailFold ? "Disable the source-skeleton fast path to use Fold sail at idle."
                         : fastModel2 ? "Disable the source-skeleton fast path to merge a second model."
                         : !canRig ? (FastPath ? "Mark at least one source bone as Wheel — the fast path spins wheel bones."
-                                              : "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar, set a Wave rock amplitude — or request geometry work (Flip, a facing fix, an active reduce dial): a Generate can be pure geometry surgery.")
+                                              : "Mark at least one entry as Wheel / Rotor / Tail rotor / Oar, set a Wave rock amplitude — or request geometry work (Flip, Two-sided, a facing fix, an active reduce dial): a Generate can be pure geometry surgery.")
                         : "Generates the rig, actions, GLB and preview with the selected backend."), GUILayout.Height(28)))
                     Vehicleize();
         }
@@ -2260,6 +2266,8 @@ public class VehicleLabWindow : EditorWindow
     void Vehicleize()
     {
         lastStdout = ""; lastGenerateRoute = ""; lastGenerateFallback = "";
+        string twoSidedRefusal = VehicleLabRules.TwoSidedFastPathRefusal(FastPath, ActiveParts.Any(p => p.role == Role.TwoSided));
+        if (twoSidedRefusal != null) { status = twoSidedRefusal; return; }
         if (FastPath && ActiveParts.Any(p => p.role == Role.Oar))
         {
             status = "Oar recovery needs mesh parts. Disable Use source skeleton, Probe parts, then mark the merged oar meshes.";

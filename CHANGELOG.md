@@ -27,6 +27,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   Sail, Flag and Rudder are unchanged. The C# route leaves such a job to Blender by name; the pass is held by a
   Blender-side fixture check in the vehicle_rig drill. Not yet seen in game: whether the game draws a coincident copy
   as it draws the model's authored pairs is the open point.
+  PR #283 review: Two-sided alone enables a geometry-only Generate; the source-skeleton fast path refuses the
+  repair it cannot perform. Ray origins are pulled back if their bias crosses another surface, so a tiny closed
+  cube or thin slab beside distant geometry stays closed and gains no faces. Both shapes are production-script fixtures.
 
 - **Workshop advisor: the Split proposer learns "are they the same parts" (2026-11-14; the U-boat, the first model cut
   after the proposer existed).** It found the four big parts of `project_50_u-boat.glb` and missed three small ones

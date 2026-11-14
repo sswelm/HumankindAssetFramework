@@ -11,7 +11,7 @@ import unittest
 SCRIPT = Path(__file__).parents[1] / "editor" / "Tools~" / "vehicle_rig.py"
 SOURCE = SCRIPT.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE, filename=str(SCRIPT))
-PURE_NAMES = {"_fitted_cycle_count", "_oar_recovery_metrics", "_merge2_scale", "_tagged_reduce_pct", "_tagged_names_pct", "_rigid_link_budget"}
+PURE_NAMES = {"_fitted_cycle_count", "_oar_recovery_metrics", "_merge2_scale", "_tagged_reduce_pct", "_tagged_names_pct", "_rigid_link_budget", "_two_sided_origin"}
 PURE_DEFS = [node for node in TREE.body if isinstance(node, ast.FunctionDef) and node.name in PURE_NAMES]
 if {node.name for node in PURE_DEFS} != PURE_NAMES:
     raise RuntimeError("Vehicle Lab pure helper contract changed; update this test deliberately")
@@ -20,6 +20,28 @@ exec(compile(ast.Module(body=PURE_DEFS, type_ignores=[]), str(SCRIPT), "exec"), 
 
 
 class VehicleRigMathTests(unittest.TestCase):
+    def test_two_sided_ray_bias_never_skips_an_intervening_wall(self):
+        class Planes:
+            def __init__(self, positions):
+                self.positions = positions
+
+            def ray_cast(self, origin, direction, limit):
+                hits = [((p - origin) / direction, i, p) for i, p in enumerate(self.positions)
+                        if 0 <= (p - origin) / direction <= limit]
+                if not hits:
+                    return (None, None, None, None)
+                distance, index, point = min(hits)
+                return (point, None, index, distance)
+
+        origin = NAMESPACE["_two_sided_origin"]
+        for sign in (-1.0, 1.0):
+            walls = Planes([0.0, sign * 1e-5, sign * 1e-4, sign * 1e-3])
+            start = origin(walls, 0.0, sign, 0.01, list(range(4)), 0)
+            self.assertGreater(sign * start, 0.0)
+            self.assertLess(sign * start, 1e-5)
+            # A single sheet has no wall to jump: keep the original bias, on either side.
+            self.assertEqual(sign * 0.01, origin(Planes([0.0]), 0.0, sign, 0.01, [0], 0))
+
     def test_rigid_links_respect_all_role_bones_and_exhausted_capacity(self):
         budget = NAMESPACE["_rigid_link_budget"]
         for existing, removable, tracks, expected in ((23, 18, 2, 60), (93, 18, 2, 25),

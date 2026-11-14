@@ -18,7 +18,7 @@ import traceback
 
 script, jobs, work = sys.argv[sys.argv.index("--") + 1:]
 source = open(script, encoding="utf-8").read()
-expected = {"fx_two_sided"}
+expected = {"fx_two_sided", "fx_two_sided_small", "fx_two_sided_thin"}
 seen = set()
 failed = False
 for row in open(jobs, encoding="utf-8"):
@@ -39,6 +39,26 @@ for row in open(jobs, encoding="utf-8"):
             exec(compile(source, script, "exec"), g)
         assert os.path.getsize(argv[2]) > 0, "no GLB export"
         text = log.getvalue()
+        if key != "fx_two_sided":
+            line = re.search(r"VEHICLE two-sided 'Mesh___two__Closed': (\d+) face\(s\) doubled \(the back shows\), (\d+) left; (\d+) authored twin\(s\) kept; (\d+) -> (\d+) verts", text)
+            assert line, "no closed-solid two-sided line"
+            assert tuple(int(x) for x in line.groups()) == (0, 12, 0, 8, 8), "a small closed solid was changed: " + line.group(0)
+            assert len(bpy.data.objects["Mesh___two__Closed"].data.polygons) == 12, "closed solid acquired back faces"
+            if key == "fx_two_sided_small":
+                # Even a direct/headless rigfast call must refuse the repair it cannot perform.
+                fast = list(argv); fast[0] = "rigfast"
+                sys.argv = [script, "--"] + fast
+                fast_log = io.StringIO()
+                with contextlib.redirect_stdout(fast_log):
+                    try:
+                        exec(compile(source, script, "exec"), {"__name__": "__main__", "__file__": script})
+                    except SystemExit as e:
+                        assert e.code == 1, "rigfast did not refuse the Two-sided role"
+                    else:
+                        raise AssertionError("rigfast silently accepted the Two-sided role")
+                assert "VEHICLE ERROR: Two-sided needs mesh parts" in fast_log.getvalue(), fast_log.getvalue()
+            print("TWOSIDED PASS\t" + key, flush=True)
+            continue
         line = re.search(r"VEHICLE two-sided 'Mesh___two__Tower': (\d+) face\(s\) doubled \(the back shows\), (\d+) left; (\d+) authored twin\(s\) kept; (\d+) -> (\d+) verts", text)
         assert line, "no per-mesh two-sided line"
         dbl, left, twins, v0, v1 = (int(x) for x in line.groups())

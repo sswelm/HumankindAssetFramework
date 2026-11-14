@@ -436,6 +436,13 @@ def two_sided_fixtures(out, models):
     wquad((7, 3.1, -1.0), (8.3, 3.1, -1.0), (8.3, 3.1, 1.0), (7, 3.1, 1.0))   # the cover
     r.node("Well", mesh=raw_mesh(r, "Well", ma, wpos, widx))
     recipe(out, "fx_two_sided", r.write(models, "fx_two_sided"), [("Hull", 0, {}), ("Tower", 25, {}), ("Well", 0, {})], sub="recipes_twosided", frames=4)
+    # A whole-model ray bias used to jump through these closed solids and double their faces.
+    # The thin slab also catches a bias based only on the face's edge length.
+    for key, scale in (("fx_two_sided_small", [.001, .001, .001]), ("fx_two_sided_thin", [1., 1., .0001])):
+        r = Rig(); ma = r.material("Steel")
+        r.node("Closed", mesh=r.mesh("Closed", material=ma), scale=scale)
+        r.node("Distant", mesh=r.mesh("Distant", material=ma), translation=[1000., 0., 0.])
+        recipe(out, key, r.write(models, key), [("Closed", 25, {}), ("Distant", 0, {})], sub="recipes_twosided", frames=4)
 
 
 def main(out):

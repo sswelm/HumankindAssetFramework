@@ -2403,9 +2403,15 @@ runs the production script on the fixture `fx_two_sided` (`recipes_twosided`: on
 closed cube wound inside-out, a free-standing sheet, an authored opposite pair, and a sheet under a cover in a walled well that no
 straight line reaches from outside) and holds the result to the INPUT: the log's counts (16 doubled, 16 left, 4 twins, 16 new
 vertices); the pieces' face counts (12, 24, 4, 4, 4); the outward cube untouched; every doubled face with exactly one partner on
-its own position, wound the other way; the pair untouched. One `TWOSIDED PASS` row is required. Planted once, each refused: the
+its own position, wound the other way; the pair untouched. The review of PR #283 adds `fx_two_sided_small` and
+`fx_two_sided_thin`: a closed cube of side 0.001 and a slab of thickness 0.0001 beside a box 1,000 units away. Both must
+keep all 12 original triangles and 8 vertices, with no doubled faces. The ray bias must not skip an intervening wall;
+backward rays pull its origin back until this is true. The small-cube case also verifies that a direct `rigfast` call
+refuses the Two-sided repair instead of silently ignoring it. Three `TWOSIDED PASS` rows are required. Planted once, each refused: the
 pass skipped, the twin rule off, the open-pocket test off (the well's sheet is then missed), the front side tested instead of the
 back, every face doubled, the copy not reversed, the copy moved.
+Pure tests also hold ray-origin retreat across several walls in both directions, and the Lab's Generate gate treats
+Two-sided alone as geometry work while refusing it on the source-skeleton fast path.
 
 The pass's design was decided by a see-through census on the U-boat part it was written for (rays from 301 outside directions
 the pass does not use; a ray counts when it meets a culled back with nothing drawn within 1.5 insets behind): the source 4,529

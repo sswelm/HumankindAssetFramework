@@ -9,6 +9,23 @@ namespace HumankindAssetFramework.Tests
     // hard-capped at 8 fields, so the NEXT field added to the script would have emptied the Lab with no log.
     public class VehicleLabRulesTests
     {
+        [Theory]
+        [InlineData(false, false, false, true, false, true)]
+        [InlineData(false, false, false, false, false, false)]
+        [InlineData(false, true, false, false, false, true)]
+        [InlineData(false, false, true, false, false, true)]
+        [InlineData(false, false, false, false, true, true)]
+        [InlineData(true, true, true, true, true, false)]
+        public void Geometry_only_generation_includes_Two_sided_and_excludes_the_fast_path(
+            bool fast, bool facing, bool flip, bool twoSided, bool reduce, bool expected)
+            => Assert.Equal(expected, VehicleLabRules.HasGeometryWork(fast, facing, flip, twoSided, reduce));
+
+        [Theory]
+        [InlineData(false, false, false)][InlineData(false, true, false)]
+        [InlineData(true, false, false)][InlineData(true, true, true)]
+        public void A_Two_sided_fast_path_job_is_refused_instead_of_reporting_a_successful_no_op(bool fast, bool marked, bool refused)
+            => Assert.Equal(refused, VehicleLabRules.TwoSidedFastPathRefusal(fast, marked) != null);
+
         [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
         static extern bool CreateHardLink(string link, string existing, System.IntPtr reserved);
 

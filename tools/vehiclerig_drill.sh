@@ -84,7 +84,7 @@ grep '^RIGID PASS' "$TMPD/rigid.txt"
 oracle_blender two_sided "$TMPD/twosided_raw.txt" --dir twosided_exports --key "$SCRIPT" "$ROOT/tools/vehiclerig-drill/blender_two_sided_check.py" "$WTMP/twosided_jobs.txt" -- --background --python "$(cygpath -m "$ROOT/tools/vehiclerig-drill/blender_two_sided_check.py")" -- "$(cygpath -m "$SCRIPT")" "$WTMP/twosided_jobs.txt" "$WTMP/twosided_exports"
 trc=$?; oracle_check
 tr -d '\r' < "$TMPD/twosided_raw.txt" > "$TMPD/twosided.txt"
-if [ "$trc" -ne 0 ] || [ "$(grep -c '^TWOSIDED PASS' "$TMPD/twosided.txt")" -ne 1 ] || grep -q '^TWOSIDED FAIL' "$TMPD/twosided.txt"; then
+if [ "$trc" -ne 0 ] || [ "$(grep -c '^TWOSIDED PASS' "$TMPD/twosided.txt")" -ne 3 ] || grep -q '^TWOSIDED FAIL' "$TMPD/twosided.txt"; then
   tail -50 "$TMPD/twosided.txt"; echo "FAIL — the Two-sided role's export pass"; exit 1
 fi
 grep '^TWOSIDED PASS' "$TMPD/twosided.txt"

@@ -119,6 +119,9 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Window** | Glazing — portholes, bridge windows, windshields, skylights — as a reduction tier of its own (**Window reduce (%)**): panes are often dense curved or bevelled sheets that read as a flat glint at game distance. Welded within each material, then collapsed, like Detail. Guessed from `window`, `windshield`, `windscreen`, `glass` in part names. |
 | **Default / Edgecase** (`D` / `E`) | Root-weighted review markers: undecided, or deliberately parked for another pass. Default has its own catch-all dial, **Default reduce (%)** — everything you never marked, cut in one move like Body. |
 
+Marking a part **Two-sided** alone enables Generate. Disable **Use source skeleton** for this repair: it needs mesh
+parts, and the source-skeleton fast path refuses it.
+
 The **Visibility** filter can isolate parts that escape-ray probing found fully enclosed. It is conservative: anything
 visible through an opening counts as external. Review interior parts before marking them Ignore.
 

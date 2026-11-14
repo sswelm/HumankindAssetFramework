@@ -1205,6 +1205,9 @@ if mode == "rigfast":
     if flip_names:
         print("VEHICLE ERROR: Flip (winding surgery) is not supported on the source-skeleton fast path — rigfast exports the source geometry as-is; disable the fast path to flip mesh parts")
         sys.exit(1)
+    if twosided_names:
+        print("VEHICLE ERROR: Two-sided needs mesh parts — disable the source-skeleton fast path to repair the marked faces")
+        sys.exit(1)
     if sail_fold:
         print("VEHICLE ERROR: Fold sail at idle needs the generated Sail fold chain (new bones + band skinning) — the source-skeleton fast path keeps the artist skeleton; disable the fast path or the fold option")
         sys.exit(1)
@@ -4074,13 +4077,27 @@ def _two_sided_newell(pw):
         _n += Vector(((_a.y - _b.y) * (_a.z + _b.z), (_a.z - _b.z) * (_a.x + _b.x), (_a.x - _b.x) * (_a.y + _b.y)))
     return _n
 
+def _two_sided_origin(bvh, sample, direction, epsilon, owners, own):
+    # The initial bias may span a small closed solid in a much larger model. Walk it back until the
+    # segment from the face crosses no other surface; a backward ray must meet this face first.
+    step = epsilon
+    while True:
+        origin = sample + direction * step
+        if origin == sample:
+            return sample
+        hit = bvh.ray_cast(origin, -direction, step * 1.01)
+        if hit[0] is None or owners[hit[2]] == own:
+            return origin
+        step = max(0.0, min(step * 0.25, (step - hit[3]) * 0.25))
+
 def _two_sided_pass(targets, everything):
     from mathutils.bvhtree import BVHTree
-    _vs = []; _ts = []; _twin = {}
+    _vs = []; _ts = []; _owners = []; _twin = {}
     for _o in everything:
         _m = _o.data; _m.calc_loop_triangles(); _base = len(_vs); _mw = _o.matrix_world
         _vs.extend(_mw @ _v.co for _v in _m.vertices)
         _ts.extend(tuple(_base + _i for _i in _lt.vertices) for _lt in _m.loop_triangles)
+        _owners.extend((_o, _lt.polygon_index) for _lt in _m.loop_triangles)
         for _p in _m.polygons:
             _pw = [_vs[_base + _i] for _i in _p.vertices]
             _twin.setdefault(frozenset(tuple(_q) for _q in _pw), []).append(_two_sided_newell(_pw))
@@ -4106,7 +4123,7 @@ def _two_sided_pass(targets, everything):
                 for _d in _dirs:
                     if _d.dot(_n) > -1e-3:
                         continue                                  # the back side's directions only
-                    _org = _s + _d * _eps
+                    _org = _two_sided_origin(_bvh, _s, _d, _eps, _owners, (_o, _p.index))
                     _hit = _bvh.ray_cast(_org, _d)
                     if _hit[0] is None:
                         _back = True; break
