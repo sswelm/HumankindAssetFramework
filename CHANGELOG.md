@@ -10,6 +10,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Workshop advisor: the Split proposer learns "are they the same parts" (2026-11-14; the U-boat, the first model cut
+  after the proposer existed).** It found the four big parts of `project_50_u-boat.glb` and missed three small ones
+  the user split, while a fourth of the same size (fourteen identical windows) was rightly left whole: "my logic for
+  splitting depends on whether they are the same parts". `corpus.py` carries two new features (cache v6):
+  `island_shapes`, how many different things a part's islands are (same triangle count, sorted box extents within
+  3 %), and `file_nodes`, the file's mesh-node count. `proposers/split.py` gains a second route beside its rule: at
+  least S shapes in a file of at most N nodes, learned on the other models and used only when it beats the rule alone
+  there. Leave-one-model-out on 12 models (188 splits): 71 % precision / 77 % recall (144 right, 60 wrong, 44 missed)
+  becomes 68 % / 86 % (161, 76, 27); the U-boat 7 of 7, none wrong. The node count does most of the work, the shape
+  count removes the identical-copies case; the cost and the controls are in
+  [Workshop-Advisor-Plan.md](docs/Workshop-Advisor-Plan.md). Three new cases (82), seven planted defects caught.
+
 - **Docs: what the pawn buffer costs and how far it stretches (2026-11-13; "make sure it's properly documented").**
   Vertex-Budget quoted three different costs for `BufferOverrides` (~28 B per vertex, VRAM only; ~48 MB per million),
   none measured. The pawn vertex record is 36 bytes (`Marshal.SizeOf` on the game's assembly), and the engine keeps

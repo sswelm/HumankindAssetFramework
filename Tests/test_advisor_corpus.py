@@ -581,6 +581,30 @@ class DistanceMerge(unittest.TestCase):
         f = self.features(tri_mesh([dash(0, 100, 0)]))
         self.assertEqual((f["islands"], f["islands_merged"], f["island_top_pct"], f["island_second_pct"], f["islands_big"]), (1, 1, 100.0, 0.0, 1))
 
+    def test_island_shapes_counts_different_things_not_islands(self):
+        def square(x, y, side):
+            return [(x, y, 0), (x + side, y, 0), (x, y + side, 0), (x + side, y + side, 0)]
+        # four identical windows far apart: four islands, one shape
+        f = self.features(tri_mesh([square(0, 0, 1), square(30, 0, 1), square(60, 0, 1), square(90, 0, 1)]))
+        self.assertEqual((f["islands"], f["island_shapes"]), (4, 1))
+        # a copy turned a quarter (extents swapped) and one 2 % larger are still the same thing; one 10 % larger is not
+        turned = [(30, 0, 0), (30, 4, 0), (31, 0, 0), (31, 4, 0)]
+        f = self.features(tri_mesh([[(0, 0, 0), (4, 0, 0), (0, 1, 0), (4, 1, 0)], turned,
+                                    [(60, 0, 0), (64.08, 0, 0), (60, 1.02, 0), (64.08, 1.02, 0)], [(90, 0, 0), (94.4, 0, 0), (90, 1.1, 0), (94.4, 1.1, 0)]]))
+        self.assertEqual((f["islands"], f["island_shapes"]), (4, 2))
+        # the same box with another triangle count is another thing: a quad of two triangles beside one of four
+        pts = square(0, 0, 1) + [(30, 0, 0), (31, 0, 0), (30, 1, 0), (31, 1, 0), (30.5, 0.5, 0)]
+        glb = make_glb(nodes=[{"name": "P", "mesh": 0}], meshes=[[(0, 0)]], positions=[pts],
+                       index_lists=[[0, 1, 2, 1, 3, 2, 4, 5, 8, 5, 7, 8, 7, 6, 8, 6, 4, 8]])
+        f = self.features(glb)
+        self.assertEqual((f["islands"], f["island_shapes"]), (2, 2))
+        # one island is one shape; a blocked (line) mesh has none; every row carries its file's mesh-node count
+        self.assertEqual(self.features(tri_mesh([dash(0, 100, 0)]))["island_shapes"], 1)
+        lines = make_glb(nodes=[{"name": "L", "mesh": 0}, {"name": "Q", "mesh": 1}], meshes=[[(0, 0)], [(1, 1)]],
+                         positions=[[(0, 0, 0), (1, 0, 0)], square(0, 0, 1)], index_lists=[[0, 1], [0, 1, 2, 1, 3, 2]], modes={0: 1})
+        rows = corpus.glb_parts(lines)
+        self.assertEqual([(r["island_shapes"], r["file_nodes"]) for r in rows], [(0, 2), (1, 2)])
+
     def test_principal_axis_aspect_of_a_dash_and_of_a_square(self):
         _, aspect, _ = corpus.principal_axis(dash(0, 100, 0), [0, 0, 0], [100, 0.02, 0])
         self.assertGreater(aspect, 3)
@@ -598,9 +622,57 @@ class SplitProposer(unittest.TestCase):
         cls.split = split
 
     @staticmethod
-    def row(model, i, tris, merged, big, truth="", blocked=""):
+    def row(model, i, tris, merged, big, truth="", blocked="", shapes=1, nodes=1000):
         return {"model": model, "file": model + "/m.glb", "node_index": i, "name": "n%d" % i, "stage": "raw", "tris": str(tris),
-                "islands_merged": str(merged), "islands_big": str(big), "blocked": blocked, "truth": truth}
+                "islands_merged": str(merged), "islands_big": str(big), "blocked": blocked, "truth": truth,
+                "island_shapes": str(shapes), "file_nodes": str(nodes)}
+
+    def bags(self, model, first, n, truth, shapes, nodes, tris=300, merged=12):
+        """n small many-island parts the first rule leaves (under its triangle floor): what the second route is for."""
+        return [self.row(model, first + i, tris + i, merged, 4, truth, shapes=shapes, nodes=nodes) for i in range(n)]
+
+    def big_rule_rows(self, model="a"):
+        """Twenty big splits and twenty small one-shape non-splits: the first rule alone separates them."""
+        return [self.row(model, i, 9000 + i, 8, 4, "S") for i in range(20)] + [self.row(model, 100 + i, 9000, 1, 1) for i in range(20)]
+
+    def test_the_second_route_is_learned_when_it_beats_the_first_rule_and_only_then(self):
+        # small bags of many different shapes in a 16-node file are split; the same bags in a 2,000-node file are not
+        train = self.big_rule_rows() + self.bags("u", 1, 6, "S", shapes=12, nodes=16) + self.bags("big", 1, 30, "", shapes=12, nodes=2000)
+        rule = self.split.learn(train)
+        route = self.split.learn_second(train, rule)
+        self.assertIsNotNone(route)
+        s, n = route
+        self.assertTrue(0 < n < 2000 and 2 <= s <= 12, route)
+        test = [{k: v for k, v in r.items() if k != "truth"} for r in
+                (self.row("b", 1, 300, 12, 4, shapes=12, nodes=16),      # a bag of different things in a small file
+                 self.row("b", 2, 300, 14, 4, shapes=1, nodes=16),       # fourteen identical windows
+                 self.row("b", 3, 300, 12, 4, shapes=12, nodes=2000),    # the same bag in a file of thousands
+                 self.row("b", 4, 300, 1, 1, shapes=12, nodes=16),       # one island after the merge: nothing to split
+                 self.row("b", 5, 300, 12, 4, shapes=12, nodes=16, blocked="Only TRIANGLES"),
+                 self.row("b", 6, 300, 12, 4, shapes=12, nodes=""),      # node count not known: in no small file
+                 self.row("b", 7, 9500, 8, 4, shapes=1, nodes=2000))]    # the first rule still proposes on its own
+        preds = self.split.propose("split", test, train, {"model": "b"}, [])
+        self.assertEqual([preds[("b/m.glb", i)] for i in range(1, 8)], ["S", "", "", "", "", "", "S"])
+        self.assertEqual((self.split.LAST_RULE["s"], self.split.LAST_RULE["n"]), route)
+        # the route must BEAT the first rule: where the bags are not split in training it is not learned, and a later
+        # call's note carries no route from this one
+        quiet = self.big_rule_rows() + self.bags("u", 1, 6, "", shapes=12, nodes=16)
+        self.assertIsNone(self.split.learn_second(quiet, self.split.learn(quiet)))
+        preds = self.split.propose("split", test, quiet, {"model": "b"}, [])
+        self.assertEqual([preds[("b/m.glb", i)] for i in range(1, 8)], ["", "", "", "", "", "", "S"])
+        self.assertNotIn("s", self.split.LAST_RULE)
+
+    def test_the_second_routes_ties_go_to_the_stricter_pair_and_zero_nodes_means_any_file(self):
+        # every bag is split whatever the file's size: only n = 0 (any file) reaches the 2,000-node bags, and among the
+        # shape floors that keep all of them the highest one at or under their 12 shapes wins
+        # (rows of identical windows, as many islands and as small, keep the first rule at its triangle floor)
+        windows = self.bags("w", 1, 30, "", shapes=1, nodes=16) + self.bags("w2", 1, 30, "", shapes=1, nodes=2000)
+        train = self.big_rule_rows() + windows + self.bags("u", 1, 6, "S", shapes=12, nodes=16) + self.bags("big", 1, 6, "S", shapes=12, nodes=2000)
+        self.assertEqual(self.split.learn_second(train, self.split.learn(train)), (10, 0))
+        self.assertTrue(self.split.second(self.row("b", 1, 300, 12, 4, shapes=10, nodes=""), 10, 0))
+        # with only the small file's bags, every n from 20 up scores the same: the smallest file limit wins
+        train = self.big_rule_rows() + windows + self.bags("u", 1, 6, "S", shapes=12, nodes=16)
+        self.assertEqual(self.split.learn_second(train, self.split.learn(train)), (10, 20))
 
     def test_the_rule_is_learned_from_the_training_rows_and_applied_without_truth(self):
         train = []

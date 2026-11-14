@@ -4132,6 +4132,15 @@ known - empty, nan or an infinity - is never a deletion candidate nor its file's
 The 2026-11-10 review adds three cases (79 total): each individual dimension must be finite and nonnegative;
 conflicting letters for the same canonical node index are refused in either proposer order with the old file
 unchanged; and an encoding failure during a write preserves all previous proposals and leaves no temporary file.
+The Split proposer's second route (2026-11-14) adds three (82 total): `island_shapes` counts different things, not
+islands (four identical windows are one shape; a copy turned a quarter or 2 % larger is the same thing, one 10 % larger
+or with another triangle count is not; a blocked mesh has none) and every row carries its file's mesh-node count; the
+route is learned when it beats the first rule on the training rows and only then (a bag of different shapes in a small
+file is proposed; identical windows, the same bag in a file of thousands, a part of one merged island, a blocked part
+and a part whose file's node count is not known are not), and a later call's note carries no route from an earlier
+one; ties go to the stricter pair and a node limit of 0 means any file. Seven planted defects (the shape clause
+dropped, a tie taking the route, ties to the looser pair, an unknown node count passing, unsorted extents, the
+triangle count ignored, a wrong node count) each fail a case.
 
 The critical review of PR #195 added a high-valence cone, tiny loose parts and non-polygon primitives. Matching every
 pair of edges in one lower-vertex bucket made a 32,000-face fan take 3.90 s against 9 ms before the parallelization.
