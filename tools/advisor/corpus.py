@@ -64,7 +64,7 @@ DEFAULT_RECIPES = "C:/Repo/ENCReload/Assets/FactorySource/VehicleLab/Recipes"
 CATEGORY = {
     "ship": ["CoastalMonitor", "Espana", "Khalandion", "Peddle Gunboat", "Peddle Steam Boat", "Protected Cruiser", "RMS Teutonic",
              "RobertsHeavyMonitor", "SS Romanic", "SiriusLightCruiser", "Steam Frigate", "Steam Ship Of The Line", "OceanLiner",
-             "Triconter", "Dugout Canoe", "Great Eastern", "EarlySteamer", "SlavaMissileCruiser", "SubmarineDiver"],
+             "Triconter", "Dugout Canoe", "Great Eastern", "EarlySteamer", "SlavaMissileCruiser", "SubmarineDiver", "TurbineSubmarine"],
     "armour": ["Abrams", "Bradley", "Heavy Tiger", "Jagdpanzer Tank Destroyer", "SU122", "T-62", "Tiger Tank", "Tiger",
                "Armored Car Ehnhardt", "Lancia IZ armored car", "Rolls-Royce armoured car", "HalftrackGun", "m901"],
     "aircraft": ["Bell H-13", "F-117 Nighthawk", "F-86F Saber", "F15 Eagle", "GlobalHawk", "Mig-15", "Rah66", "U2", "WW1Bomber", "Zeppelin"],
@@ -78,7 +78,7 @@ FOLDER_CATEGORY = {f: c for c, fs in CATEGORY.items() for f in fs}
 
 PART_COLUMNS = ["model", "category", "file", "stage", "node_index", "name", "file_name", "mesh_index", "mesh_shared", "parent_index",
                 "depth", "verts", "tris", "islands", "islands_merged", "island_top_pct", "island_second_pct", "islands_big",
-                "cx", "cy", "cz", "sx", "sy", "sz", "blocked", "triangle_free",
+                "island_shapes", "file_nodes", "cx", "cy", "cz", "sx", "sy", "sz", "blocked", "triangle_free",
                 "mark", "auto_mark", "mark_later", "fuse_letter", "fuse_group_name", "fused_into", "fused_letter",
                 "role", "role_id", "vis", "flip", "bone", "vis_from", "placed", "recipe", "recipe_verts", "recipe_name", "name_join", "role_via_fuse", "recipe_via_fuse"]
 MODEL_COLUMNS = ["model", "category", "files", "recipe", "recipe_src", "recipe_src_stage", "recipe_parts", "recipe_parts_matched", "dials"]
@@ -356,7 +356,8 @@ def analyse_mesh(glb, mesh_index):
         dsu_parent = dsu.p
     if verts == 0:
         return {"verts": 0, "tris": 0, "islands": 1 if blocked is None else 0, "lo": [0.0] * 3, "hi": [0.0] * 3, "unique": [], "blocked": blocked,
-                "triangle_free": triangle_free, "islands_merged": 1 if blocked is None else 0, "island_top_pct": 100.0, "island_second_pct": 0.0, "islands_big": 1 if blocked is None else 0}
+                "triangle_free": triangle_free, "islands_merged": 1 if blocked is None else 0, "island_top_pct": 100.0, "island_second_pct": 0.0, "islands_big": 1 if blocked is None else 0,
+                "island_shapes": 1 if blocked is None else 0}
     dsu = Dsu(0)
     dsu.p = dsu_parent
     roots = set(dsu.find(i) for i in range(len(unique)))
@@ -366,7 +367,87 @@ def analyse_mesh(glb, mesh_index):
     return {"verts": verts, "tris": tris, "islands": len(roots), "lo": lo, "hi": hi, "unique": unique, "blocked": blocked, "triangle_free": triangle_free,
             "islands_merged": len(merged), "island_top_pct": 100.0 * merged[0] / total if merged else 0.0,
             "island_second_pct": 100.0 * merged[1] / total if len(merged) > 1 else 0.0,
-            "islands_big": sum(1 for t in merged if t >= 0.01 * total)}
+            "islands_big": sum(1 for t in merged if t >= 0.01 * total),
+            "island_shapes": island_shape_count(unique, tri_ids, dsu)}
+
+
+# HOW MANY DIFFERENT THINGS A PART HOLDS (2026-11-14, the U-boat: "my logic for splitting depends on whether they are
+# the same parts"). The user leaves a part of fourteen identical islands whole and splits one of fourteen different
+# ones; the island count reads the same for both. Two islands (the exact-position weld's, BEFORE the distance merge:
+# a copy is a copy wherever it sits) are the same shape when they have the same triangle count and their boxes'
+# sorted extents agree within SHAPE_TOLERANCE each - sorted, so a copy turned a quarter or mirrored is still a copy.
+# AN EXTENT NEAR ZERO is compared against the island's size, not against itself (review of PR #282: a flat window has
+# a thickness of exactly 0, its quarter-turned copy one of 1e-7 from the rotation's rounding, and a purely relative
+# tolerance called fourteen such windows fourteen shapes): the allowed difference is SHAPE_TOLERANCE of the larger of
+# the two extents and SHAPE_FLAT of the larger island's largest extent.
+# Greedy in descending (triangles, extents) order, an island joining the EARLIEST group whose first member it matches,
+# so the count does not depend on the file's vertex order. An island without a triangle (a referenced vertex no
+# triangle uses) is not counted.
+SHAPE_TOLERANCE = 0.03
+SHAPE_FLAT = 0.05
+_SHAPE_CELL = -math.log(1.0 - SHAPE_TOLERANCE) * (1.0 + 1e-9)   # two matching extents are under one cell apart
+
+
+def same_shape(e, g):
+    """Sorted extents e and g (ascending) of two islands with the same triangle count."""
+    floor = SHAPE_FLAT * max(e[2], g[2])
+    return all(abs(a - b) <= SHAPE_TOLERANCE * max(a, b, floor) for a, b in zip(e, g))
+
+
+def count_shapes(signatures):
+    """The number of shape groups among (triangles, sorted extents) signatures. Each island looks only at the groups
+    in its own and the neighbouring cells of a logarithmic grid over the three extents (an extent under the flat floor
+    sits in the floor's cell), 27 lookups whatever the part holds: scanning every group made a part of 4,000 different
+    islands cost sixteen million comparisons (review of PR #282, 0.31 s to 5.12 s on a 4,000-triangle file)."""
+    groups = {}   # (triangles, cell, cell, cell) -> [(creation order, extents of the first member)]
+    made = 0
+    for t, e in sorted(signatures, reverse=True):
+        size = e[2]
+        if size > 0.0:
+            cell = tuple(int(math.floor(math.log(max(x, SHAPE_FLAT * size)) / _SHAPE_CELL)) for x in e)
+        else:
+            cell = None   # a point: every extent zero; the same thing as every other point of its triangle count
+        best = None
+        if cell is None:
+            for order, g in groups.get((t, None), ()):
+                if same_shape(e, g) and (best is None or order < best):
+                    best = order
+        else:
+            for i in (cell[0] - 1, cell[0], cell[0] + 1):
+                for j in (cell[1] - 1, cell[1], cell[1] + 1):
+                    for k in (cell[2] - 1, cell[2], cell[2] + 1):
+                        for order, g in groups.get((t, i, j, k), ()):
+                            if same_shape(e, g) and (best is None or order < best):
+                                best = order
+        if best is None:
+            groups.setdefault((t, None) if cell is None else (t,) + cell, []).append((made, e))
+            made += 1
+    return made
+
+
+def island_shape_count(unique, tri_ids, dsu):
+    find = dsu.find
+    tris = {}
+    for a, _, _ in tri_ids:
+        r = find(a)
+        tris[r] = tris.get(r, 0) + 1
+    lo = {}
+    hi = {}
+    for v, p in enumerate(unique):
+        r = find(v)
+        if r not in tris:
+            continue
+        if r not in lo:
+            lo[r] = list(p)
+            hi[r] = list(p)
+            continue
+        l, h = lo[r], hi[r]
+        for k in (0, 1, 2):
+            if p[k] < l[k]:
+                l[k] = p[k]
+            if p[k] > h[k]:
+                h[k] = p[k]
+    return count_shapes((tris[r], tuple(sorted(hi[r][k] - lo[r][k] for k in (0, 1, 2)))) for r in tris)
 
 
 # THE WORKSHOP'S DISTANCE MERGE (GlbDisconnectedParts.AnalyzeMesh, "DISTANCE MERGE (2026-09-06, the 602-island rope)"):
@@ -584,7 +665,10 @@ def glb_parts(data):
             "blocked": blocked or "", "triangle_free": int(bool(info.get("triangle_free"))),
             "islands_merged": info.get("islands_merged", 0), "island_top_pct": info.get("island_top_pct", 0.0),
             "island_second_pct": info.get("island_second_pct", 0.0), "islands_big": info.get("islands_big", 0),
+            "island_shapes": info.get("island_shapes", 0),
         })
+    for r in rows:
+        r["file_nodes"] = len(rows)   # how finely the file arrives cut: 16 material bags or 5,000 named fittings
     return rows
 
 
@@ -748,7 +832,7 @@ def recipe_dials(j):
 
 # Bump when a feature's definition changes: the cache below is keyed on it, so an old export never serves stale
 # features for a file that did not change (the referenced-vertices fix would have been masked by the cache otherwise).
-FEATURES_VERSION = 5   # 3: non-TRIANGLES primitives block the mesh; triangle_free carried. 4: the islands after the Workshop's 1 % distance merge. 5: a blocked mesh's bounds are empty, not nan
+FEATURES_VERSION = 7   # 3: non-TRIANGLES primitives block the mesh; triangle_free carried. 4: the islands after the Workshop's 1 % distance merge. 5: a blocked mesh's bounds are empty, not nan. 6: island_shapes and file_nodes. 7: a near-zero extent is compared against the island's size
 
 
 WINDOWS_EPOCH_TICKS = 621355968000000000   # .NET ticks (100 ns) at 1970-01-01, what FileInfo.LastWriteTimeUtc.Ticks counts from

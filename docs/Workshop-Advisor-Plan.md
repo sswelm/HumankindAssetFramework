@@ -187,6 +187,39 @@ verdict in the table for every file; grouping is not started.**
   splits mid-sized rigging and fittings that the rule cannot tell from the thousands of small multi-island parts
   left alone. The next feature to try is what the parts around a marked part look like (the same material, the
   same size band) rather than the part alone.
+- **The second route (2026-11-14, the U-boat).** The first new model cut after the proposer existed
+  (`TurbineSubmarine/project_50_u-boat.glb`, 16 nodes): the rule found the four big parts and missed three small
+  ones the user split (350, 735 and 2,561 triangles, 14 to 22 merged islands), while a fourth of the same size was
+  left whole. The user's reason: "it depends on whether they are the same parts" (the part left whole is fourteen
+  identical windows). `corpus.py` now counts that as `island_shapes`: the islands before the merge, two of them the
+  same shape when their triangle counts are equal and their boxes' sorted extents agree within 3 % (an extent near
+  zero within 3 % of a twentieth of the island's size, so a flat window and its turned copy are one shape); and carries
+  `file_nodes`, the file's mesh-node count. On the U-boat the shape count separates all 9 multi-island parts (1 shape:
+  left; 2 to 50: split). On the other models only half of it holds: of 3,089 raw/cut parts with two or more merged
+  islands, 3 of the 220 one-shape parts were split, but also only 131 of the 397 with ten or more shapes; most of
+  the unsplit ones are in files of hundreds or thousands of nodes. So the proposer gained a second route, not a
+  fourth threshold: a part the first rule leaves is proposed when it has at least S different shapes in a file of at
+  most N mesh nodes, S and N learned after K, T, B on the same training models and used only when they beat the
+  first rule alone there. Leave-one-model-out on the corpus of that day (10,478 splittable parts in 12 models and
+  13 files, 188 marked S or T):
+
+  | Rule | Precision | Recall | Proposed | Right | Wrong | Missed |
+  |---|---:|---:|---:|---:|---:|---:|
+  | first rule alone (the corpus has grown: 74 % / 78 % on 2026-11-09) | 71 % | 77 % | 204 | 144 | 60 | 44 |
+  | **with the second route** | **68 %** | **86 %** | 237 | 161 | 76 | 27 |
+
+  The route learned is 6 shapes in a file of at most 200 nodes on 10 of 12 folds (8 shapes on one, 100 nodes on
+  one). Its 33 extra proposals are 17 right and 16 wrong; the gain is on the Svea (12 to 19 found, 4 to 11 wrong),
+  the Roberts (20 to 24), the Surcouf (1 to 3 of 3) and the U-boat (4 to 7 of 7, none wrong). Three controls,
+  measured with a scratch learner before the build: the shape count as a fourth threshold of the first rule
+  changes nothing (144 right, 64 wrong); the route without the node limit is never learned; the route with the
+  merged island count in place of the shape count reaches the same recall with 78 wrong where the shapes give 76.
+  So the file's node count does most of the work and the shape count removes the identical-copies case. What it
+  costs and does not explain: precision is three points lower; in the 13 files that went to the Lab uncut
+  the route would propose 38 splits on eight models (21 on the Jagdpanzer) where the first rule proposes 13, unscored
+  because there is no mark to compare with; and within one file the choice between two small bags of eight to ten
+  shapes (the Svea's `Material3_3` split, `Material2_14` left) is about what the things are, which no feature here
+  sees. The beta and the route are choices the user made on these numbers ("yes for now").
 - Writing proposals: `python tools/advisor/proposers/split.py --corpus <dir> --model "<folder>" --write` puts
   `<file>.glb.marks.proposed.txt` beside each raw or cut GLB, in the sidecar's format, trained on every other
   model. Every raw/cut file present in the corpus is refreshed, including an empty proposal when nothing is

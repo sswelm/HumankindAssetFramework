@@ -9,6 +9,14 @@ model it is judged on. F1 over F0.5 was measured, not assumed (2026-11-09, leave
 files): F0.5 gave 72 % precision at 68 % recall, F1 74 % at 78 %; a within-file size percentile as a fourth
 threshold changed nothing under F1 and cost recall under F0.5, so the rule stays at three absolute thresholds.
 
+A SECOND ROUTE (2026-11-14, the U-boat): a part the first rule leaves is still proposed when it holds at least S
+different island shapes (corpus.py's island_shapes: fourteen identical windows are one shape, a bag of fittings is
+many) in a file of at most N mesh nodes (a file that arrives as a few material bags; 0 = any file). S and N are
+learned after K, T, B, on the same training models, and the route is used only when it BEATS the first rule alone
+there, so a corpus it does not help keeps the old rule. The user's own words for the choice: "it depends on whether
+they are the same parts"; the node count carries the rest (a small mixed node in a file of thousands goes into a fuse
+group as it is). Measured in docs/Workshop-Advisor-Plan.md.
+
 Used by the evaluator as a proposer module:
 
     python tools/advisor/evaluate.py --corpus <dir> --proposer tools/advisor/proposers/split.py
@@ -30,6 +38,8 @@ from fractions import Fraction
 K_GRID = (2, 3, 4, 5, 6, 8, 12)
 T_GRID = (0, 100, 200, 500, 1000, 2000, 5000, 10000, 20000)
 B_GRID = (0, 2, 3, 4)
+S_GRID = (2, 3, 4, 6, 8, 10, 15)
+N_GRID = (20, 50, 100, 200, 500, 0)   # 0: no limit on the file's node count
 LAST_RULE = {}   # the thresholds the last propose() chose, for tests and for the report
 
 
@@ -42,6 +52,14 @@ def num(v, default=0.0):
 
 def candidate(row, k, t, b):
     return (not row.get("blocked")) and num(row.get("islands_merged")) >= k and num(row.get("tris")) >= t and num(row.get("islands_big")) >= b
+
+
+def second(row, s, n):
+    """The second route: several islands after the merge, at least s different shapes among them, in a file of at most
+    n mesh nodes (n = 0: any file). A file whose node count is not known is in no file of at most n."""
+    if row.get("blocked") or num(row.get("islands_merged")) < 2 or num(row.get("island_shapes")) < s:
+        return False
+    return n == 0 or 1 <= num(row.get("file_nodes")) <= n
 
 
 def f_beta(tp, fp, fn, beta=1):
@@ -73,7 +91,31 @@ def learn(train):
     return best[1] if best and best[0][0] > 0 else None
 
 
-NEEDED = ("islands_merged", "islands_big", "tris", "blocked")
+def learn_second(train, rule):
+    """(s, n) for the second route on top of `rule` (learn's k, t, b), or None when no grid pair scores above the
+    first rule alone on the training rows. Ties go to the stricter pair (more shapes, then fewer nodes): the route
+    adds proposals, so the doubt goes against it."""
+    k, t, b = rule
+    positives = [r for r in train if r.get("truth") in ("S", "T")]
+    rest_pos = [r for r in positives if not candidate(r, k, t, b)]
+    rest_neg = [r for r in train if r.get("truth") not in ("S", "T") and not candidate(r, k, t, b)]
+    tp0 = len(positives) - len(rest_pos)
+    fp0 = sum(1 for r in train if r.get("truth") not in ("S", "T")) - len(rest_neg)
+    floor = f_beta(tp0, fp0, len(positives) - tp0)
+    best = None
+    for s, n in itertools.product(S_GRID, N_GRID):
+        tp = tp0 + sum(1 for r in rest_pos if second(r, s, n))
+        fp = fp0 + sum(1 for r in rest_neg if second(r, s, n))
+        score = f_beta(tp, fp, len(positives) - tp)
+        if score <= floor:
+            continue
+        key = (score, s, -(n or 10 ** 9))
+        if best is None or key > best[0]:
+            best = (key, (s, n))
+    return best[1] if best else None
+
+
+NEEDED = ("islands_merged", "islands_big", "tris", "blocked", "island_shapes", "file_nodes")
 
 
 def propose(task, test, train, test_model, train_models):
@@ -90,7 +132,11 @@ def propose(task, test, train, test_model, train_models):
         return {}
     k, t, b = rule
     LAST_RULE.update({"k": k, "t": t, "b": b, "model": test_model.get("model", "")})
-    return {(r["file"], r["node_index"] if r["node_index"] != "" else r["name"]): ("S" if candidate(r, k, t, b) else "") for r in test}
+    route = learn_second(train, rule)
+    if route is not None:
+        LAST_RULE.update({"s": route[0], "n": route[1]})
+    return {(r["file"], r["node_index"] if r["node_index"] != "" else r["name"]):
+            ("S" if candidate(r, k, t, b) or (route is not None and second(r, *route)) else "") for r in test}
 
 
 def main(argv=None):
@@ -123,6 +169,8 @@ def main(argv=None):
     if "k" in LAST_RULE:
         print("rule learned on %d parts of %d models: islands after merge >= %d, triangles >= %d, islands of 1%% or more >= %d"
               % (len(train), len(set(r["model"] for r in train)), LAST_RULE["k"], LAST_RULE["t"], LAST_RULE["b"]))
+        if "s" in LAST_RULE:
+            print("  or: different island shapes >= %d%s" % (LAST_RULE["s"], " in a file of at most %d mesh nodes" % LAST_RULE["n"] if LAST_RULE["n"] else ""))
     else:
         print("no split proposals: %s" % LAST_RULE.get("abstained", "no rule"))
     by_file = {}
@@ -135,7 +183,7 @@ def main(argv=None):
         print("%s: %d proposal(s)" % (rel, len(rows)))
         for r in rows:
             agree = " (marked %s)" % r["mark"] if r.get("mark") in ("S", "T") else (" (marked X)" if r.get("mark") == "X" else "")
-            print("  S|%s|%s  %s tris, %s islands after merge%s" % (r["node_index"], r["name"], r["tris"], r["islands_merged"], agree))
+            print("  S|%s|%s  %s tris, %s islands after merge, %s shape(s)%s" % (r["node_index"], r["name"], r["tris"], r["islands_merged"], r.get("island_shapes", ""), agree))
         if a.write:
             # the S lines of the one proposals file; another proposer's letters (delete.py's X) stay
             path = os.path.join(a.models_root, rel) + ".marks.proposed.txt"
