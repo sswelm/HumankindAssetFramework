@@ -66,7 +66,7 @@ public static class RigRouteAcceptanceTest
                 if (missingA.Count > 0) problems.Add("the FBX route's bake lacks " + string.Join(", ", missingA.Select(x => x.Substring(nameA.Length))));
                 if (missingB.Count > 0) problems.Add("the GLB route's bake lacks " + string.Join(", ", missingB.Select(x => x.Substring(nameB.Length))));
                 if (problems.Count == 0) CompareBakes(nameA, nameB, problems, notes);
-                if (problems.Count > 0) { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: " + string.Join("; ", problems)); }
+                if (problems.Count > 0) { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: " + string.Join("; ", problems) + (notes.Count > 0 ? "; " + notes[0] : "")); }
                 else { s.pass++; equal++; body.AppendLine($"PASS: {e.resourceName}: " + string.Join("; ", notes)); }
             }
             // a cancel keeps every verdict made so far (an hour's worth): the entry under way is named, the rest are not run
@@ -95,7 +95,7 @@ public static class RigRouteAcceptanceTest
     static void CompareBakes(string nameA, string nameB, List<string> problems, List<string> notes)
     {
         string root = Directory.GetParent(Application.dataPath).FullName;
-        int roles = 0, vertexSamples = 0; double worst = 0;
+        int roles = 0, vertexSamples = 0; double worst = 0; var census = new ClipCensus();
         for (int ri = 0; ri < RoleDirs.Length; ri++)
         {
             string dir = RoleDirs[ri];
@@ -112,7 +112,7 @@ public static class RigRouteAcceptanceTest
                 instA.hideFlags = instB.hideFlags = HideFlags.HideAndDontSave;
                 // Preserve each imported root's authored transform: normalizing it here would hide placement/scale errors.
                 // Both clones have no scene parent, so their asset transforms already share the same world space.
-                CompareRole(dir, instA, instB, clipA, clipB, problems, ref vertexSamples, ref worst);
+                CompareRole(dir, instA, instB, clipA, clipB, problems, ref vertexSamples, ref worst, census);
             }
             finally
             {
@@ -133,6 +133,8 @@ public static class RigRouteAcceptanceTest
             if (poseProblem != null) problems.Add($"role '{dir}': {poseProblem}");
         }
         if (roles == 0) problems.Add("no role's rig could be found on either route");
+        // the census line on PASS and FAIL alike: a FAIL stops its role at the first failing time, so its maximum is a lower bound
+        notes.Add(FormattableString.Invariant($"worst clip rotation {census.angle:0.####} degrees{(census.where.Length > 0 ? " (" + census.where + ")" : "")}{(problems.Count > 0 ? " - a lower bound, the failing role stopped early" : "")}"));
         notes.Add(FormattableString.Invariant($"{roles} role(s) equal: bones, mesh, placement and clips, {vertexSamples} skinned vertex samples within {worst:0.#####} of each other; non-empty role collections and pose streams with equal bone counts and encoding-compatible lengths (frame counts equal or one apart, the SDK's rounding)"));
     }
 
@@ -188,15 +190,16 @@ public static class RigRouteAcceptanceTest
     // through a hierarchy, so applying the same cap to world rotation/scale rejects valid deep rigs. The positional
     // and scale margins remain the row's acceptance policy, not a claim that Unity's percentage metrics use mesh extent.
     const float RestFraction = 1e-3f, RestAngle = 0.06f, RestScale = 1e-3f;
-    // ClipAngle 2 degrees is an empirical route-comparison policy (0.6 until 2026-10-28, then 1). Unity documents
-    // its default 0.5-degree rotation error as the angle between compressed and original quaternions, not per Euler axis:
-    // https://docs.unity3d.com/2021.3/Documentation/ScriptReference/ModelImporter-animationRotationError.html
-    // The UniversalTanks census measured 378 frames x 126 bones: 1,447 samples over 0.5 degrees, 41 over 1, none over
-    // 1.5, maximum 1.365 ('Box_001.087' at 13.375 s). Source spot checks agree with the GLB route at that frame and on
-    // the hull at 12.083 s; the FBX clips retain 97 and 105 of 378 rotation keys respectively. These finite measurements
-    // motivate the margin; they do not establish a per-axis importer guarantee or a bound between sampled times.
-    // First-frame transforms still use RestAngle, and local scale/position retain their separate limits.
-    internal const float ClipFraction = 0.015f, ClipAngle = 2f, ClipScale = 0.01f;
+    // ClipAngle 0.1 degree (2026-11-15; was 0.6, then 1, then 2 from 2026-10-28). The 1-2 degree allowance was paying for
+    // a LOSSY reference, not for noise: the FBX route's clips came from Blender's FBX exporter at its default
+    // bake_anim_simplify_factor 1.0, which drops keys and rounds reversals off (the TankDestroyers' rigid tread link,
+    // 2.0743 degrees at 13.333 s, measured to four digits in a Blender A/B; the 10-28 UniversalTanks census, 1.365, was
+    // blamed on Unity's reduction). rig_anim.py now exports with 0 and the Factory imports with no reduction; the row's
+    // own census (worst clip rotation, printed per entry) then read 0.0142 at most over all 23 entries, both kernel modes,
+    // every sampled frame (TankDestroyers 'b019_Track_00_R_L17' at 13.75 s; UniversalTanks 0.0038, was 1.5057). 0.1 is
+    // seven times that; a real route difference of a tenth of a degree now fails. Sampled times only - no bound between
+    // them. First-frame transforms still use RestAngle; local scale and position keep their separate limits (not re-measured).
+    internal const float ClipFraction = 0.015f, ClipAngle = 0.1f, ClipScale = 0.01f;
 
     static Transform BoneParent(Transform bone, Dictionary<string, Transform> bones)
     {
@@ -251,8 +254,17 @@ public static class RigRouteAcceptanceTest
         return 2 * Mathf.Rad2Deg * Mathf.Atan2(new Vector3(relative.x, relative.y, relative.z).magnitude, Mathf.Abs(relative.w));
     }
 
+    /// <summary>The largest parent-space rotation between the routes over every sampled clip time - the census a ClipAngle
+    /// is set from (2026-11-15: the row reported only its first failure, so each run showed one deviation, never the maximum).</summary>
+    internal sealed class ClipCensus
+    {
+        public float angle; public string where = "";
+        public void Offer(float a, string label, string bone) { if (a > angle) { angle = a; where = label + " bone '" + bone + "'"; } }
+    }
+
     static void CompareBones(string label, Dictionary<string, Transform> a, Dictionary<string, Transform> b,
-                             float tol, float angleTol, float scaleTol, bool local, Dictionary<string, Vector3> restA, Dictionary<string, Vector3> restB, List<string> problems, ref double worst)
+                             float tol, float angleTol, float scaleTol, bool local, Dictionary<string, Vector3> restA, Dictionary<string, Vector3> restB, List<string> problems, ref double worst,
+                             ClipCensus census = null)
     {
         foreach (var name in a.Keys)
         {
@@ -268,6 +280,7 @@ public static class RigRouteAcceptanceTest
             float distance = (pa != null ? pa.localToWorldMatrix.MultiplyVector(delta) : delta).magnitude;
             worst = Math.Max(worst, (ta.position - tb.position).magnitude);
             float angle = RotationAngle(qa, qb), axisAngle = AxisAngle(ma, mb), scaleDiff = AxisScaleDifference(ma, mb);
+            census?.Offer(angle, label, name);
             float axisTol = angleTol, matrixScaleTol = scaleTol, localScaleDiff = 0;
             if (local)
             {
@@ -341,7 +354,8 @@ public static class RigRouteAcceptanceTest
 
     static float Rel(float x, float y) => Mathf.Abs(x - y) / Mathf.Max(1e-6f, Mathf.Max(Mathf.Abs(x), Mathf.Abs(y)));
 
-    static void CompareRole(string dir, GameObject a, GameObject b, AnimationClip clipA, AnimationClip clipB, List<string> problems, ref int vertexSamples, ref double worst)
+    static void CompareRole(string dir, GameObject a, GameObject b, AnimationClip clipA, AnimationClip clipB, List<string> problems, ref int vertexSamples, ref double worst,
+                            ClipCensus census = null)
     {
         var smrA = a.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null).ToArray();
         var smrB = b.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null).ToArray();
@@ -391,7 +405,7 @@ public static class RigRouteAcceptanceTest
             BakeTestRunnerWindow.Progress.ThrowIfCancelled();
             clipA.SampleAnimation(a, t); clipB.SampleAnimation(b, t);
             int before = problems.Count;
-            CompareBones(FormattableString.Invariant($"role '{dir}' at {t:0.###} s"), byNameA, byNameB, tolClip, ClipAngle, ClipScale, true, restScalesA, restScalesB, problems, ref worst);
+            CompareBones(FormattableString.Invariant($"role '{dir}' at {t:0.###} s"), byNameA, byNameB, tolClip, ClipAngle, ClipScale, true, restScalesA, restScalesB, problems, ref worst, census);
             var cloudA = Positions(smrA); var cloudB = Positions(smrB);
             vertexSamples += cloudA.Count;
             float meshTol = Mathf.Max(tolClip, SkinMotionAllowance(envelopes) + tol);
