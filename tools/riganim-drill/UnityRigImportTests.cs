@@ -198,8 +198,9 @@ public static class UnityRigImportTests
             }
             finally { UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b); }
         }
-        // the Factory keeps the FBX importer's default compression (keys dropped within 0.5 degrees / 0.5%): the row's clip-time
-        // tolerance covers that allowance, so the default import must agree, and so must the uncompressed one
+        // Unity's default compression (keys dropped within 0.5 degrees / 0.5%) must still agree within the clip-time tolerance on
+        // this fixture, and so must the uncompressed import - which is what the Factory bakes since 2026-11-15 (UniversalBaker
+        // sets animationCompression Off: the SDK's per-frame pose stream gains nothing from reduction, the motion loses its peaks)
         Compare(true, "acceptance: the real FBX pair with Unity's default compression agrees within the clip-time allowance");
         imp.animationCompression = ModelImporterAnimationCompression.Off; imp.SaveAndReimport();
         Compare(true, "acceptance: real uncompressed FBX and GLB slim imports agree");

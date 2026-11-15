@@ -878,6 +878,11 @@ public static class UniversalBaker
         if (imp == null) return Fail("could not get ModelImporter for " + fbxRel);
         imp.animationType = ModelImporterAnimationType.Generic;
         imp.importAnimation = true;
+        // NO KEYFRAME REDUCTION (2026-11-15): the SDK samples the clip into a per-frame pose stream of a fixed size, so
+        // Unity's reduction saves nothing in the game - it only rounds the motion off. A rigid tread link reversing at
+        // 13.333 s on the TankDestroyers lost 2.074 degrees to it, against the GLB route's every key (Bake Tests' rig-route
+        // row). Set explicitly both ways: a prior bake stamps the importer's setting into the .meta.
+        imp.animationCompression = ModelImporterAnimationCompression.Off;
         // Tangents: EXPLICITLY set both ways (a prior bake stamps this into the .meta, so a bare "skip" leaves it stuck).
         // Single-material -> None: runtime neutralizes normal maps, so tangents are 16 B/vert of dead weight in the mesh +
         // hex skeleton. Multi-material -> CalculateMikk (the default): its mesh is REBUILT (Instantiate + submesh-merge),
@@ -923,6 +928,7 @@ public static class UniversalBaker
                 if (rimp == null) return Fail("could not get ModelImporter for " + roleRel);
                 rimp.animationType = ModelImporterAnimationType.Generic;
                 rimp.importAnimation = true;
+                rimp.animationCompression = imp.animationCompression;   // the role clips as faithful as the primary's
                 rimp.importTangents = ModelImporterTangents.CalculateMikk;
                 rimp.useFileScale = imp.useFileScale;
                 rimp.globalScale = imp.globalScale;

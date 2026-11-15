@@ -66,7 +66,7 @@ public static class RigRouteAcceptanceTest
                 if (missingA.Count > 0) problems.Add("the FBX route's bake lacks " + string.Join(", ", missingA.Select(x => x.Substring(nameA.Length))));
                 if (missingB.Count > 0) problems.Add("the GLB route's bake lacks " + string.Join(", ", missingB.Select(x => x.Substring(nameB.Length))));
                 if (problems.Count == 0) CompareBakes(nameA, nameB, problems, notes);
-                if (problems.Count > 0) { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: " + string.Join("; ", problems)); }
+                if (problems.Count > 0) { s.fail++; body.AppendLine($"FAIL: {e.resourceName}: " + string.Join("; ", problems) + (notes.Count > 0 ? "; " + notes[0] : "")); }
                 else { s.pass++; equal++; body.AppendLine($"PASS: {e.resourceName}: " + string.Join("; ", notes)); }
             }
             // a cancel keeps every verdict made so far (an hour's worth): the entry under way is named, the rest are not run
@@ -95,7 +95,7 @@ public static class RigRouteAcceptanceTest
     static void CompareBakes(string nameA, string nameB, List<string> problems, List<string> notes)
     {
         string root = Directory.GetParent(Application.dataPath).FullName;
-        int roles = 0, vertexSamples = 0; double worst = 0;
+        int roles = 0, vertexSamples = 0; double worst = 0; var census = new ClipCensus();
         for (int ri = 0; ri < RoleDirs.Length; ri++)
         {
             string dir = RoleDirs[ri];
@@ -112,7 +112,7 @@ public static class RigRouteAcceptanceTest
                 instA.hideFlags = instB.hideFlags = HideFlags.HideAndDontSave;
                 // Preserve each imported root's authored transform: normalizing it here would hide placement/scale errors.
                 // Both clones have no scene parent, so their asset transforms already share the same world space.
-                CompareRole(dir, instA, instB, clipA, clipB, problems, ref vertexSamples, ref worst);
+                CompareRole(dir, instA, instB, clipA, clipB, problems, ref vertexSamples, ref worst, census);
             }
             finally
             {
@@ -133,6 +133,8 @@ public static class RigRouteAcceptanceTest
             if (poseProblem != null) problems.Add($"role '{dir}': {poseProblem}");
         }
         if (roles == 0) problems.Add("no role's rig could be found on either route");
+        // the census line on PASS and FAIL alike: a FAIL stops its role at the first failing time, so its maximum is a lower bound
+        notes.Add(FormattableString.Invariant($"worst clip rotation {census.angle:0.####} degrees{(census.where.Length > 0 ? " (" + census.where + ")" : "")}{(problems.Count > 0 ? " - a lower bound, the failing role stopped early" : "")}"));
         notes.Add(FormattableString.Invariant($"{roles} role(s) equal: bones, mesh, placement and clips, {vertexSamples} skinned vertex samples within {worst:0.#####} of each other; non-empty role collections and pose streams with equal bone counts and encoding-compatible lengths (frame counts equal or one apart, the SDK's rounding)"));
     }
 
@@ -251,8 +253,17 @@ public static class RigRouteAcceptanceTest
         return 2 * Mathf.Rad2Deg * Mathf.Atan2(new Vector3(relative.x, relative.y, relative.z).magnitude, Mathf.Abs(relative.w));
     }
 
+    /// <summary>The largest parent-space rotation between the routes over every sampled clip time - the census a ClipAngle
+    /// is set from (2026-11-15: the row reported only its first failure, so each run showed one deviation, never the maximum).</summary>
+    internal sealed class ClipCensus
+    {
+        public float angle; public string where = "";
+        public void Offer(float a, string label, string bone) { if (a > angle) { angle = a; where = label + " bone '" + bone + "'"; } }
+    }
+
     static void CompareBones(string label, Dictionary<string, Transform> a, Dictionary<string, Transform> b,
-                             float tol, float angleTol, float scaleTol, bool local, Dictionary<string, Vector3> restA, Dictionary<string, Vector3> restB, List<string> problems, ref double worst)
+                             float tol, float angleTol, float scaleTol, bool local, Dictionary<string, Vector3> restA, Dictionary<string, Vector3> restB, List<string> problems, ref double worst,
+                             ClipCensus census = null)
     {
         foreach (var name in a.Keys)
         {
@@ -268,6 +279,7 @@ public static class RigRouteAcceptanceTest
             float distance = (pa != null ? pa.localToWorldMatrix.MultiplyVector(delta) : delta).magnitude;
             worst = Math.Max(worst, (ta.position - tb.position).magnitude);
             float angle = RotationAngle(qa, qb), axisAngle = AxisAngle(ma, mb), scaleDiff = AxisScaleDifference(ma, mb);
+            census?.Offer(angle, label, name);
             float axisTol = angleTol, matrixScaleTol = scaleTol, localScaleDiff = 0;
             if (local)
             {
@@ -341,7 +353,8 @@ public static class RigRouteAcceptanceTest
 
     static float Rel(float x, float y) => Mathf.Abs(x - y) / Mathf.Max(1e-6f, Mathf.Max(Mathf.Abs(x), Mathf.Abs(y)));
 
-    static void CompareRole(string dir, GameObject a, GameObject b, AnimationClip clipA, AnimationClip clipB, List<string> problems, ref int vertexSamples, ref double worst)
+    static void CompareRole(string dir, GameObject a, GameObject b, AnimationClip clipA, AnimationClip clipB, List<string> problems, ref int vertexSamples, ref double worst,
+                            ClipCensus census = null)
     {
         var smrA = a.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null).ToArray();
         var smrB = b.GetComponentsInChildren<SkinnedMeshRenderer>(true).Where(r => r.sharedMesh != null).ToArray();
@@ -391,7 +404,7 @@ public static class RigRouteAcceptanceTest
             BakeTestRunnerWindow.Progress.ThrowIfCancelled();
             clipA.SampleAnimation(a, t); clipB.SampleAnimation(b, t);
             int before = problems.Count;
-            CompareBones(FormattableString.Invariant($"role '{dir}' at {t:0.###} s"), byNameA, byNameB, tolClip, ClipAngle, ClipScale, true, restScalesA, restScalesB, problems, ref worst);
+            CompareBones(FormattableString.Invariant($"role '{dir}' at {t:0.###} s"), byNameA, byNameB, tolClip, ClipAngle, ClipScale, true, restScalesA, restScalesB, problems, ref worst, census);
             var cloudA = Positions(smrA); var cloudB = Positions(smrB);
             vertexSamples += cloudA.Count;
             float meshTol = Mathf.Max(tolClip, SkinMotionAllowance(envelopes) + tol);
