@@ -190,15 +190,16 @@ public static class RigRouteAcceptanceTest
     // through a hierarchy, so applying the same cap to world rotation/scale rejects valid deep rigs. The positional
     // and scale margins remain the row's acceptance policy, not a claim that Unity's percentage metrics use mesh extent.
     const float RestFraction = 1e-3f, RestAngle = 0.06f, RestScale = 1e-3f;
-    // ClipAngle 2 degrees is an empirical route-comparison policy (0.6 until 2026-10-28, then 1). Unity documents
-    // its default 0.5-degree rotation error as the angle between compressed and original quaternions, not per Euler axis:
-    // https://docs.unity3d.com/2021.3/Documentation/ScriptReference/ModelImporter-animationRotationError.html
-    // The UniversalTanks census measured 378 frames x 126 bones: 1,447 samples over 0.5 degrees, 41 over 1, none over
-    // 1.5, maximum 1.365 ('Box_001.087' at 13.375 s). Source spot checks agree with the GLB route at that frame and on
-    // the hull at 12.083 s; the FBX clips retain 97 and 105 of 378 rotation keys respectively. These finite measurements
-    // motivate the margin; they do not establish a per-axis importer guarantee or a bound between sampled times.
-    // First-frame transforms still use RestAngle, and local scale/position retain their separate limits.
-    internal const float ClipFraction = 0.015f, ClipAngle = 2f, ClipScale = 0.01f;
+    // ClipAngle 0.1 degree (2026-11-15; was 0.6, then 1, then 2 from 2026-10-28). The 1-2 degree allowance was paying for
+    // a LOSSY reference, not for noise: the FBX route's clips came from Blender's FBX exporter at its default
+    // bake_anim_simplify_factor 1.0, which drops keys and rounds reversals off (the TankDestroyers' rigid tread link,
+    // 2.0743 degrees at 13.333 s, measured to four digits in a Blender A/B; the 10-28 UniversalTanks census, 1.365, was
+    // blamed on Unity's reduction). rig_anim.py now exports with 0 and the Factory imports with no reduction; the row's
+    // own census (worst clip rotation, printed per entry) then read 0.0142 at most over all 23 entries, both kernel modes,
+    // every sampled frame (TankDestroyers 'b019_Track_00_R_L17' at 13.75 s; UniversalTanks 0.0038, was 1.5057). 0.1 is
+    // seven times that; a real route difference of a tenth of a degree now fails. Sampled times only - no bound between
+    // them. First-frame transforms still use RestAngle; local scale and position keep their separate limits (not re-measured).
+    internal const float ClipFraction = 0.015f, ClipAngle = 0.1f, ClipScale = 0.01f;
 
     static Transform BoneParent(Transform bone, Dictionary<string, Transform> bones)
     {

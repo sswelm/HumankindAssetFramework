@@ -121,9 +121,9 @@ public static class UnityRigImportTests
             }
             string socketPath = AnimationUtility.CalculateTransformPath(a.GetComponentsInChildren<Transform>().First(t => t.name == "Muzzle"), a.transform);
             AnimationUtility.SetEditorCurve(clipA, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 0));
-            AnimationUtility.SetEditorCurve(clipB, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 2.02f));   // just beyond the 2-degree clip-time allowance
+            AnimationUtility.SetEditorCurve(clipB, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 1.02f * RigRouteAcceptanceTest.ClipAngle));   // just beyond the clip-time allowance
             var clipC = new AnimationClip { legacy = true };
-            AnimationUtility.SetEditorCurve(clipC, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 0.4f));   // inside Unity's 0.5-degree compression allowance
+            AnimationUtility.SetEditorCurve(clipC, EditorCurveBinding.FloatCurve(socketPath, typeof(Transform), "localEulerAnglesRaw.z"), AnimationCurve.Linear(0, 0, 1, 0.4f * RigRouteAcceptanceTest.ClipAngle));   // inside it
             var identicalSocket = RigRouteAcceptanceTest.CompareRigs(a, b, clipA, clipA);
             Check("acceptance: identical unweighted socket motion passes", identicalSocket.Count == 0, string.Join("; ", identicalSocket));
             // Restore both rigs' rest after sampling the equal pair.
@@ -132,7 +132,7 @@ public static class UnityRigImportTests
             Check("acceptance: unweighted socket rotation past the allowance is caught", socketDifference.Count > 0, string.Join("; ", socketDifference));
             clipA.SampleAnimation(a, 0); clipA.SampleAnimation(b, 0);
             var socketWithin = RigRouteAcceptanceTest.CompareRigs(a, b, clipA, clipC);
-            Check("acceptance: a socket rotation within Unity's compression allowance passes", socketWithin.Count == 0, string.Join("; ", socketWithin));
+            Check("acceptance: a socket rotation within the clip-time allowance passes", socketWithin.Count == 0, string.Join("; ", socketWithin));
             UnityEngine.Object.DestroyImmediate(clipC);
             UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b);
             a = UnityEngine.Object.Instantiate(go); b = UnityEngine.Object.Instantiate(go);
@@ -198,10 +198,9 @@ public static class UnityRigImportTests
             }
             finally { UnityEngine.Object.DestroyImmediate(a); UnityEngine.Object.DestroyImmediate(b); }
         }
-        // Unity's default compression (keys dropped within 0.5 degrees / 0.5%) must still agree within the clip-time tolerance on
-        // this fixture, and so must the uncompressed import - which is what the Factory bakes since 2026-11-15 (UniversalBaker
-        // sets animationCompression Off: the SDK's per-frame pose stream gains nothing from reduction, the motion loses its peaks)
-        Compare(true, "acceptance: the real FBX pair with Unity's default compression agrees within the clip-time allowance");
+        // The uncompressed import is what the Factory bakes since 2026-11-15 (UniversalBaker sets animationCompression Off: the
+        // SDK's per-frame pose stream gains nothing from reduction). Unity's default compression is no longer judged here:
+        // its 0.5-degree allowance is five times the row's ClipAngle (0.1), and no bake imports that way any more.
         imp.animationCompression = ModelImporterAnimationCompression.Off; imp.SaveAndReimport();
         Compare(true, "acceptance: real uncompressed FBX and GLB slim imports agree");
     }
@@ -248,25 +247,29 @@ public static class UnityRigImportTests
                     string path = AnimationUtility.CalculateTransformPath(bone, a.transform);
                     foreach (var property in scale ? new[] { "m_LocalScale.x", "m_LocalScale.y", "m_LocalScale.z" } : new[] { "localEulerAnglesRaw.z" })
                     {
-                        float start = scale ? 1 : 0, end = scale ? 1.006f : 0.4f;
+                        // per bone, under the row's limits: 0.6% of the 1% scale limit, 40% of ClipAngle (2026-11-15: was 0.4 degree
+                        // against a 2-degree ClipAngle; the chain's bones are judged parent-space, one by one)
+                        float start = scale ? 1 : 0, end = scale ? 1.006f : 0.4f * RigRouteAcceptanceTest.ClipAngle;
                         var binding = EditorCurveBinding.FloatCurve(path, typeof(Transform), property);
                         AnimationUtility.SetEditorCurve(ca, binding, AnimationCurve.Linear(0, start, 1, start));
                         AnimationUtility.SetEditorCurve(cb, binding, AnimationCurve.Linear(0, start, 1, end));
                     }
                 }
                 var differences = RigRouteAcceptanceTest.CompareRigs(a, b, ca, cb);
-                Check("acceptance: " + (scale ? "0.6% local scale" : "0.4-degree local rotation") + " errors through three " + (scenario.weighted ? "weighted" : "unweighted") + " bones pass", differences.Count == 0, string.Join("; ", differences));
+                Check("acceptance: " + (scale ? "0.6% local scale" : (0.4f * RigRouteAcceptanceTest.ClipAngle).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "-degree local rotation") + " errors through three " + (scenario.weighted ? "weighted" : "unweighted") + " bones pass", differences.Count == 0, string.Join("; ", differences));
                 ca.SampleAnimation(a, 0); cb.SampleAnimation(b, 0);
                 string tip = AnimationUtility.CalculateTransformPath(a.GetComponentsInChildren<Transform>().First(t => t.name == "Socket2"), a.transform);
                 var excessiveBinding = EditorCurveBinding.FloatCurve(tip, typeof(Transform), scale ? "m_LocalScale.x" : "localEulerAnglesRaw.z");
-                // Exercise both sides of the policy. The measured 1.365-degree deviation must pass, while
-                // 2.02 degrees must fail even when skin-motion envelopes allow the resulting vertex displacement.
-                foreach (float end in scale ? new[] { 1.03f } : new[] { 1.365f, 1.98f, 2.02f, 5f })
+                // Exercise both sides of the policy, derived from ClipAngle (2026-11-15: the fixed 1.365 / 1.98 / 2.02 / 5 fit a
+                // 2-degree limit only). The measured 0.0142 census maximum and 98% of the limit must pass; 102% and 50x must
+                // fail even when skin-motion envelopes allow the resulting vertex displacement.
+                float lim = RigRouteAcceptanceTest.ClipAngle;
+                foreach (float end in scale ? new[] { 1.03f } : new[] { 0.0142f, 0.98f * lim, 1.02f * lim, 50f * lim })
                 {
                     ca.SampleAnimation(a, 0); cb.SampleAnimation(b, 0);
                     AnimationUtility.SetEditorCurve(cb, excessiveBinding, AnimationCurve.Linear(0, scale ? 1 : 0, 1, end));
                     var differencesAtLimit = RigRouteAcceptanceTest.CompareRigs(a, b, ca, cb);
-                    bool shouldFail = scale || end > 2f;
+                    bool shouldFail = scale || end > lim;
                     Check("acceptance: local " + (scale ? "scale " : "rotation ") + end.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + " on " +
                         (scenario.weighted ? "weighted" : "unweighted") + " chain " + (shouldFail ? "fails" : "passes"),
                         shouldFail ? differencesAtLimit.Any(p => p.Contains("transform differs")) : differencesAtLimit.Count == 0, string.Join("; ", differencesAtLimit));
@@ -323,7 +326,7 @@ public static class UnityRigImportTests
             string path = AnimationUtility.CalculateTransformPath(a.GetComponentsInChildren<Transform>().First(t => t.name == "StretchedSocket"), a.transform);
             var binding = EditorCurveBinding.FloatCurve(path, typeof(Transform), "localEulerAnglesRaw.z");
             AnimationUtility.SetEditorCurve(ca, binding, AnimationCurve.Linear(0, 0, 1, 0));
-            AnimationUtility.SetEditorCurve(cb, binding, AnimationCurve.Linear(0, 0, 1, 0.4f));
+            AnimationUtility.SetEditorCurve(cb, binding, AnimationCurve.Linear(0, 0, 1, 0.4f * RigRouteAcceptanceTest.ClipAngle));   // 40% of the limit
             var differences = RigRouteAcceptanceTest.CompareRigs(a, b, ca, cb);
             Check("acceptance: allowed rotation under " + stretch + "x static parent passes", differences.Count == 0, string.Join("; ", differences));
             ca.SampleAnimation(a, 0); cb.SampleAnimation(b, 0);
