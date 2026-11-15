@@ -156,7 +156,7 @@ public static class WorkshopGoldenDrill
                 foreach (var p in bad.Take(3))
                 {
                     lines.Add("  " + (string)explain.Invoke(null, new object[] { split.Bytes, p.NodeName, 12 }));
-                    string parent = System.Text.RegularExpressions.Regex.Replace(p.NodeName ?? "", @"_Part_\d{3}$", "");
+                    string parent = System.Text.RegularExpressions.Regex.Replace(p.NodeName ?? "", VehicleLabRules.CutChildTail, "");
                     if (parent.Length > 0 && parentsDone.Add(parent))
                         lines.Add("  from " + (string)explain.Invoke(null, new object[] { bytes, parent, 6 }));
                 }

@@ -174,5 +174,5 @@ public static class WorkshopGateTest
 
     internal const int FuseTriangleBudget = 150000;
 
-    static bool IsCutChild(string n) => n != null && System.Text.RegularExpressions.Regex.IsMatch(n, @"_Part_\d{3}$");
+    static bool IsCutChild(string n) => n != null && System.Text.RegularExpressions.Regex.IsMatch(n, VehicleLabRules.CutChildTail);
 }
