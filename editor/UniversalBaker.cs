@@ -879,9 +879,10 @@ public static class UniversalBaker
         imp.animationType = ModelImporterAnimationType.Generic;
         imp.importAnimation = true;
         // NO KEYFRAME REDUCTION (2026-11-15): the SDK samples the clip into a per-frame pose stream of a fixed size, so
-        // Unity's reduction saves nothing in the game - it only rounds the motion off. A rigid tread link reversing at
-        // 13.333 s on the TankDestroyers lost 2.074 degrees to it, against the GLB route's every key (Bake Tests' rig-route
-        // row). Set explicitly both ways: a prior bake stamps the importer's setting into the .meta.
+        // Unity's reduction saves nothing in the game - it can only round the motion off. (Suspected first for the
+        // TankDestroyers' 2.074-degree tread link in the rig-route row; the row's census with this OFF still read 2.0743,
+        // and a Blender A/B measured the loss in the FBX EXPORT instead: rig_anim.py now exports with
+        // bake_anim_simplify_factor=0.) Set explicitly: a prior bake stamps the importer's setting into the .meta.
         imp.animationCompression = ModelImporterAnimationCompression.Off;
         // Tangents: EXPLICITLY set both ways (a prior bake stamps this into the .meta, so a bare "skip" leaves it stuck).
         // Single-material -> None: runtime neutralizes normal maps, so tangents are 16 B/vert of dead weight in the mesh +

@@ -1281,8 +1281,13 @@ def _export_one(_a, _o):
     _d = os.path.dirname(_o)
     if _d and not os.path.isdir(_d):
         os.makedirs(_d)
+    # bake_anim_simplify_factor=0 (2026-11-15): the exporter's default 1.0 drops keys it judges redundant and rounds a
+    # reversal off - the TankDestroyers' rigid tread link Track_01_L_L15 lost 2.0743 degrees at frame 320 (13.333 s) to
+    # it, 2.18 at worst over the clip; with 0 the re-imported FBX equals the source to 0.0002 degrees. The game samples
+    # every frame into its pose stream, so the thinning saved nothing. (Only this export ships; the round trip above
+    # and the previews keep their settings - the C# port reproduces the round trip's values.)
     bpy.ops.export_scene.fbx(filepath=_o, use_selection=False, add_leaf_bones=False, global_scale=gscale,
-                             bake_anim=True, bake_anim_use_all_actions=False,
+                             bake_anim=True, bake_anim_use_all_actions=False, bake_anim_simplify_factor=0.0,
                              bake_anim_use_nla_strips=False, object_types={'ARMATURE', 'MESH'})
     print("RIGANIM wrote %s ('%s', frames %d..%d)" % (_o, _a.name, _fs, _fe))
 _export_one(act, outp)
