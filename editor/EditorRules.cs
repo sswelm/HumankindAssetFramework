@@ -805,6 +805,11 @@ public static class VehicleLabRules
     // inherit. A bare _<number> tail is NOT ancestry (review of PR #85, third round): the Cutter's unique renaming
     // makes one, but so does an author who names two parts Hull and Hull_2, and a suffix alone cannot tell them
     // apart - Hull_2 would have taken Hull's role, an Ignore among them, and vanished from the output.
+    // The Split numbers its children with ToString("D3"): at least three digits, more past 999 (2026-11-15: the
+    // Sirius bow, 4,471 islands at no merge, made _Part_1000.._Part_4471, which a \d{3} pattern did not see -
+    // the Bake Tests row failed and the Lab would have dropped the parent's role from those parts).
+    public const string CutChildTail = @"_Part_\d{3,}$";
+
     public static IEnumerable<string> ParentNames(string name)
     {
         if (string.IsNullOrEmpty(name)) yield break;
@@ -812,7 +817,7 @@ public static class VehicleLabRules
         for (int guard = 0; guard < 16; guard++)
         {
             string next = null;   // the specific tails before the bare number: a greedy "(.*)_\d+" would peel "_001" off "_Part_001"
-            foreach (string tail in new[] { @"^(.+)_Part_\d{3}$", @"^(.+)_Cut[AB]$" })
+            foreach (string tail in new[] { "^(.+)" + CutChildTail, @"^(.+)_Cut[AB]$" })
             {
                 var m1 = System.Text.RegularExpressions.Regex.Match(cur, tail);
                 if (m1.Success) { next = m1.Groups[1].Value; break; }

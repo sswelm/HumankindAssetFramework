@@ -786,5 +786,46 @@ namespace HumankindAssetFramework.Tests
             Assert.StartsWith("[full] FAIL (", r.Summary);
             Assert.StartsWith("PASS", UniversalInject.SmokeVerdict(new UniversalInject.SmokeFacts { Models = 1, Repointed = 1 }).Summary);   // untagged stays as it was
         }
+
+        // ---- THE QUAD CEILING (2026-11-15): the TankDestroyers shipped 29,636 quads in one mesh, 13,316 over; only the
+        // bake's Editor.log line ever said so ----
+        static KeyValuePair<string, int> Mesh(string name, int quads) => new KeyValuePair<string, int>(name, quads);
+
+        [Fact]
+        public void Quads_OverTheCeiling_FailsAndNamesEntryMeshAndExcess()
+        {
+            var f = Healthy();
+            UniversalInject.JudgeMeshQuads("TankDestroyers", new[] { Mesh("TankDestroyers_rigmesh_atlas0", 29636) }, f);
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.False(r.Pass);
+            Assert.Contains("TankDestroyers 'TankDestroyers_rigmesh_atlas0' 29636 quads (13316 over)", r.Summary);
+            Assert.Contains("Multi-fragment split", r.Summary);   // the remedy, in the line that reports it
+        }
+
+        [Fact]
+        public void Quads_AtTheCeiling_AndASplitUnit_Pass_AndThePassLineCountsThem()
+        {
+            var f = Healthy();
+            UniversalInject.JudgeMeshQuads("Exact", new[] { Mesh("Exact_ModelMesh", 16320) }, f);   // the boundary fits
+            UniversalInject.JudgeMeshQuads("TankDestroyers", new[] { Mesh("TankDestroyers_ModelMesh", 14810), Mesh("TankDestroyers_ModelMesh_B", 14633) }, f);
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.True(r.Pass, r.Summary);
+            Assert.Contains("3 baked mesh(es) within the 16320-quad ceiling", r.Summary);
+        }
+
+        [Fact]
+        public void Quads_Unreadable_IsANoteNeverAFit()
+        {
+            var f = Healthy();
+            UniversalInject.JudgeMeshQuads("Odd", new[] { Mesh("Odd_ModelMesh", 0) }, f);
+            var r = UniversalInject.SmokeVerdict(f);
+            Assert.True(r.Pass, r.Summary);                                  // not a failure: nothing was measured
+            Assert.Equal(0, f.QuadMeshesChecked);                            // and not counted as verified
+            Assert.Contains("NOTE: Odd 'Odd_ModelMesh': quad count unreadable", r.Summary);
+        }
+
+        [Fact]
+        public void Quads_TheRuntimeCeilingIsTheBakesCeiling()
+            => Assert.Equal(QuadEstimate.EngineQuadCeiling, UniversalInject.EngineQuadCeiling);
     }
 }

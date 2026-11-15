@@ -69,6 +69,16 @@ namespace HumankindAssetFramework.Tests
     }
 
     [Fact]
+    public void A_split_child_past_999_still_finds_its_parent()
+    {
+        // the Split's D3 numbering grows a fourth digit past 999 (the Sirius bow: 4,471 islands at no merge)
+        Assert.Equal(new[] { "Bow" }, VehicleLabRules.ParentNames("Bow_Part_1000").ToArray());
+        Assert.Equal(new[] { "Bow" }, VehicleLabRules.ParentNames("Bow_Part_4471").ToArray());
+        Assert.Equal(new[] { "Bow_CutA", "Bow" }, VehicleLabRules.ParentNames("Bow_CutA_Part_1234").ToArray());
+        Assert.Empty(VehicleLabRules.ParentNames("Bow_Part_12"));   // fewer than three digits was never a Split name
+    }
+
+    [Fact]
         public void Placement_line_round_trips_and_keeps_a_pipe_in_the_name()
         {
             string line = VehicleLabRules.PartPlacementLine("Fused_F|boat", 0f, -1.25f, 0.5f, 1f, 1f, 0.75f);
