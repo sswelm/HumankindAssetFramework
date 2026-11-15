@@ -153,10 +153,14 @@ public static class WorkshopGoldenDrill
             if (explain != null)
             {
                 var parentsDone = new HashSet<string>(StringComparer.Ordinal);
+                // HAF_EDITOR_ROOT can predate CutChildTail. Resolve it without a compile-time dependency, as
+                // with ExplainIslands above, so this drill still builds against the checkouts it compares.
+                string childTail = typeof(VehicleLabRules).GetField("CutChildTail")?.GetRawConstantValue() as string
+                    ?? @"_Part_\d{3,}$";
                 foreach (var p in bad.Take(3))
                 {
                     lines.Add("  " + (string)explain.Invoke(null, new object[] { split.Bytes, p.NodeName, 12 }));
-                    string parent = System.Text.RegularExpressions.Regex.Replace(p.NodeName ?? "", VehicleLabRules.CutChildTail, "");
+                    string parent = System.Text.RegularExpressions.Regex.Replace(p.NodeName ?? "", childTail, "");
                     if (parent.Length > 0 && parentsDone.Add(parent))
                         lines.Add("  from " + (string)explain.Invoke(null, new object[] { bytes, parent, 6 }));
                 }
