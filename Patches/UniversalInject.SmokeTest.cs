@@ -83,6 +83,50 @@ namespace HumankindAssetFramework
             // from the presentation entity factory, which no HAF hook touches.
             public int PawnManagers = -1;                            // -1 = not sampled; registered pawn managers (pose-hook evidence)
             public int ArmiesLive = -1;                              // -1 = not sampled; armies the engine has on the map right now
+            // THE QUAD CEILING (2026-11-15): a baked mesh over 255 x 64 quads silently drops its tail in the game. The bake
+            // warned once in the Editor.log and nothing else did - the TankDestroyers shipped 13,316 quads over for days.
+            public List<string> QuadOver = new List<string>();       // FAIL: "<entry> '<mesh>' N quads (M over)"
+            public List<string> QuadNotes = new List<string>();      // informational: a mesh whose quad count could not be read
+            public int QuadMeshesChecked;                            // baked meshes whose quad count was read and judged
+        }
+
+        // The engine draws at most 255 x 64 quads per baked mesh (fragment): the compiled pawn shader's stride. The bake's
+        // copy is QuadEstimate.EngineQuadCeiling (editor); a test pins the two equal.
+        internal const int EngineQuadCeiling = 255 * 64;
+
+        // PURE: every baked mesh of one entry against the ceiling. A count of 0 or less is "could not read", never "fits".
+        internal static void JudgeMeshQuads(string entry, IEnumerable<KeyValuePair<string, int>> meshes, SmokeFacts f)
+        {
+            foreach (var m in meshes)
+            {
+                if (m.Value <= 0) { f.QuadNotes.Add($"{entry} '{m.Key}': quad count unreadable - the ceiling is NOT verified for it"); continue; }
+                f.QuadMeshesChecked++;
+                if (m.Value > EngineQuadCeiling) f.QuadOver.Add($"{entry} '{m.Key}' {m.Value} quads ({m.Value - EngineQuadCeiling} over)");
+            }
+        }
+
+        // The skeleton asset's baked meshes and their quad counts (MeshCollection.skinnedMeshInfos[].FxMeshContent.QuadCount,
+        // the number the bake reports). Null = the list itself could not be read.
+        static List<KeyValuePair<string, int>> ReadMeshQuads(object skeleton)
+        {
+            if (!(GetMember(skeleton, "skinnedMeshInfos") is System.Collections.IEnumerable infos)) return null;
+            var list = new List<KeyValuePair<string, int>>();
+            foreach (var si in infos)
+            {
+                string mesh = GetMember(si, "MeshName") as string ?? "?";
+                var fmc = GetMember(si, "FxMeshContent");
+                list.Add(new KeyValuePair<string, int>(mesh, fmc == null ? 0 : MemberInt(fmc, "QuadCount", 0)));
+            }
+            return list;
+        }
+
+        // Every entry with a skeleton - loaded at registration, so units not on the map are judged too.
+        static void GatherQuadFacts(ModelEntry e, SmokeFacts f)
+        {
+            if (e.skeleton == null) return;   // a retexture has none of its own; a missing authored skeleton is MissingAssets' finding
+            var meshes = ReadMeshQuads(e.skeleton);
+            if (meshes == null) { f.QuadNotes.Add($"{e.resourceName}: baked mesh list unreadable - the quad ceiling is NOT verified"); return; }
+            JudgeMeshQuads(e.resourceName, meshes, f);
         }
 
         // Back-compat convenience: the original four-signal verdict (deep-check lists empty).
@@ -112,6 +156,8 @@ namespace HumankindAssetFramework
             if (f.PawnSkinIssues.Count > 0) fails.Add($"{f.PawnSkinIssues.Count} entry(ies) rendering the donor: {string.Join("; ", f.PawnSkinIssues)}");
             if (f.PoseIdle.Count > 0) fails.Add($"pose hook idle on {f.PoseIdle.Count} entry(ies): {string.Join("; ", f.PoseIdle)}");
             if (f.SubPawnMissed.Count > 0) fails.Add($"sub-pawn walk missed {f.SubPawnMissed.Count} of {f.SubPawnScene}: {string.Join(", ", f.SubPawnMissed)}");
+            if (f.QuadOver.Count > 0) fails.Add($"{f.QuadOver.Count} baked mesh(es) over the engine's {EngineQuadCeiling}-quad draw ceiling - their last parts silently do not render " +
+                                                $"(rebake with Multi-fragment split, or Reduce): {string.Join("; ", f.QuadOver)}");
             // THE CONTRADICTION THAT PROVES THE POSE HOOK IS DEAD (2026-08-22). Armies are on the map and entries are
             // injected, so the pawn-added path must have run and registered a manager — every applicable entry makes
             // the hook proceed for every pawn add. Zero managers with live armies is not "nothing to check", it is the
@@ -138,6 +184,7 @@ namespace HumankindAssetFramework
             notes.AddRange(f.SamplerNotes);
             notes.AddRange(f.DistrictNotes);
             notes.AddRange(f.FragmentNotes);
+            notes.AddRange(f.QuadNotes);
             bool pass = fails.Count == 0;
             string head = (f.Tier.Length > 0 ? "[" + f.Tier + "] " : "") + (pass ? "PASS" : "FAIL (" + string.Join("; ", fails) + ")");
             return new SmokeResult
@@ -146,7 +193,8 @@ namespace HumankindAssetFramework
                 Summary = $"{head} — bindings {(f.GbMissing == 0 ? "ok" : f.GbMissing + " MISSING")}, {f.Models} model(s) loaded " +
                           $"({f.Repointed} injected so far), {f.InjectionErrors} injection error(s)" +
                           (pass ? $"; deep checks clean on {f.Repointed} injected — verified {f.RolesChecked} clip role(s), " +
-                                  $"{f.AssetsChecked} asset(s), {f.SoundsChecked} sound(s), {f.FilesChecked} file(s) on disk, {f.LayersChecked} GPU layer(s)" +
+                                  $"{f.AssetsChecked} asset(s), {f.SoundsChecked} sound(s), {f.FilesChecked} file(s) on disk, {f.LayersChecked} GPU layer(s), " +
+                                  $"{f.QuadMeshesChecked} baked mesh(es) within the {EngineQuadCeiling}-quad ceiling" +
                                   (f.FragmentsChecked > 0 ? $", {f.FragmentsChecked} descriptor repoint(s) held" : "") +
                                   // NEVER suppressed at zero: an omitted clause reads as "fine", a printed 0 reads as
                                   // "nothing was examined" — and the note above says why. (Review 2026-08-22.)
@@ -659,6 +707,7 @@ namespace HumankindAssetFramework
                     {
                         GatherEntryFacts(e, f, addonDefIds.Keys, snapshot);   // every unit-definition name the addon hook saw this session
                         CheckLooseFiles(e, f, Path.Combine(Paths.ConfigPath, "haf_sounds"), Path.Combine(Paths.ConfigPath, "haf_skins"));
+                        GatherQuadFacts(e, f);   // every entry with a skeleton, injected or not
                     }
                 foreach (var d in DistrictInject.distModels)   // main-thread state, read on the main thread (F8)
                 {
