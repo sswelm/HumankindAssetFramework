@@ -48,7 +48,6 @@ public static partial class BlenderVehicleRig
     /// <summary>The branches of stage 3 the C# does not model yet: the role list that takes each, and the part that will.</summary>
     static readonly (string role, string branch)[] Stage3Later =
     {
-        ("tracks", "the tread rig's rigid links (d6)"),
     };
 
     /// <summary>Stage 3 on the scene stage 2 left: the rig. Lines go to s.Logs3; a branch not modelled sets s.Fallback; the script's exit
@@ -58,7 +57,6 @@ public static partial class BlenderVehicleRig
         if (s.Fallback != null || s.Exits || s.Dies != null) return;
         foreach (var (role, branch) in Stage3Later)
         {
-            if (role == "tracks" && (a.TracksStatic || !a.TreadLinks)) continue;   // tracks_static empties track_names; the conveyor's carrier skinning is modelled (BlenderVehicleRig.Tread.cs)
             if (a.Names.TryGetValue(role, out var l) && l.Count > 0) { s.Fallback = "stage 3: " + branch + " is not modelled yet"; return; }
         }
         if (a.TracksStatic && a.Names.TryGetValue("tracks", out var st) && st.Count > 0) Note(s, "static tracks rigged as body parts");
@@ -773,12 +771,16 @@ public static partial class BlenderVehicleRig
         var removedBones = new HashSet<int>(); var linkJobs = new List<TreadJob>();
         bool turretsAny = a.Names.TryGetValue("turrets", out var turretList6) && turretList6.Count > 0;
         bool gunsAny = new[] { "guns", "muzzles", "cradles" }.Any(r => a.Names.TryGetValue(r, out var gl) && gl.Count > 0);
+        // rigid links: the bones a track may take once its nine carriers are gone - (126 - every bone there is + the carriers) // tracks
+        int rigidBudget = !a.TreadLinks ? -1 : trackInfos.Count == 0 ? 0 : Math.Max(0, (int)Math.Floor((126 - boneNames.Count + 9 * trackInfos.Count) / (double)trackInfos.Count));
+        string treadDeathPart = null;
         foreach (var o in objs)
         {
             if (oarParts.Contains(o.Name) || !trackByName.TryGetValue(o.Name, out var track)) continue;
             var tlog = new List<string>(); treadLogs[o.Name] = tlog;
-            var why = TreadSkin(s, o, track, clusters.Select(cl => (cl.m, cl.c)).ToList(), a, tlog, clusterBoneIds.Count, turretsAny, gunsAny, liveTracks.Count);
+            var why = TreadSkin(s, o, track, clusters.Select(cl => (cl.m, cl.c)).ToList(), a, tlog, clusterBoneIds.Count, turretsAny, gunsAny, liveTracks.Count, rigidBudget);
             if (why != null) { s.Fallback = "stage 3: " + why; return; }
+            if (track.Death != null) { treadDeathPart = o.Name; break; }   // the script dies at this part's turn in the skinning loop
             if (track.Job != null) linkJobs.Add(track.Job);
         }
         foreach (var job in linkJobs)
@@ -836,6 +838,7 @@ public static partial class BlenderVehicleRig
             if (!oarParts.Contains(o.Name) && trackByName.ContainsKey(o.Name))
             {
                 s.Logs3.AddRange(treadLogs[o.Name]);   // skinned above, before the rest was built
+                if (o.Name == treadDeathPart) { s.Dies = trackByName[o.Name].Death; Note(s, "rigid links without the bones for them: the script's own error"); return; }
                 o.Mesh.ArmatureModifier = armObjName; o.Parent = armObj;
                 continue;
             }

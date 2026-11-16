@@ -759,6 +759,13 @@ static class StageDrill
                     else if (!d.LogsOfStop.SequenceEqual(model.Logs3)) problems.Add("stage 3 model: the stop's VEHICLE lines differ: here [" + string.Join(" | ", model.Logs3) + "], Blender [" + string.Join(" | ", d.LogsOfStop) + "]");
                     else { RowsEqual += model.Logs3.Count; Console.WriteLine($"STAGE3 {key}: equal - the script's exit in stage 3, {model.Logs3.Count} VEHICLE lines"); }
                 }
+                else if (model.Dies != null)
+                {
+                    // the script dies in stage 3 (rigid links without the bones for them): the exception and every line printed before it
+                    if (d.StoppedAt != 3 || d.Died != model.Dies) problems.Add("stage 3 model: the death differs: here '" + model.Dies + "', Blender '" + d.Died + "' in stage " + d.StoppedAt);
+                    else if (!d.LogsOfStop.SequenceEqual(model.Logs3)) problems.Add("stage 3 model: the death's VEHICLE lines differ: here [" + string.Join(" | ", model.Logs3) + "], Blender [" + string.Join(" | ", d.LogsOfStop) + "]");
+                    else { RowsEqual += model.Logs3.Count; Console.WriteLine($"STAGE3 {key}: equal - dies: {model.Dies}"); }
+                }
                 else if (!d.Stages.TryGetValue(3, out var s3)) problems.Add("stage 3 model: the scene runs on here, Blender stopped in stage 3: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
                 else
                 {
@@ -806,7 +813,14 @@ static class StageDrill
             BlenderDeployExport.Result exported = null;
             try { exported = BlenderVehicleRig.RunStage5(model, args); }
             catch (Exception e) { problems.Add("stage 5 model: " + e.GetType().Name + ": " + e.Message); }
-            if (model.Fallback != null)
+            if (model.Dies != null && model.Fallback == null && problems.Count == 0)
+            {
+                // the script dies in stage 5, before it writes anything (rigid links past the bone wall)
+                if (d.StoppedAt != 5 || d.Died != model.Dies) problems.Add("stage 5 model: the death differs: here '" + model.Dies + "', Blender '" + d.Died + "' in stage " + d.StoppedAt);
+                else if (!d.LogsOfStop.SequenceEqual(model.Logs5)) problems.Add("stage 5 model: the death's VEHICLE lines differ: here [" + string.Join(" | ", model.Logs5) + "], Blender [" + string.Join(" | ", d.LogsOfStop) + "]");
+                else { RowsEqual += model.Logs5.Count; Console.WriteLine($"STAGE5 {key}: equal - dies: {model.Dies}"); }
+            }
+            else if (model.Fallback != null)
             {
                 if (!NamedStage5Deferral(model.Fallback)) problems.Add("stage 5 model: " + model.Fallback);
                 else { Equal--; Left++; Console.WriteLine("STAGE5 " + key + ": left to Blender by name: " + model.Fallback); return true; }

@@ -136,6 +136,8 @@ public static partial class BlenderVehicleRig
         var periods = new List<BigInteger> { frames };
         if (a.RockOn) periods.Add(a.RockFrames);
         if (st.Oars.Count > 0) periods.Add(a.OarFrames);
+        // rigid links: the whole loop in a whole number of spin cycles - every link is back at its own place on the last frame
+        if (a.TreadLinks && st.Tracks.Any(t => t.Job != null)) periods.Add(frames * st.Tracks.Where(t => t.Job != null).Max(t => t.Job.CircuitCycles));
         BigInteger clipBig = periods.Max();
         if (clipBig > MaxClipFrames) { s.Fallback = "stage 4: the clip of more than 100,000 frames is not modelled yet"; return; }
         int clip = (int)clipBig;
@@ -546,6 +548,8 @@ public static partial class BlenderVehicleRig
                     // Euler and scale read back from it), location and rotation keyed; a straight run's shuttle bone slides
                     var job = t.Job; string L2(int ci) => job.Prefix + "L" + ci.ToString("00", CultureInfo.InvariantCulture);
                     double advLink = -job.AdvCells * job.CellL * (degrees >= 0 ? 1.0 : -1.0);
+                    if (a.TreadLinks) advLink = -(job.L / Math.Max(1, spinRepeats)) * (degrees >= 0 ? 1.0 : -1.0);
+                    var qprev = new Dictionary<int, float[]>();
                     var names2 = job.Cells.Select(L2).Concat(job.Runs.Select((r, ri) => job.Prefix + "S" + ri.ToString("00", CultureInfo.InvariantCulture))).ToList();
                     if (names2.Any(n => !st.BoneId.ContainsKey(n))) { s.Fallback = "stage 4: the tread's link bone under another name is not modelled yet"; return; }
                     var p0s = new Dictionary<int, float[]>(); var t0s = new Dictionary<int, float[]>();
@@ -561,10 +565,31 @@ public static partial class BlenderVehicleRig
                         foreach (int ci in job.Cells)
                         {
                             string bn = L2(ci); int id = st.BoneId[bn];
-                            PathEval(job, job.SRest[ci] + advLink * spinRepeats * f / clip, out var p1, out var t1);
-                            var poseM = VehicleProbe.ToColumnMajor(LinkPoseMatrix(p0s[ci], t0s[ci], p1, t1, ad.Rest.MatrixLocal[id]));
                             int parent = ad.Rest.Parent[id];
                             var rotscale = parent >= 0 ? VehicleProbe.MulM4(poseNow[parent], ad.Rest.OffsBone[id]) : ad.Rest.ArmMat[id];
+                            if (a.TreadLinks)
+                            {
+                                // a RIGID link: the chord between the cell's two ends, at rest and now - turned by the chords' angle about Y,
+                                // carried from the rest chord's middle to this one's; the pose read back as a quaternion kept on one side
+                                double h = 0.5 * job.CellL, s0 = job.SRest[ci], s1 = s0 + advLink * spinRepeats * f / clip;
+                                PathEval(job, s0 - h, out var a0, out _); PathEval(job, s0 + h, out var b0, out _);
+                                PathEval(job, s1 - h, out var a1, out _); PathEval(job, s1 + h, out var b1, out _);
+                                var c0 = Sub(b0, a0); var c1 = Sub(b1, a1);
+                                double th = BlenderTrig.Atan2(-(double)c1[2], c1[0]) - BlenderTrig.Atan2(-(double)c0[2], c0[0]);
+                                var mid1 = Scale(Add(a1, b1), 0.5f); var mid0 = Scale(Add(a0, b0), 0.5f);
+                                var rm = VehicleProbe.MatMulMathutils(LinkTranslation(mid1[0], mid1[1], mid1[2]), VehicleProbe.MatRotation(th, 'Y'));
+                                rm = VehicleProbe.MatMulMathutils(VehicleProbe.MatMulMathutils(rm, LinkTranslation(-mid0[0], -mid0[1], -mid0[2])), ad.Rest.MatrixLocal[id]);
+                                var rbasis = BlenderDeploy.PoseFromChannel(BlenderEigen.InvertM4(rotscale), VehicleProbe.ToColumnMajor(rm));
+                                VehicleProbe.Mat4ToLocRotSize(rbasis, out var rloc, out var rrot, out var rsize);
+                                var qn = VehicleProbe.Mat3NormalizedToQuat(rrot);
+                                if (qprev.TryGetValue(ci, out var qp) && VehicleProbe.DotQt(qp, qn) < 0.0f) qn = new[] { (float)(qn[0] * -1.0f), (float)(qn[1] * -1.0f), (float)(qn[2] * -1.0f), (float)(qn[3] * -1.0f) };
+                                qprev[ci] = qn;
+                                SetLoc(bn, rloc); SetPose(bn, "QUATERNION", null, qn); ad.PoseProps[id][2] = rsize;
+                                Insert(bn, "location", rloc, f); Insert(bn, "rotation_quaternion", qn, f);
+                                continue;
+                            }
+                            PathEval(job, job.SRest[ci] + advLink * spinRepeats * f / clip, out var p1, out var t1);
+                            var poseM = VehicleProbe.ToColumnMajor(LinkPoseMatrix(p0s[ci], t0s[ci], p1, t1, ad.Rest.MatrixLocal[id]));
                             var basis = BlenderDeploy.PoseFromChannel(BlenderEigen.InvertM4(rotscale), poseM);
                             VehicleProbe.Mat4ToLocRotSize(basis, out var loc, out var rot, out var size);
                             var eul = BlenderDeploy.Mat3ToEulXYZ(rot);
@@ -590,6 +615,12 @@ public static partial class BlenderVehicleRig
                         var endLoc = Scale(local, (float)spinRepeats);
                         SetLoc(bn, endLoc);
                         Insert(bn, "location", endLoc, clip);
+                    }
+                    if (a.TreadLinks)
+                    {
+                        s.Logs4.Add("VEHICLE tread '" + t.Part + "' RIGID LINKS circuit: " + job.Cells.Count + " link bones, the whole loop " + BlenderRigAnim.PyFixed(job.L, 2) + " in " + clip + " frames (" + BlenderRigAnim.PyFixed(Math.Abs(advLink), 3) + " per spin cycle)");
+                        Note(s, "rigid links: every link keyed round the whole loop");
+                        continue;
                     }
                     s.Logs4.Add("VEHICLE tread '" + t.Part + "' HYBRID conveyor: " + job.Cells.Count + " link bones on wraps + " + job.Runs.Count + " shuttle(s), advance " + BlenderRigAnim.PyFixed(Math.Abs(advLink), 3) + "/loop");
                     Note(s, "the tread's link bones carried along the path, every frame keyed");

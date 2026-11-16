@@ -30,6 +30,7 @@ public static partial class BlenderVehicleRig
         public Dictionary<string, double> BandRot = new Dictionary<string, double>(StringComparer.Ordinal);   // _band_rot by wrap bone
         public bool Skinned;                        // the skinning ran (a part the scene no longer holds never does)
         public TreadJob Job;                        // the link job, when the tread's link pitch was found (_link_jobs)
+        public string Death;                        // the script's own exception in this tread's skinning (its VEHICLE ERROR line is the last logged)
     }
 
     /// <summary>_link_jobs' entry: the measured ring path and the cells cut along it.</summary>
@@ -42,6 +43,7 @@ public static partial class BlenderVehicleRig
         public List<List<int>> Runs = new List<List<int>>();   // the straight runs: one shuttle bone each
         public int[] CellOf; public double[] SRest; // per vertex its cell; per cell its place along the path at rest
         public double AdvCells;                     // the advance per loop, in cells
+        public int CircuitCycles = 1;               // rigid links: the spin cycles the whole loop takes
         public string[] Aux;                        // the nine carrier bones, removed for the link bones
     }
 
@@ -59,7 +61,7 @@ public static partial class BlenderVehicleRig
     /// <summary>The skinning of one tread part. Returns null, or why the part is left to Blender. The part's mesh is replaced
     /// by the subdivided one, its groups and weights set; t receives the pitch, the flow directions and the band radii.</summary>
     static string TreadSkin(BlenderRigAnim.Stage1 s, BlenderRigAnim.SceneObject o, TrackInfo t, IList<(double m, float[] c)> clusters, Args a, List<string> log,
-                            int clusterBones, bool turrets, bool guns, int trackCount)
+                            int clusterBones, bool turrets, bool guns, int trackCount, int rigidBudget)
     {
         var d0 = o.Mesh; int nv0 = d0.Vertices;
         string botb = t.Bones[0], topb = t.Bones[1], rampfb = t.Bones[2], ramprb = t.Bones[3], ramprtb = t.Bones[4];
@@ -279,8 +281,10 @@ public static partial class BlenderVehicleRig
         if (fund > 0.03)
         {
             var why = TreadLinkCells(o, t, clusters, a, log, d, fund, clusterBones, turrets, guns, trackCount, highCls,
-                                     hasF, hasR, sprC, sprR, idlC, idlR, rotF, rotR, rrC, rrR, rotGr, rfC, rfR, rotGf);
+                                     hasF, hasR, sprC, sprR, idlC, idlR, rotF, rotR, rrC, rrR, rotGr, rfC, rfR, rotGf, rigidBudget, out var instanced);
             if (why != null) return why;
+            if (t.Death != null) return null;   // the script died here: its lines are logged, nothing after them counts
+            if (instanced != null) { d = instanced; nv = d.Vertices; Note(s, "rigid links: the band rebuilt from copies of one link"); }
             // the carrier groups stay empty in link mode and are dropped; each vertex goes whole to its cell's bone - the run's
             // shuttle or the cell's own link -, the groups made in the order their first vertex comes
             var job = t.Job; var runOf = new Dictionary<int, int>();
@@ -349,8 +353,10 @@ public static partial class BlenderVehicleRig
     /// straight runs one shuttle bone. Python doubles; the path's points are float32 Vectors.</summary>
     static string TreadLinkCells(BlenderRigAnim.SceneObject o, TrackInfo t, IList<(double m, float[] c)> clusters, Args a, List<string> log, BlenderRigAnim.MeshData d, double fund,
                                  int clusterBones, bool turrets, bool guns, int trackCount, List<int> highCls, bool hasF, bool hasR,
-                                 float[] sprC, double sprR, float[] idlC, double idlR, double rotF, double rotR, float[] rrC, double rrR, double rotGr, float[] rfC, double rfR, double rotGf)
+                                 float[] sprC, double sprR, float[] idlC, double idlR, double rotF, double rotR, float[] rrC, double rrR, double rotGr, float[] rfC, double rfR, double rotGf,
+                                 int rigidBudget, out BlenderRigAnim.MeshData instanced)
     {
+        instanced = null;
         int nv = d.Vertices;
         double sto = PyMax2(0.03, idlR > 0.0 && rotR > idlR ? rotR - idlR : 0.08);
         var circ = new List<(double x, double z, double r)>();
@@ -457,6 +463,26 @@ public static partial class BlenderVehicleRig
         int NC = Math.Max(8, (int)ncD);
         int nonLink = clusterBones + 1 + (turrets ? 1 : 0) + (guns ? 1 : 0);
         int linkBudget = Math.Max(8, (int)Math.Floor((240 - nonLink) / (double)Math.Max(1, trackCount)));
+        int nl = 0, kph = 0;
+        if (a.TreadLinks)
+        {
+            // RIGID LINKS: one bone per molded link, as many links as the bone wall leaves this track
+            linkBudget = rigidBudget;
+            if (linkBudget < 4)
+            {
+                string err = "rigid links need at least 4 bones per track; the 126-bone budget leaves " + linkBudget + ". Mark fewer separate animated parts.";
+                log.Add("VEHICLE ERROR: " + err); t.Death = "RuntimeError: " + err; return null;
+            }
+            double nlD = PyRound(L / fund);
+            nl = Math.Max(4, (int)nlD);
+            if (nl > linkBudget)
+            {
+                log.Add("VEHICLE *** WARNING: tread '" + o.Name + "' has " + nl + " links, the bone wall leaves " + linkBudget + " per track - links are merged (" + linkBudget + " bones), the molded pattern will not repeat exactly");
+                nl = linkBudget;
+            }
+            kph = Math.Max(1, Math.Min((int)PyRound(cpl), linkBudget / nl));
+            NC = nl * kph;
+        }
         if (NC > linkBudget)
         {
             log.Add("VEHICLE tread '" + o.Name + "' CELL CLAMP: " + NC + " cells -> " + linkBudget + " (" + clusterBones + " wheels+aux leave " + linkBudget
@@ -475,6 +501,11 @@ public static partial class BlenderVehicleRig
         }
         var cellOf = new int[nv];
         for (int v = 0; v < nv; v++) cellOf[v] = Math.Min(NC - 1, (int)(PyMod(sOf[v] + bestOff, L) / cellL));
+        if (a.TreadLinks)
+        {
+            instanced = TreadInstanceLinks(o, d, log, pts, S, L, NC, nl, kph, cellL, bestOff, out cellOf);
+            nv = instanced.Vertices;
+        }
         var arcs = arcRaw.Select(r => (a: r.a * L / LP, b: r.b * L / LP)).Where(r => r.b - r.a >= cellL).ToList();
         double margin = a.TreadAdvCells * cellL;
         bool InArcs(double sq)
@@ -491,7 +522,7 @@ public static partial class BlenderVehicleRig
         var job = new TreadJob { Prefix = t.Bones[0].Substring(0, t.Bones[0].Length - 3), NC = NC, CellL = cellL, L = L, S = S, Pts = pts, Off = bestOff, CellOf = cellOf, AdvCells = a.TreadAdvCells, Aux = (string[])t.Bones.Clone() };
         var shuttle = new List<int>();
         foreach (int ci in new SortedSet<int>(cellOf))
-            (InArcs(PyMod((ci + 0.5) * cellL - bestOff, L)) ? job.Cells : shuttle).Add(ci);
+            (a.TreadLinks || InArcs(PyMod((ci + 0.5) * cellL - bestOff, L)) ? job.Cells : shuttle).Add(ci);
         foreach (int ci in shuttle)
         {
             if (job.Runs.Count > 0 && ci == job.Runs[job.Runs.Count - 1].Last() + 1) job.Runs[job.Runs.Count - 1].Add(ci);
@@ -503,6 +534,14 @@ public static partial class BlenderVehicleRig
         }
         job.SRest = new double[NC]; for (int ci = 0; ci < NC; ci++) job.SRest[ci] = PyMod((ci + 0.5) * cellL - bestOff, L);
         t.Job = job;
+        if (a.TreadLinks)
+        {
+            // the whole loop in a whole number of spin cycles, each advancing about what the conveyor's dial asks (quarter links)
+            job.CircuitCycles = Math.Max(1, (int)PyRound(L / PyMax2(1e-6, a.TreadAdvCells * fund / 4.0)));
+            job.AdvCells = (L / job.CircuitCycles) / cellL;
+            log.Add("VEHICLE tread '" + o.Name + "' RIGID LINKS: " + job.Cells.Count + " link bones, one per link, no shuttles (link " + Py(cellL, 3) + ", loop " + Py(L, 2) + ", cut phase " + Py(bestOff, 3) + ")");
+            return null;
+        }
         log.Add("VEHICLE tread '" + o.Name + "' HYBRID v2: " + job.Cells.Count + " link bones on wraps + " + job.Runs.Count + " shuttle run(s) covering " + shuttle.Count + " cells (cell "
                 + Py(cellL, 3) + ", loop " + Py(L, 2) + ", cut phase " + Py(bestOff, 3) + ")");
         return null;
@@ -549,6 +588,7 @@ public static partial class BlenderVehicleRig
     }
 
     /// <summary>Matrix.Translation(v): the identity with v in its last column (row-major, as MatMulMathutils takes it).</summary>
+    internal static float[] LinkTranslation(float x, float y, float z) => TranslationRow(x, y, z);
     static float[] TranslationRow(float x, float y, float z) { var m = new float[16]; m[0] = m[5] = m[10] = m[15] = 1f; m[3] = x; m[7] = y; m[11] = z; return m; }
 
     /// <summary>The pose matrix of a link bone carried along the path: Translation(P1) @ q.to_matrix().to_4x4() @ Translation(-P0) @
@@ -562,5 +602,153 @@ public static partial class BlenderVehicleRig
         var m = VehicleProbe.MatMulMathutils(TranslationRow(p1[0], p1[1], p1[2]), r4);
         m = VehicleProbe.MatMulMathutils(m, TranslationRow(-p0[0], -p0[1], -p0[2]));
         return VehicleProbe.MatMulMathutils(m, restRowMajor);
+    }
+    /// <summary>bmesh.ops.duplicate(bm, geom=faces) for a list of faces (bmo_dupe.cc bmo_mesh_copy): the faces in the mesh's own order;
+    /// per face its vertices in corner order copied where not yet copied, then its edges likewise (between the copies of the
+    /// edge's own v1 and v2), then the face with every corner's data. Returns vert_map: the vertex -> its copy.</summary>
+    static Dictionary<int, int> DuplicateFaces(BMesh bm, BlenderWeld.Layers layers, List<int> faces)
+    {
+        var flagged = new HashSet<int>(faces); var vmap = new Dictionary<int, int>(); var emap = new Dictionary<int, int>();
+        int faceCount = bm.FaceCount; var loops = new List<int>(); var newLoops = new List<int>();
+        for (int f = 0; f < faceCount; f++)
+        {
+            if (!bm.FAlive[f] || !flagged.Contains(f)) continue;
+            loops.Clear(); bm.LoopsOfFace(f, loops);
+            foreach (int l in loops)
+            {
+                int v = bm.LV[l];
+                if (vmap.ContainsKey(v)) continue;
+                int nv = bm.VertCreate(bm.VCo[3 * v], bm.VCo[3 * v + 1], bm.VCo[3 * v + 2]);
+                bm.VFlag[nv] = bm.VFlag[v]; bm.VNo[3 * nv] = bm.VNo[3 * v]; bm.VNo[3 * nv + 1] = bm.VNo[3 * v + 1]; bm.VNo[3 * nv + 2] = bm.VNo[3 * v + 2];
+                for (int i = 0; i < layers.PointColor.Count; i++)
+                {
+                    var c = layers.PointColor[i];
+                    if (4 * nv + 3 >= c.Length) { Array.Resize(ref c, Math.Max(4 * nv + 4, c.Length * 2)); layers.PointColor[i] = c; }
+                    Array.Copy(c, 4 * v, c, 4 * nv, 4);
+                }
+                vmap[v] = nv;
+            }
+            foreach (int l in loops)
+            {
+                int e = bm.LE[l];
+                if (emap.ContainsKey(e)) continue;
+                int ne = bm.EdgeCreate(vmap[bm.EV1[e]], vmap[bm.EV2[e]]);
+                bm.EFlag[ne] = bm.EFlag[e]; emap[e] = ne;
+            }
+            int n = loops.Count; var vs = new int[n]; var es = new int[n];
+            for (int k = 0; k < n; k++) { vs[k] = vmap[bm.LV[loops[k]]]; es[k] = emap[bm.LE[loops[k]]]; }
+            int nf = bm.FaceCreate(vs, es, n);
+            bm.FFlag[nf] = bm.FFlag[f]; bm.FMat[nf] = bm.FMat[f];
+            for (int k = 0; k < 3; k++) bm.FNo[3 * nf + k] = bm.FNo[3 * f + k];
+            newLoops.Clear(); bm.LoopsOfFace(nf, newLoops);
+            for (int k = 0; k < n; k++) layers.CopyLoop(loops[k], newLoops[k]);
+        }
+        return vmap;
+    }
+
+    /// <summary>RIGID LINKS' instancing (vehicle_rig.py 2801-2905): every link of the band becomes a copy of ONE source link. Each
+    /// cell gets a frame on the path (its chord's middle, direction and normal); the faces go to cells by their median centre; the
+    /// link with the most faces whose chord is a cell long (the lowest of those) is the source; its vertices, measured in their own
+    /// cell's frame, are laid into every cell's frame on a duplicate of the faces; the original vertices are deleted. The result
+    /// has no custom normals (the source's describe the bent band).</summary>
+    static BlenderRigAnim.MeshData TreadInstanceLinks(BlenderRigAnim.SceneObject o, BlenderRigAnim.MeshData d, List<string> log, float[][] pts, double[] S, double L,
+                                                      int NC, int nl, int kph, double cellL, double bestOff, out int[] cellOf)
+    {
+        const int M = 512;
+        var layers = new BlenderWeld.Layers(); var bm = FromMeshData(d, layers, faceNormals: false, vertexNormals: false);
+        double hl = 0.5 * cellL;
+        float[] Pe(double sq)
+        {
+            sq = PyMod(sq, L);
+            int b = Math.Min(M - 1, Math.Max(0, BisectRight(S, sq) - 1)), b2 = (b + 1) % M;
+            double sg = S[b + 1] - S[b], fq = sg > 1e-9 ? (sq - S[b]) / sg : 0.0;
+            return VecLerp(pts[b], pts[b2], fq);
+        }
+        double SAt(double x, double z)
+        {
+            double bd = 1e18; int bmi = 0;
+            for (int m = 0; m < M; m++) { double ax = pts[m][0] - x, az = pts[m][2] - z, dd = ax * ax + az * az; if (dd < bd) { bd = dd; bmi = m; } }
+            return S[bmi];
+        }
+        var fSc0 = new double[NC]; var fMid = new float[NC][]; var fDc = new float[NC][]; var fNc = new float[NC][]; var fNear = new List<int>[NC]; var fChord = new double[NC];
+        for (int ci = 0; ci < NC; ci++)
+        {
+            double sc0 = PyMod((ci + 0.5) * cellL - bestOff, L);
+            var pa = Pe(sc0 - hl); var pb = Pe(sc0 + hl);
+            var dc = Sub(pb, pa); fChord[ci] = VecLength(dc);
+            dc = VecLength(dc) > 1e-9 ? Normalized(dc) : new[] { 1f, 0f, 0f };
+            var near = new List<int>();
+            for (int m = 0; m < M; m++) if (Math.Abs(PyMod(S[m] - sc0 + 0.5 * L, L) - 0.5 * L) <= 1.5 * cellL) near.Add(m);
+            fSc0[ci] = sc0; fMid[ci] = Scale(Add(pa, pb), 0.5f); fDc[ci] = dc; fNc[ci] = new[] { -dc[2], 0f, dc[0] }; fNear[ci] = near;
+        }
+        var facesOf = new Dictionary<int, List<int>>(); var loops = new List<int>();
+        for (int f = 0; f < bm.FaceCount; f++)
+        {
+            if (!bm.FAlive[f]) continue;
+            loops.Clear(); bm.LoopsOfFace(f, loops);
+            float cx = 0f, cz = 0f;   // BM_face_calc_center_median: the corners summed in float32, times 1.0f / len
+            foreach (int l in loops) { cx = (float)(cx + bm.VCo[3 * bm.LV[l]]); cz = (float)(cz + bm.VCo[3 * bm.LV[l] + 2]); }
+            float inv = (float)(1.0f / (float)loops.Count); cx = (float)(cx * inv); cz = (float)(cz * inv);
+            int cell = Math.Min(NC - 1, (int)(PyMod(SAt(cx, cz) + bestOff, L) / cellL));
+            if (!facesOf.TryGetValue(cell, out var list)) facesOf[cell] = list = new List<int>();
+            list.Add(f);
+        }
+        int FacesIn(int cell) => facesOf.TryGetValue(cell, out var l0) ? l0.Count : 0;
+        var nfl = new int[nl]; for (int j = 0; j < nl; j++) for (int q = 0; q < kph; q++) nfl[j] += FacesIn(j * kph + q);
+        int maxN = nfl.Max();
+        var cand = Enumerable.Range(0, nl).Where(j => nfl[j] >= 0.9 * maxN && Enumerable.Range(0, kph).All(q => Math.Abs(fChord[j * kph + q] - cellL) <= 0.005 * cellL)).ToList();
+        if (cand.Count == 0) cand = Enumerable.Range(0, nl).Where(j => nfl[j] >= 0.9 * maxN).ToList();
+        int tj = cand[0]; double tz = 0.0; bool first = true;
+        foreach (int j in cand)   // min by (the frames' height summed, the link's number)
+        {
+            double z = PySum(Enumerable.Range(0, kph).Select(q => (double)fMid[j * kph + q][2]));
+            if (first || z < tz) { tz = z; tj = j; first = false; }
+        }
+        int nf0 = bm.TotFace, nv0 = bm.TotVert;
+        var orig = new List<int>(); for (int v = 0; v < bm.VertCount; v++) if (bm.VAlive[v]) orig.Add(v);
+        var vcell = new Dictionary<int, int>();
+        for (int q = 0; q < kph; q++)
+        {
+            if (!facesOf.TryGetValue(tj * kph + q, out var src) || src.Count == 0) continue;
+            int sci = tj * kph + q; double sc0 = fSc0[sci]; var near0 = fNear[sci];
+            var local = new List<(int v, double ds, double hv)>(); var seen = new HashSet<int>();
+            foreach (int f in src)
+            {
+                loops.Clear(); bm.LoopsOfFace(f, loops);
+                foreach (int l in loops)
+                {
+                    int v = bm.LV[l];
+                    if (!seen.Add(v)) continue;
+                    double vx = bm.VCo[3 * v], vz = bm.VCo[3 * v + 2], bd = 1e18; int bmi = 0;
+                    foreach (int m in near0) { double ax = pts[m][0] - vx, az = pts[m][2] - vz, dd = ax * ax + az * az; if (dd < bd) { bd = dd; bmi = m; } }
+                    var tp = Sub(pts[(bmi + 1) % M], pts[((bmi - 1) % M + M) % M]);
+                    tp = VecLength(tp) > 1e-9 ? Normalized(tp) : new[] { 1f, 0f, 0f };
+                    var rel = new[] { (float)(vx - pts[bmi][0]), 0f, (float)(vz - pts[bmi][2]) };
+                    double ds = PyMod(S[bmi] + Dot(rel, tp) - sc0 + 0.5 * L, L) - 0.5 * L;
+                    local.Add((v, ds, Dot(rel, new[] { -tp[2], 0f, tp[0] })));
+                }
+            }
+            for (int j = 0; j < nl; j++)
+            {
+                int ci = j * kph + q;
+                var vm = DuplicateFaces(bm, layers, src);
+                foreach (var (v, ds, hv) in local)
+                {
+                    int nv = vm[v];
+                    var p = Add(Add(fMid[ci], Scale(fDc[ci], (float)ds)), Scale(fNc[ci], (float)hv));
+                    bm.VCo[3 * nv] = p[0]; bm.VCo[3 * nv + 2] = p[2];
+                    vcell[nv] = ci;
+                }
+            }
+        }
+        foreach (int v in orig) if (bm.VAlive[v]) bm.VertKill(v);   // bmesh.ops.delete(geom=the original vertices, context='VERTS')
+        var cells = new List<int>(); for (int v = 0; v < bm.VertCount; v++) if (bm.VAlive[v]) cells.Add(vcell[v]);
+        cellOf = cells.ToArray();
+        int nf1 = bm.TotFace, nv1 = bm.TotVert;
+        var r = ToMeshDataPolygons(bm, layers, d);
+        r.CustomNormal = null;   // the custom_normal attribute is removed
+        log.Add("VEHICLE tread '" + o.Name + "' RIGID LINKS instanced: " + nl + " link(s) x " + kph + " cell(s), each a copy of link " + tj + " (" + nfl[tj] + " of the band's " + nf0 + " faces); "
+                + nv0 + " -> " + nv1 + " verts, " + nf0 + " -> " + nf1 + " faces");
+        return r;
     }
 }

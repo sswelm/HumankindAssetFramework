@@ -298,6 +298,13 @@ public static partial class BlenderVehicleRig
         // the script's _bone_wall_check(arm): every rig, past the 126-bone budget, says so (the Lab shows *** WARNING lines)
         if (s.Armature.BoneNodes.Count > 126)
             s.Logs5.Add("VEHICLE *** WARNING: " + s.Armature.BoneNodes.Count + " bones — past the 126-bone budget (bone indices break past 127 in-game: the geometry on the last bones collapses or spikes). Lower Tread detail (the bones dial) or mark fewer separate parts.");
+        // rigid links: a track without a measurable pitch keeps its carriers, so the finished rig is checked before anything is written
+        if (a.TreadLinks && s.Armature.BoneNodes.Count > 126)
+        {
+            string err = "rigid links exceed the 126-bone budget (" + s.Armature.BoneNodes.Count + " bones); mark fewer separate animated parts.";
+            s.Logs5.Add("VEHICLE ERROR: " + err); s.Dies = "RuntimeError: " + err; Note(s, "rigid links past the bone wall: the script's own error");
+            return null;
+        }
         int current = s.FrameCurrent;
         var x = BlenderRigExport.BuildVehicle(s, f => EvaluateExportFrame(s, f), preserveJpegAlpha);
         if (x.Fallback != null) { s.Fallback = "stage 5: the GLB export (" + x.Fallback + ") is not modelled yet"; return x; }
@@ -331,7 +338,9 @@ public static partial class BlenderVehicleRig
             foreach (int b in s.Armature.BoneNodes) { s.Armature.PoseProps[b] = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } }; 
                 // matrix_basis.identity() on an XYZ bone reads the identity back as the Euler (0, -0, 0) (atan2f(-m[0][2], cy)); a keyed channel
                 // is written over at the next evaluation, an unkeyed one (a tread carrier's rotation) keeps it
-                s.Armature.PoseEuler[b] = s.Armature.RotMode.TryGetValue(b, out var rmode) && rmode == "XYZ" ? new[] { 0f, -0f, 0f } : new float[3]; }
+                // (a QUATERNION bone's Euler is not touched by the reset: a rigid link, set to XYZ once and then keyed as a quaternion, keeps the (0, -0, 0) of that)
+                if (s.Armature.RotMode.TryGetValue(b, out var rmode) && rmode == "XYZ") s.Armature.PoseEuler[b] = new[] { 0f, -0f, 0f };
+                else if (!s.Armature.PoseEuler.ContainsKey(b)) s.Armature.PoseEuler[b] = new float[3]; }
         if (visited.Count > 0 && visited.Last().Name == st.Arm.Action)
         {
             var range = BlenderRigExport.ActionRange(visited.Last());
