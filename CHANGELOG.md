@@ -10,6 +10,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Vehicle Lab: Rigid links run in C# - the tread rig is complete (2026-11-16; d6, third part).** Rigid links (the Tread
+  type popup, PR #278) gives every molded link its own bone and rebuilds the band from copies of one link, so a link never
+  bends. In C# now: the bone budget (what the 126-bone wall leaves a track once its nine carriers are gone), the choice of
+  the source link, Blender's `duplicate` operator per link with every vertex laid into its cell's frame, the delete of the
+  original band, and the keys - each link carried round the WHOLE loop as a quaternion kept on one side, on every frame of
+  a clip stretched to a whole number of spin cycles. The script's two own errors are modelled as its deaths: fewer than
+  four bones left for a track (stage 3), and a finished rig past the bone wall because one track kept its carriers (stage
+  5). The five rigid fixtures, until now checked in Blender only, joined the stage comparison: three equal at every stage
+  with byte-identical GLBs (the largest: 125 bones, 852 curves, 528,384 keys), two equal as the script's error. One cost
+  found on the way and fixed: keying every link on every frame re-evaluated every curve each frame (the square of the
+  clip) - a 2,000-frame circuit took 2 min 15 s in a unit test, 2 s after the evaluation was limited to the bones a link's
+  pose is set against. **Still Blender, by name:** Double-sided / Fix inside-out / a Two-sided part beside a moving tread.
 - **Vehicle Lab: a moving tread's link bones run in C# - the Bradley's rig equals Blender's (2026-11-16; d6, second part).**
   Every real tank's tread has a link pitch, and for those the script cuts the loop into cells along a measured path: a bone
   per cell on the wheels' wraps, one shuttle bone per straight run, the nine carrier bones removed, and every link bone

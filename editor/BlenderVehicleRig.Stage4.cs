@@ -90,6 +90,7 @@ public static partial class BlenderVehicleRig
         }
 
         public void Recalc() { foreach (var k in Dirty) BlenderFCurve.RecalcHandles(Curves[k]); Dirty.Clear(); }
+        public void Recalc((string bone, string prop, int index) k) { if (Dirty.Remove(k)) BlenderFCurve.RecalcHandles(Curves[k]); }
         public void Linear(Func<(string bone, string prop, int index), bool> select = null)
         {
             Recalc(); // changing interpolation leaves the auto-clamped handles in place
@@ -166,11 +167,15 @@ public static partial class BlenderVehicleRig
         var evaluatedAt = new Dictionary<(string bone, string prop, int index), int>();
         void FrameSet(int f) { anyFrameSet = true; s.FrameCurrent = f; frameHistory.Add(f); assignedSince.Clear(); }
         // frame_set(f) for the armature: every keyed channel takes its curve's value at f (BKE_fcurve evaluation of the BEZIER keys)
-        void EvaluatePose(int f)
+        // `only`: the bones whose state is read now - a channel left out keeps its place in the history and is evaluated when
+        // something does read it (a link bone keyed on every frame of a long circuit is never read between its keys: evaluating
+        // every curve at every frame recalculated each curve's handles once per key, the square of the clip)
+        void EvaluatePose(int f, HashSet<string> only = null)
         {
-            spin.Recalc();
+            if (only == null) spin.Recalc();
             foreach (var k3 in curveOrder)
             {
+                if (only != null) { if (!only.Contains(k3.bone)) continue; spin.Recalc(k3); }
                 float v = BlenderFCurve.Evaluate(curves[k3], f, constant: true);
                 int id = st.BoneId[k3.bone];
                 if (assignedSince.Contains((k3.bone, k3.prop))) continue;
@@ -558,10 +563,13 @@ public static partial class BlenderVehicleRig
                         ToXyz(L2(ci));
                         PathEval(job, job.SRest[ci], out var p0, out var t0); p0s[ci] = p0; t0s[ci] = t0;
                     }
+                    // what a link's pose is set against: its parent chain's pose at the frame (the body bone under the wave rock)
+                    var parentChain = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (int ci in job.Cells) for (int pb = ad.Rest.Parent[st.BoneId[L2(ci)]]; pb >= 0; pb = ad.Rest.Parent[pb]) parentChain.Add(s.Names.BoneOfJoint[pb]);
                     for (int f = 0; f <= clip; f++)
                     {
                         TreadFrameSet(f);
-                        EvaluatePose(f); var poseNow = VehiclePoseMats(ad);
+                        EvaluatePose(f, parentChain); var poseNow = VehiclePoseMats(ad);
                         foreach (int ci in job.Cells)
                         {
                             string bn = L2(ci); int id = st.BoneId[bn];

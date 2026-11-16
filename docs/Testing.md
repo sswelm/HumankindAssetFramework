@@ -2796,6 +2796,25 @@ The `EXPORTS` line counts them (`pixelImages`), a `PIXELS <job>` line names the 
 both images by pixel and channel. NOT modelled, left by name: Rigid links (`treadmode=links`), and the stage 5 passes on a
 polygon tread. NOT checked: nothing ran in Unity or in the game - the Bradley's C# rig has not been looked at there.
 
+The tread rig, third part (2026-11-16, d6): RIGID LINKS. The five fixtures of `recipes_rigid` were a Blender-only check
+(`blender_rigid_tread_check.py`, which stays); they now also run through the stage comparison, the two that are the script's
+own errors under keys naming the stage (`DIES:3:fx_links_full`, `DIES:5:fx_links_fallback`). Held: `fx_links`, `fx_links_dense`
+and `fx_links_tight` equal at every stage, the GLB byte for byte (fx_links: 125 bones, 852 fcurves, 528,384 keys under
+VEHICLERIG_KEYS=1 over a 628-frame circuit); `fx_links_full` dies in stage 3 with the script's exception and every line printed
+before it (the VEHICLE ERROR last); `fx_links_fallback` (one pitched belt, one 8-vertex belt that keeps its nine carriers)
+runs four stages equal and dies in stage 5 on the bone wall. The drill's stage 3 and stage 5 blocks did not know a death (only
+stages 1, 2 and 4 did): both now compare the exception text and the stop's lines, and the drill script requires the two death
+lines and the three equal exports by name. What is modelled: the budget ((126 - every bone + the carriers) // tracks), the
+merged-links warning, the source link (most faces, chord one cell long, lowest), `bmesh.ops.duplicate` on a face list (faces
+in mesh order; per face its vertices, then its edges, then the face - `DuplicateFaces`), each copy's vertices laid into its
+cell's frame, the original vertices deleted, `custom_normal` removed; the clip stretched to frames x circuit cycles; per frame
+the chord's angle (atan2 of the float32 chord, in double) about Y between the two chord middles, the pose read back as a
+quaternion and negated when it flips against the frame before. Two readings: the exporter's pose reset leaves a QUATERNION
+bone's Euler alone (a rigid link was set to XYZ once, so its (0, -0, 0) survives - the reset used to zero it), and evaluating
+every curve at every frame of a long circuit costs the square of the clip (2 min 15 s for a 2,000-frame unit test; 2 s with
+the evaluation limited to the links' parent chain - the fixtures stayed equal). `VehicleRigTreadTests` (9). NOT checked:
+nothing ran in Unity or in the game; the time a rigid-links Generate takes in the Lab is not measured.
+
 The gun's recoil defects (2026-11-07): the recoil-side entries open since October, fixed in `vehicle_rig.py` and in the C#
 port in the same PR so the parity drill holds each fix (the fixtures are TAKEN by the port, unlike the tread's). (1) The arc's
 bore came from `gun_axis` (trunnion -> muzzle): at a pivot of 1.0 the trunnion is the muzzle and the difference is a float32

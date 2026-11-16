@@ -10,8 +10,11 @@
 //   - a tread whose link pitch IS found (every real tank): the link cells (TreadLinkCells: the belt path round the band circles,
 //     512 samples pulled onto the tread's centre line, the cut phase, a bone per wrap cell and a shuttle bone per straight run)
 //     and the pose a link bone takes along the path (LinkPoseMatrix; the keys are Stage4's).
-// What is NOT here yet, left to Blender by name: the rigid links (treadmode=links), and the script's own crash on a tread
-// with no sprocket or idler cluster.
+//   - RIGID LINKS (treadmode=links): one bone per molded link within the bone wall's budget, the band rebuilt from copies of ONE
+//     source link laid into every cell's frame (TreadInstanceLinks: bmesh.ops.duplicate per link, the originals deleted, the
+//     custom normals dropped); the script's two errors - no four bones left for a track, the finished rig past 126 bones - are
+//     its own deaths (TrackInfo.Death, Stage5).
+// What is NOT here, left to Blender by name: the script's own crash on a tread with no sprocket or idler cluster.
 using System;
 using System.Collections.Generic;
 using System.Linq;
