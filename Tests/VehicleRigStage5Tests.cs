@@ -173,6 +173,35 @@ public class VehicleRigStage5Tests
         Assert.Equal(global ? 16 : 8, Mesh(s, "Mesh_Root").Vertices);       // the hull: doubled by the switch alone
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Two_sided_face_batches_poll_on_the_caller_and_propagate_deadlines_and_cancellation(bool cancel)
+    {
+        var m = Model(); Box(m, "Hull", 0, -3, 0);
+        var points = new List<float>();
+        for (int i = 0; i < 300; i++) points.AddRange(new[] { 2f * i, 0f, 0f, 2f * i + 1, 0f, 0f, 2f * i, 1f, 0f });
+        var panel = new HafMesh { Name = "Panel" };
+        panel.Primitives.Add(new HafPrimitive { Positions = points.ToArray(), Indices = Enumerable.Range(0, points.Count / 3).ToArray() });
+        m.Nodes.Add(new HafNode { Name = "Panel", Mesh = m.Meshes.Count }); m.Meshes.Add(panel); m.Scenes[0].Nodes.Add(m.Nodes.Count - 1);
+        var a = Args(); Mark(a, "twosided", "Panel");
+        var s = Stage4(m, a); var before = Mesh(s, "Mesh___two__Panel");
+        var faces = (int[])before.Faces.Clone(); var positions = (float[])before.Positions.Clone();
+        int polls = 0, caller = System.Threading.Thread.CurrentThread.ManagedThreadId;
+        Action checkpoint = () =>
+        {
+            Assert.Equal(caller, System.Threading.Thread.CurrentThread.ManagedThreadId);
+            if (++polls != 3) return;   // after the scene build and the first face batch, before committing copies
+            if (cancel) throw new OperationCanceledException();
+            throw new TimeoutException("deadline");
+        };
+        if (cancel) Assert.Throws<OperationCanceledException>(() => BlenderVehicleRig.RunStage5(s, a, checkpoint: checkpoint));
+        else Assert.Throws<TimeoutException>(() => BlenderVehicleRig.RunStage5(s, a, checkpoint: checkpoint));
+        Assert.Equal(3, polls); Assert.Same(before, Mesh(s, "Mesh___two__Panel"));
+        Assert.Equal(faces, before.Faces); Assert.Equal(positions, before.Positions);
+        Assert.DoesNotContain(s.Logs5, l => l.StartsWith("VEHICLE two-sided '", StringComparison.Ordinal));
+    }
+
     static BlenderDeployExport.Result Export(BlenderRigAnim.Stage1 s, BlenderVehicleRig.Args a)
     {
         var x = BlenderVehicleRig.RunStage5(s, a); Assert.Null(s.Fallback); Assert.NotNull(x); Assert.Null(x.Fallback); return x;
