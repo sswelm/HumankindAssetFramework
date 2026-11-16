@@ -7,8 +7,11 @@
 //   - the wrap bands around the sprocket, the idler and the first and last road wheel, each measured on the tread's
 //     own vertices; the weight of every vertex on the wrap bones and its shuttle region; one smoothing pass over the
 //     edges; the vertex groups (one per carrier bone, by name), written in the order the script's dicts hold them.
-// What is NOT here yet, left to Blender by name: a tread whose link pitch was found (the link cells, the hybrid and
-// the rigid-links rigs), and the script's own crash on a tread with no sprocket or idler cluster.
+//   - a tread whose link pitch IS found (every real tank): the link cells (TreadLinkCells: the belt path round the band circles,
+//     512 samples pulled onto the tread's centre line, the cut phase, a bone per wrap cell and a shuttle bone per straight run)
+//     and the pose a link bone takes along the path (LinkPoseMatrix; the keys are Stage4's).
+// What is NOT here yet, left to Blender by name: the rigid links (treadmode=links), and the script's own crash on a tread
+// with no sprocket or idler cluster.
 using System;
 using System.Collections.Generic;
 using System.Linq;

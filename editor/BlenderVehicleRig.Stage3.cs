@@ -28,9 +28,9 @@
 //     part skins per vertex and keeps its own mesh (__oar__<part>) through the join. Python's float sum() is compensated: PySum.
 // Part d6, the TREAD rig (2026-11-16): per live tread nine bones after the trails - five shuttle carriers at the part's centre, four
 // wrap bones laid on the sprocket's, the idler's and the first and last road wheel's cluster bones; the part skins per vertex
-// (BlenderVehicleRig.Tread.cs) and keeps its own mesh (__track__<part>), which holds POLYGONS after the subdivision. Left to
-// Blender by name: a tread whose link pitch is found (the link cells), the rigid links, a tread without a sprocket or idler
-// cluster; as is a scene this part does not expect (an armature still
+// (BlenderVehicleRig.Tread.cs) and keeps its own mesh (__track__<part>), which holds POLYGONS after the subdivision. A tread
+// whose link pitch is found trades its nine carriers for a bone per wrap cell and one per straight run. Left to Blender by
+// name: the rigid links, a tread without a sprocket or idler cluster; as is a scene this part does not expect (an armature still
 // there, a parented part, a mesh still carrying an Armature modifier, a main rotor hub whose covariance is non-finite with two or
 // more vertices, or whose eigh takes a LAPACK branch not ported: rescaling a tiny or huge entry, DSTEQR not converging; an oar
 // part without its edge list, a non-finite projected centre, a world with no inverse, an infinite blade roll).

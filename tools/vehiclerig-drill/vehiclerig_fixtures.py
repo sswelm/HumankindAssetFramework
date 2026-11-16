@@ -81,6 +81,9 @@ Stage 3 (step (d), part d3: the turret, the gun assembly, the trails):
                      (their under-bands measured, the WrapGF / WrapGR weights), past a return roller above it (the upper-rear
                      slope) - so the three ramp regions hold vertices; no station on the straights, so still no link pitch; one
                      wheel on the other side (the side filter)
+  fx_r_tracks_hybrid the rigid-links fixtures' pitched belts (120 stations: a link pitch IS found) on the conveyor, no treadmode: the
+                     link cells - a bone per wrap cell, a shuttle bone per straight run, the nine carriers removed; the cell
+                     clamp; every link bone keyed on every frame along the measured path
   fx_r_tracks_recoil the same live tracks with a tube along x under recoil 8 units BELOW them: the recoil sign test read the module-level
                      _tc the track loops had rebound to the last track's centre; the arc's pivot is R (= slide / tan 3 deg) above the
                      bore, so the sign flips once the tracks' centre is more than R above the tube - here it is, and the old script

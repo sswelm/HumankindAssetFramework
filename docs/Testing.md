@@ -2774,6 +2774,28 @@ the Bradley), rigid links, a tread with no sprocket or idler cluster (the script
 inside-out fix, the double-sided shell and the Two-sided pass on or beside a polygon tread. NOT checked: nothing ran in
 Unity or in the game; no saved recipe takes the new path (the Bradley has a link pitch), so the evidence is the fixtures.
 
+The tread rig, second part (2026-11-16, d6): the LINK BONES. A tread whose link pitch is found is cut into cells along a path:
+tangent to tangent round the wheels' band circles, arcs sampled every 0.02, resampled to 512 points, pulled onto the tread's own
+centre line (the vertices' mean per sample, smoothed over one link each side), cut at the one of 24 phases that crosses the fewest
+edges; the cells on a wrap arc and the advance's margin each get a bone, a straight run one shuttle bone, the nine carriers go.
+The script makes those bones in a second edit-mode session; an edit bone keeps its head, tail and roll through one, so the C#
+builds the rest once with the final bone set (the fixture's 119 BONE rows are the check). Stage 4 sets each link bone's pose
+matrix whole on every frame - Translation(P1) @ rotation_difference @ Translation(-P0) @ rest, into the bone's space under its
+parent's pose at that frame, read back as location, Euler and scale (no compatible-Euler pass) - and keys location and rotation;
+with link bones the ground wheels roll at the belt's advance instead of the drive wheel's rim ratio. `fx_r_tracks_hybrid` (the
+rigid fixtures' pitched belts without treadmode: the cell clamp, 55 link bones and 2 shuttle runs per track, 119 bones, 684
+fcurves, 3,348 keys) is equal at all five stages, the GLB byte for byte, and the drill fails if it is left. The BRADLEY
+(`Bredley_Low`, the one saved recipe with live tracks: 28 link bones and 2 shuttles per track, 79 bones, 396 fcurves, 5,496
+keys) is equal at all five stages. Its file first differed in two images: the metallic-roughness textures the FBX reader
+composes from two files' pixels, where Blender's side of this drill carries the PNG its own image writer made (sRGB, gAMA, cHRM,
+eXIf, oFFs chunks, another deflate stream). Measured before deciding anything: 0 of 50,331,648 pixel bytes differ in each. So the
+vehicle_rig drill now does, for an .fbx job only, what the FBX model drill does for a composed image: a PNG whose bytes differ
+from its IMG row is decoded on both sides (Blender's out of its own exported file, whose bytes must hash to the row); with every
+pixel equal Blender's bytes stand in, and the rest of the file - the JSON, every other view - is still compared byte for byte.
+The `EXPORTS` line counts them (`pixelImages`), a `PIXELS <job>` line names the job. Planted: one bit of one pixel flipped fails
+both images by pixel and channel. NOT modelled, left by name: Rigid links (`treadmode=links`), and the stage 5 passes on a
+polygon tread. NOT checked: nothing ran in Unity or in the game - the Bradley's C# rig has not been looked at there.
+
 The gun's recoil defects (2026-11-07): the recoil-side entries open since October, fixed in `vehicle_rig.py` and in the C#
 port in the same PR so the parity drill holds each fix (the fixtures are TAKEN by the port, unlike the tread's). (1) The arc's
 bore came from `gun_axis` (trunnion -> muzzle): at a pivot of 1.0 the trunnion is the muzzle and the difference is a float32
