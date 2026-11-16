@@ -19,8 +19,9 @@ using System.Linq;
 
 public static partial class BlenderVehicleRig
 {
-    /// <summary>Why a job that marks a part Two-sided is left to Blender.</summary>
-    public const string TwoSidedLeave = "the Two-sided role (twosided=): its outside-visibility pass is not modelled yet";
+    /// <summary>Why a job whose Two-sided names file cannot be read is left to Blender: the script dies of Python's own
+    /// error there, which is not modelled for this tag.</summary>
+    public const string TwoSidedLeave = "the Two-sided role (twosided=): a names file that cannot be read";
     public sealed class Args
     {
         public string Mode = "rig", Input = "", OutGlb = "", PreviewFbx = "";
@@ -224,11 +225,15 @@ public static partial class BlenderVehicleRig
                 a.TagError = tag == "gunreduce" || tag == "turretreduce" || tag == "windowreduce" || tag == "railingreduce" ? "VEHICLE ERROR: malformed " + tag + " argument: " + err
                            : "VEHICLE ERROR: malformed " + tag + " argument: " + arg + " (" + err + ")";
         }
-        // twosided=@<names file> (2026-11-14): the Two-sided role's pass casts rays against the whole model at export, which stage 5
-        // does not model yet - a job that carries the tag is left to Blender by name. The window sends the tag only when a part is marked.
+        // twosided=@<names file> (2026-11-14; modelled 2026-11-16): `namelist(arg[9:]) if arg[9:].strip() else []`, after every
+        // reduce tag - a script that already died or exited above never reads it. The window sends the tag only when a part is marked.
+        a.Names["twosided"] = new List<string>();
         string two = argv.FirstOrDefault(x => x.StartsWith("twosided=", StringComparison.Ordinal));
         if (two != null && PyNonBlank(two.Substring(9)) && a.NamesDie == null && a.Unsupported == null && a.TagError == null)
-            a.Unsupported = TwoSidedLeave;
+        {
+            try { a.Names["twosided"] = NameList(two.Substring(9)); }
+            catch (Exception e) when (NamesFileException(e)) { a.Unsupported = TwoSidedLeave; }
+        }
         // _role_marked: every role list but ignore (the tagged shroud/window/railing lists too); static tracks are emptied before it is built
         foreach (var kv in a.Names) if (kv.Key != "ignore" && kv.Key != "default" && !(kv.Key == "tracks" && a.TracksStatic)) a.Marked.UnionWith(kv.Value);
         string m2 = argv.FirstOrDefault(x => x.StartsWith("merge2=", StringComparison.Ordinal));

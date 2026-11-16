@@ -76,6 +76,23 @@ public class VehicleRigInProcessTests : IDisposable
         Assert.Equal(8,ticks); Assert.Equal("old",File.ReadAllText(a[2])); Assert.Empty(Directory.GetFiles(dir,"*.tmp"));
     }
     [Theory] [InlineData(false)] [InlineData(true)]
+    public void Two_sided_finishing_observes_cancellation_or_deadline_before_completing_the_pass(bool cancel)
+    {
+        var a = Args().Concat(new[] { "twosided=Hull" }).ToArray();
+        File.WriteAllText(a[2], "old"); int ticks = 0;
+        // Six checkpoints reach stage 5 with these arguments. The next poll must be inside the
+        // new visibility pass, before it finishes, rather than after the entire export is prepared.
+        Action checkpoint = () => { if (++ticks == 7) { if (cancel) throw new OperationCanceledException(); throw new TimeoutException("deadline"); } };
+        if (cancel) Assert.Throws<OperationCanceledException>(() => BlenderVehicleRigInProcess.Run(a, checkpoint));
+        else
+        {
+            var o = BlenderVehicleRigInProcess.Run(a, checkpoint);
+            Assert.False(o.Written); Assert.Contains("deadline", o.Error); Assert.Null(o.UseBlender);
+            Assert.DoesNotContain(o.Log, l => l.StartsWith("VEHICLE two-sided '", StringComparison.Ordinal));
+        }
+        Assert.Equal(7, ticks); Assert.Equal("old", File.ReadAllText(a[2])); Assert.Empty(Directory.GetFiles(dir, "*.tmp"));
+    }
+    [Theory] [InlineData(false)] [InlineData(true)]
     public void Script_exit_and_known_death_do_not_fall_back_or_replace_output(bool dies)
     {
         var a=Args(); File.WriteAllText(a[2],"old"); if(dies)a[7]="15.0";else a[4]="Missing";

@@ -7,6 +7,29 @@ check before proposing a change to any of them.
 
 ---
 
+## The tools run in C#; Blender is the oracle, and a feature lands in both (2026-11-16)
+
+**Decision:** the Factory's and the Lab's conversion steps run in C#, in the editor's own process. The Blender scripts
+under `editor/Tools~` stay for two jobs only: they are the **oracle** the C# is held to (`tools/blender_parity.sh`,
+row for row and byte for byte), and the **fallback** for a job the C# still leaves by name. Every such leave is to be
+ported (user, 2026-11-16: "everything need to be converted to C#").
+
+**The rule that follows:** a new feature, or a change of behaviour, lands in the script **and** in its port in the same
+PR, with a fixture the parity drill compares. A leave by name is allowed only as a stated, temporary limit: the reason
+in the code's own fallback string, the job counted as left in the drill's output.
+
+**Why:** the ports were done step by step from October on, and no record said so - the newest entry here was from
+August. Without the rule the gap grew back: rigid-link treads (PR #278) and the Two-sided role (PR #283) landed in
+`vehicle_rig.py` alone, and the 2026-11-15 Bake Tests run failed six rows as "C# coverage lost". A feature that exists
+only in Python sends its jobs back through Blender: slower, a second install to keep, and outside the in-process paths
+the previews use.
+
+**Order of what is left in the Lab (2026-11-16):** the Two-sided role (done with this entry), the tread rig with its
+rigid links, the source-skeleton fast path.
+
+**What this does not decide:** Blender stays installed on the build machine as the oracle; the parity drills need it.
+The code's default rig route (`rigRoute`) is a separate switch and is not flipped here.
+
 ## Footprint settings: keep BOTH sources, make the precedence explicit and logged (2026-08-23)
 The strategic footprint can be set in two places — the per-district **registry entry** (what a pack authors and
 ships) and the **global config** (what an operator tunes live in the F8 window, no re-bake). A 2026-08-23 review

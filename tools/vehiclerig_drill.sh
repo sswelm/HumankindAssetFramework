@@ -43,7 +43,7 @@ if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/VehicleRigJobs.exe" ]; then echo "$OUT" | gr
 # the drill with the stage models (editor/BlenderVehicleRig.cs) and the editor files they are built from - the rig_anim drill's list
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/vehiclerig.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WAPI/System.Numerics.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/vehiclerig-drill/VehicleRigDrill.cs" "$WROOT/tools/deploy-drill/GlbRowsCompare.cs" "$WROOT/tools/deploy-drill/MaterialDrill.cs" "$E/BlenderVehicleRig.cs" "$E/FbxDocument.cs" "$E/FbxScene.cs" "$E/FbxAnimation.cs" "$E/FbxTriangulate.cs" "$E/FbxImport.cs" "$E/FbxModel.cs" "$E/FbxMaterials.cs" "$E/PngCodec.cs" "$E/FbxArmature.cs" "$E/FbxActions.cs" "$E/HafModelLoader.cs" "$E/VehicleProbe.PolygonNormals.cs" "$E/BlenderVehicleRig.Stage2.cs" "$E/BlenderVehicleRig.Stage3.cs" "$E/BlenderVehicleRig.Stage4.cs" "$E/BlenderVehicleRig.Stage5.cs" "$E/BlenderVehicleRigInProcess.cs" "$E/BlenderNumpy.cs" "$E/BlenderWeld.cs" "$E/BlenderDissolve.cs" "$E/BlenderPolyfill.cs" "$E/VehicleRigArgs.cs" "$E/EditorRules.cs" \
+  "$WROOT/tools/vehiclerig-drill/VehicleRigDrill.cs" "$WROOT/tools/deploy-drill/GlbRowsCompare.cs" "$WROOT/tools/deploy-drill/MaterialDrill.cs" "$E/BlenderVehicleRig.cs" "$E/FbxDocument.cs" "$E/FbxScene.cs" "$E/FbxAnimation.cs" "$E/FbxTriangulate.cs" "$E/FbxImport.cs" "$E/FbxModel.cs" "$E/FbxMaterials.cs" "$E/PngCodec.cs" "$E/FbxArmature.cs" "$E/FbxActions.cs" "$E/HafModelLoader.cs" "$E/VehicleProbe.PolygonNormals.cs" "$E/BlenderVehicleRig.Stage2.cs" "$E/BlenderVehicleRig.Stage3.cs" "$E/BlenderVehicleRig.Stage4.cs" "$E/BlenderVehicleRig.Stage5.cs" "$E/BlenderVehicleRig.TwoSided.cs" "$E/BlenderBvh.cs" "$E/BlenderVehicleRigInProcess.cs" "$E/BlenderNumpy.cs" "$E/BlenderWeld.cs" "$E/BlenderDissolve.cs" "$E/BlenderPolyfill.cs" "$E/VehicleRigArgs.cs" "$E/EditorRules.cs" \
   "$E/BlenderRigAnim.cs" "$E/BlenderRigExport.cs" "$E/BlenderRigAnimInProcess.cs" "$E/BlenderDeploy.cs" "$E/BlenderDeployExport.cs" "$E/BlenderMaterialExport.cs" "$E/BlenderChannelExport.cs" "$E/BlenderGlbWriter.cs" "$E/PyFloatRepr.cs" "$E/BlenderFCurve.cs" \
   "$E/BlenderExport.cs" "$E/BlenderReduce.cs" "$E/BlenderDecimate.cs" "$E/BlenderExportTree.cs" \
   "$E/HafModel.cs" "$E/GlbReader.cs" "$E/HafTransforms.cs" "$E/BlenderNames.cs" "$E/BlenderPosedState.cs" "$E/BlenderTrig.cs" "$E/BlenderEigen.cs" "$E/BlenderMesh.cs" "$E/BMesh.cs" "$E/BlenderColor.cs" \
@@ -77,8 +77,10 @@ if [ "$rrc" -ne 0 ] || [ "$(grep -c '^RIGID PASS' "$TMPD/rigid.txt")" -ne 5 ] ||
   tail -50 "$TMPD/rigid.txt"; echo "FAIL — rigid tread motion / bone budget"; exit 1
 fi
 grep '^RIGID PASS' "$TMPD/rigid.txt"
-# The Two-sided role is a Blender-only path too (the C# leaves a job carrying twosided= by name), so no stage comparison
-# reaches its export pass. Run the fixture through the complete production script and hold the result to the input.
+# The Two-sided role: run the fixture through the complete production script and hold the result to the INPUT (which
+# faces a correct pass doubles - the contract, which no comparison of two implementations states). Since 2026-11-16 the
+# C# models the pass (BlenderVehicleRig.TwoSided.cs, BlenderBvh.cs), so the same jobs also join the stage comparison
+# below: every stage's rows and the exported GLB's bytes against Blender's.
 "$TMPD/VehicleRigJobs.exe" "$WTMP/fixtures/recipes_twosided" "$WTMP/twosidedwork" --all > "$TMPD/twosided_jobs.txt"; tjrc=$?
 [ "$tjrc" -eq 0 ] || { cat "$TMPD/twosided_jobs.txt"; echo "FAIL — two-sided fixture arguments"; exit 1; }
 oracle_blender two_sided "$TMPD/twosided_raw.txt" --dir twosided_exports --key "$SCRIPT" "$ROOT/tools/vehiclerig-drill/blender_two_sided_check.py" "$WTMP/twosided_jobs.txt" -- --background --python "$(cygpath -m "$ROOT/tools/vehiclerig-drill/blender_two_sided_check.py")" -- "$(cygpath -m "$SCRIPT")" "$WTMP/twosided_jobs.txt" "$WTMP/twosided_exports"
@@ -88,6 +90,8 @@ if [ "$trc" -ne 0 ] || [ "$(grep -c '^TWOSIDED PASS' "$TMPD/twosided.txt")" -ne 
   tail -50 "$TMPD/twosided.txt"; echo "FAIL — the Two-sided role's export pass"; exit 1
 fi
 grep '^TWOSIDED PASS' "$TMPD/twosided.txt"
+tr -d '\r' < "$TMPD/twosided_jobs.txt" > "$TMPD/twosided_jobs_lf.txt"; cat "$TMPD/twosided_jobs_lf.txt" >> "$TMPD/jobs.txt"
+[ "$(grep -cE "^JOB	" "$TMPD/twosided_jobs_lf.txt")" -eq 3 ] || { echo "FAIL — the Two-sided fixtures gave other than 3 jobs for the stage comparison"; exit 1; }
 # argument fixtures: post-edited (vehiclerig_fixtures.py --exits) into text the Lab's builder never writes. EXIT:/DIES:
 # keys name a required stop; unprefixed keys are valid argument variants and must complete like every positive fixture.
 "$TMPD/VehicleRigJobs.exe" "$WTMP/fixtures/recipes_exit" "$WTMP/fxwork" --all > "$TMPD/fxexit_raw.txt"; ferc=$?
@@ -95,7 +99,7 @@ grep '^TWOSIDED PASS' "$TMPD/twosided.txt"
 tr -d '\r' < "$TMPD/fxexit_raw.txt" > "$TMPD/fxexit_jobs_in.txt"
 python "$ROOT/tools/vehiclerig-drill/vehiclerig_fixtures.py" --exits "$TMPD/fxexit_jobs_in.txt" > "$TMPD/fxexit_jobs.txt" || { echo "FAIL — could not derive the vehicle_rig exit fixtures"; exit 1; }
 cat "$TMPD/fxexit_jobs.txt" >> "$TMPD/jobs.txt"
-n_fx=$(( $(grep -cE "^(JOB|FAST)	" "$TMPD/fxjobs_raw.txt") + $(grep -cE "^JOB	" "$TMPD/fxexit_jobs.txt") )); n_jobs=$((n_reg + n_fx)); n_fast=$(grep -c "^FAST	" "$TMPD/jobs.txt")
+n_fx=$(( $(grep -cE "^(JOB|FAST)	" "$TMPD/fxjobs_raw.txt") + $(grep -cE "^JOB	" "$TMPD/fxexit_jobs.txt") + $(grep -cE "^JOB	" "$TMPD/twosided_jobs_lf.txt") )); n_jobs=$((n_reg + n_fx)); n_fast=$(grep -c "^FAST	" "$TMPD/jobs.txt")
 [ "$n_fx" -gt 0 ] || { echo "FAIL — the vehicle_rig fixtures gave no job"; exit 1; }
 [ "$(grep -cE "^JOB	(EXIT|DIES):" "$TMPD/fxexit_jobs.txt")" -ge 8 ] || { echo "FAIL — the vehicle_rig exit fixtures gave fewer than 8 EXIT:/DIES: jobs"; exit 1; }
 

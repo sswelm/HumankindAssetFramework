@@ -126,6 +126,82 @@ public class VehicleRigStage5Tests
         var a = BlenderVehicleRig.ParseArgs(argv); Assert.True(a.DoubleSided); Assert.True(a.FixInsideOut);
     }
 
+    // The Two-sided role (2026-11-16, the C# pass): ONE part of a closed box wound outward, a free-standing sheet, and an
+    // authored pair (a quad and its reverse on their own vertices at the same positions). Only the sheet's two triangles
+    // show their back: they get a reversed copy on new vertices at the same positions; the box (every back ray meets the
+    // box, and the air inside sees no sky) and the pair (each face already has a twin) are left. The live drill holds the
+    // same pass to Blender's on vehiclerig_fixtures.py's two_sided fixtures; this holds the rule in the unit suite.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]    // the global Double-sided switch leaves a Two-sided part to its own pass
+    public void Two_sided_doubles_only_the_faces_whose_back_shows(bool global)
+    {
+        var m = Model(); Box(m, "Hull", 0, -3, 0, 8, 1, 8);
+        var points = new List<float>(); var indices = new List<int>();
+        foreach (int dx in new[] { -1, 1 }) foreach (int dy in new[] { -1, 1 }) foreach (int dz in new[] { -1, 1 }) points.AddRange(new[] { dx * .5f, dy * .5f, dz * .5f });
+        indices.AddRange(new[] { 0,1,3,0,3,2,4,6,7,4,7,5,0,4,5,0,5,1,2,3,7,2,7,6,0,2,6,0,6,4,1,5,7,1,7,3 });
+        void Quad(float x, bool reversed)
+        {
+            int b = points.Count / 3; points.AddRange(new[] { x, -.5f, -.5f, x, .5f, -.5f, x, .5f, .5f, x, -.5f, .5f });
+            indices.AddRange(reversed ? new[] { b, b + 2, b + 1, b, b + 3, b + 2 } : new[] { b, b + 1, b + 2, b, b + 2, b + 3 });
+        }
+        Quad(2f, false);                       // the sheet: faces 12, 13
+        Quad(3.5f, false); Quad(3.5f, true);   // the authored pair: faces 14..17
+        var mesh = new HafMesh { Name = "Tower" }; mesh.Primitives.Add(new HafPrimitive { Positions = points.ToArray(), Indices = indices.ToArray() });
+        m.Nodes.Add(new HafNode { Name = "Tower", Mesh = m.Meshes.Count }); m.Meshes.Add(mesh); m.Scenes[0].Nodes.Add(m.Nodes.Count - 1);
+        var a = Args(); a.DoubleSided = global; Mark(a, "twosided", "Tower");
+        var s = Stage4(m, a);
+        Assert.Contains("VEHICLE TWO-SIDED: 1 part(s) — a face whose back shows is doubled at export, every other face left", s.Logs3);
+        var before = Mesh(s, "Mesh___two__Tower"); Assert.Equal(20, before.Vertices); Assert.Equal(18 * 3, before.Faces.Length);
+        var oldFaces = (int[])before.Faces.Clone(); var oldPositions = (float[])before.Positions.Clone();
+        Export(s, a);
+        var after = Mesh(s, "Mesh___two__Tower");
+        Assert.Contains("VEHICLE two-sided 'Mesh___two__Tower': 2 face(s) doubled (the back shows), 16 left; 4 authored twin(s) kept; 20 -> 24 verts", s.Logs5);
+        Assert.Equal(24, after.Vertices); Assert.Equal(20 * 3, after.Faces.Length);
+        Assert.Equal(oldFaces, after.Faces.Take(18 * 3));                    // nothing reversed in place
+        Assert.Equal(oldPositions, after.Positions.Take(20 * 3));
+        float[] At(int v) => after.Positions.Skip(3 * v).Take(3).ToArray();
+        for (int f = 0; f < 2; f++)
+        {
+            int[] src = after.Faces.Skip(3 * (12 + f)).Take(3).ToArray(), copy = after.Faces.Skip(3 * (18 + f)).Take(3).ToArray();
+            Assert.All(copy, v => Assert.True(v >= 20));                     // on its own vertices
+            // the copy holds the source's positions, wound the other way round
+            var srcPoints = src.Select(At).ToList(); var copyPoints = copy.Select(At).ToList();
+            int start = srcPoints.FindIndex(p => p.SequenceEqual(copyPoints[0])); Assert.True(start >= 0);
+            for (int k = 1; k < 3; k++) Assert.Equal(srcPoints[(start + 3 - k) % 3], copyPoints[k]);
+        }
+        Assert.Equal(global ? 16 : 8, Mesh(s, "Mesh_Root").Vertices);       // the hull: doubled by the switch alone
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Two_sided_face_batches_poll_on_the_caller_and_propagate_deadlines_and_cancellation(bool cancel)
+    {
+        var m = Model(); Box(m, "Hull", 0, -3, 0);
+        var points = new List<float>();
+        for (int i = 0; i < 300; i++) points.AddRange(new[] { 2f * i, 0f, 0f, 2f * i + 1, 0f, 0f, 2f * i, 1f, 0f });
+        var panel = new HafMesh { Name = "Panel" };
+        panel.Primitives.Add(new HafPrimitive { Positions = points.ToArray(), Indices = Enumerable.Range(0, points.Count / 3).ToArray() });
+        m.Nodes.Add(new HafNode { Name = "Panel", Mesh = m.Meshes.Count }); m.Meshes.Add(panel); m.Scenes[0].Nodes.Add(m.Nodes.Count - 1);
+        var a = Args(); Mark(a, "twosided", "Panel");
+        var s = Stage4(m, a); var before = Mesh(s, "Mesh___two__Panel");
+        var faces = (int[])before.Faces.Clone(); var positions = (float[])before.Positions.Clone();
+        int polls = 0, caller = System.Threading.Thread.CurrentThread.ManagedThreadId;
+        Action checkpoint = () =>
+        {
+            Assert.Equal(caller, System.Threading.Thread.CurrentThread.ManagedThreadId);
+            if (++polls != 3) return;   // after the scene build and the first face batch, before committing copies
+            if (cancel) throw new OperationCanceledException();
+            throw new TimeoutException("deadline");
+        };
+        if (cancel) Assert.Throws<OperationCanceledException>(() => BlenderVehicleRig.RunStage5(s, a, checkpoint: checkpoint));
+        else Assert.Throws<TimeoutException>(() => BlenderVehicleRig.RunStage5(s, a, checkpoint: checkpoint));
+        Assert.Equal(3, polls); Assert.Same(before, Mesh(s, "Mesh___two__Panel"));
+        Assert.Equal(faces, before.Faces); Assert.Equal(positions, before.Positions);
+        Assert.DoesNotContain(s.Logs5, l => l.StartsWith("VEHICLE two-sided '", StringComparison.Ordinal));
+    }
+
     static BlenderDeployExport.Result Export(BlenderRigAnim.Stage1 s, BlenderVehicleRig.Args a)
     {
         var x = BlenderVehicleRig.RunStage5(s, a); Assert.Null(s.Fallback); Assert.NotNull(x); Assert.Null(x.Fallback); return x;

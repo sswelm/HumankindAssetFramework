@@ -88,7 +88,7 @@ public static partial class BlenderVehicleRig
         return d;
     }
 
-    static BlenderRigAnim.MeshData FinishMesh(BlenderRigAnim.MeshData d, bool insideOut, bool flip, double? inset, out int reversed, out int kept)
+    static BlenderRigAnim.MeshData FinishMesh(BlenderRigAnim.MeshData d, bool insideOut, bool flip, double? inset, out int reversed, out int kept, IList<int> twoSided = null)
     {
         reversed = kept = 0;
         var layers = new BlenderWeld.Layers(); var bm = FromMeshData(d, layers, true, false);
@@ -121,7 +121,9 @@ public static partial class BlenderVehicleRig
             }
         }
         if (flip) { for (int f = 0; f < bm.FaceCount; f++) ReverseBmFace(bm, f); }
-        if (inset.HasValue)
+        // bmesh.ops.duplicate on faces: every face of the mesh (the whole-part doubling, its copies then inset along the
+        // vertex normals) or the Two-sided pass's chosen faces (twoSided: the copies stay on the originals' positions)
+        if (inset.HasValue || twoSided != null)
         {
             for (int i = 0; i < layers.PointColor.Count; i++) { var a = layers.PointColor[i]; Array.Resize(ref a, 8 * d.Vertices); layers.PointColor[i] = a; }
             int nf = bm.FaceCount; var vm = new Dictionary<int, int>(); var em = new Dictionary<int, int>(); var copies = new List<int>();
@@ -132,7 +134,7 @@ public static partial class BlenderVehicleRig
                 for (int i = 0; i < layers.PointColor.Count; i++) { var a = layers.PointColor[i]; Array.Copy(a, 4 * v, a, 4 * dst, 4); }
                 return dst;
             }
-            for (int f = 0; f < nf; f++)
+            foreach (int f in twoSided ?? (IList<int>)Enumerable.Range(0, nf).ToList())
             {
                 int l0 = bm.FLFirst[f], l = l0; var loops = new List<int>();
                 do { loops.Add(l); CopyV(bm.LV[l]); l = bm.LNext[l]; } while (l != l0);
@@ -143,9 +145,12 @@ public static partial class BlenderVehicleRig
                 var newLoops = new int[3]; int copy = bm.FaceCreate(loops.Select(x => vm[bm.LV[x]]).ToArray(), loops.Select(x => em[bm.LE[x]]).ToArray(), 3, f, newLoops); copies.Add(copy);
                 for (int k = 0; k < 3; k++) { layers.CopyLoop(loops[k], newLoops[k]); }
             }
-            BmNormals(bm); // duplicate's NORMALS_CALC finish precedes the displacement
-            float offset = (float)inset.Value;
-            foreach (int v in vm.Values) for (int k = 0; k < 3; k++) bm.VCo[3 * v + k] = (float)(bm.VCo[3 * v + k] - (float)(bm.VNo[3 * v + k] * offset));
+            if (inset.HasValue)
+            {
+                BmNormals(bm); // duplicate's NORMALS_CALC finish precedes the displacement
+                float offset = (float)inset.Value;
+                foreach (int v in vm.Values) for (int k = 0; k < 3; k++) bm.VCo[3 * v + k] = (float)(bm.VCo[3 * v + k] - (float)(bm.VNo[3 * v + k] * offset));
+            }
             foreach (int f in copies) ReverseBmFace(bm, f);
         }
         return FinishBm(bm, layers, d, vs);
@@ -236,7 +241,7 @@ public static partial class BlenderVehicleRig
         return why == null ? null : "stage 5: the GLB export (" + why + ") is not modelled yet";
     }
 
-    public static BlenderDeployExport.Result RunStage5(BlenderRigAnim.Stage1 s, Args a, bool preserveJpegAlpha = false)
+    public static BlenderDeployExport.Result RunStage5(BlenderRigAnim.Stage1 s, Args a, bool preserveJpegAlpha = false, Action checkpoint = null)
     {
         if (s.Fallback != null || s.Exits || s.Dies != null) return null;
         if (!PrepareExportMaterials(s, a, out var materials, out var materialNames)) return null;
@@ -249,7 +254,7 @@ public static partial class BlenderVehicleRig
         {
             foreach (var o in meshes)
             {
-                if (OarMesh(o) || CanvasMesh(o) || o.Name.StartsWith("Mesh___rud__", StringComparison.Ordinal) || o.Name.StartsWith("Mesh___keep__", StringComparison.Ordinal)) continue;
+                if (OarMesh(o) || CanvasMesh(o) || o.Name.StartsWith("Mesh___rud__", StringComparison.Ordinal) || o.Name.StartsWith("Mesh___keep__", StringComparison.Ordinal) || o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal)) continue;
                 o.Mesh = FinishMesh(o.Mesh, true, false, null, out int r, out int k); reversed += r; kept += k;
             }
             s.Logs5.Add("VEHICLE inside-out fix: " + reversed + " island(s) reversed (interior-facing), " + kept + " kept as authored; Sail/Oar meshes untouched");
@@ -257,7 +262,10 @@ public static partial class BlenderVehicleRig
         int flipped = 0;
         foreach (var o in meshes.Where(o => o.Name.StartsWith("Mesh___flip__", StringComparison.Ordinal))) { o.Mesh = FinishMesh(o.Mesh, false, true, null, out _, out _); flipped++; }
         if (flipped > 0) s.Logs5.Add("VEHICLE FLIP applied: " + flipped + " part(s) winding reversed once" + (a.FixInsideOut ? " (on top of the inside-out fix — cancelling where it flipped)" : ""));
-        var targets = a.DoubleSided ? meshes.Where(o => !OarMesh(o) && !o.Name.StartsWith("Mesh___keep__", StringComparison.Ordinal)).ToList()
+        // the Two-sided parts first: the model they are measured against holds no copies yet
+        var twoTargets = meshes.Where(o => o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal)).ToList();
+        if (twoTargets.Count > 0) TwoSidedPass(s, twoTargets, meshes, checkpoint);
+        var targets = a.DoubleSided ? meshes.Where(o => !OarMesh(o) && !o.Name.StartsWith("Mesh___keep__", StringComparison.Ordinal) && !o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal)).ToList()
             : meshes.Where(o => (CanvasMesh(o) || o.Name.StartsWith("Mesh___rud__", StringComparison.Ordinal)) && !o.Name.StartsWith("Mesh___rigsail__", StringComparison.Ordinal)).ToList();
         if (targets.Count > 0)
         {

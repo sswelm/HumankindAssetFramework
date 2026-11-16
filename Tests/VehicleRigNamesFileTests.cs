@@ -59,15 +59,28 @@ public class VehicleRigNamesFileTests
         finally { File.Delete(path); }
     }
 
-    // 2026-11-14: a job that marks a part Two-sided is left to Blender by name - stage 5 does not model the role's export pass.
-    // An earlier death or malformed tag is still the script's own stop, and a blank tag marks nothing.
+    // 2026-11-16: the Two-sided role is modelled - the tag's names file is read like any role's (2026-11-14 to 11-16 a job
+    // carrying the tag was left to Blender by name). A file that cannot be read is still left: the script dies of Python's
+    // own error there. An earlier death or malformed tag is the script's own stop, and a blank tag marks nothing.
     [Fact]
-    public void A_twosided_tag_leaves_the_job_to_Blender_unless_the_script_stopped_earlier()
+    public void A_twosided_tag_names_the_parts_and_marks_them()
     {
-        var args = BlenderVehicleRig.ParseArgs(Argv("twosided=@C:/p/x_twosided.txt"));
-        Assert.Equal(BlenderVehicleRig.TwoSidedLeave, args.Unsupported); Assert.Null(args.TagError); Assert.Null(args.NamesDie);
+        string path = Path.Combine(Path.GetTempPath(), "haf_twosided_" + Guid.NewGuid().ToString("N") + ".txt");
+        File.WriteAllText(path, "Tower\r\n  Sheet  \n\n");
+        BlenderVehicleRig.Args args;
+        try { args = BlenderVehicleRig.ParseArgs(Argv("twosided=@" + path)); }
+        finally { File.Delete(path); }
+        Assert.Null(args.Unsupported); Assert.Null(args.TagError); Assert.Null(args.NamesDie);
+        Assert.Equal(new[] { "Tower", "Sheet" }, args.Names["twosided"]);
+        Assert.Contains("Tower", args.Marked); Assert.Contains("Sheet", args.Marked);   // _role_marked: never purged as an artifact
 
-        Assert.Null(BlenderVehicleRig.ParseArgs(Argv()).Unsupported);
+        args = BlenderVehicleRig.ParseArgs(Argv("twosided=Tower;Sheet"));   // namelist's other form
+        Assert.Equal(new[] { "Tower", "Sheet" }, args.Names["twosided"]);
+
+        args = BlenderVehicleRig.ParseArgs(Argv("twosided=@C:/p/no_such_folder/x_twosided.txt"));
+        Assert.Equal(BlenderVehicleRig.TwoSidedLeave, args.Unsupported); Assert.Empty(args.Names["twosided"]);
+
+        Assert.Null(BlenderVehicleRig.ParseArgs(Argv()).Unsupported); Assert.Empty(BlenderVehicleRig.ParseArgs(Argv()).Names["twosided"]);
         Assert.Null(BlenderVehicleRig.ParseArgs(Argv("twosided=")).Unsupported);
         Assert.Null(BlenderVehicleRig.ParseArgs(Argv("twosided=  ")).Unsupported);
 
