@@ -81,6 +81,10 @@ Stage 3 (step (d), part d3: the turret, the gun assembly, the trails):
                      (their under-bands measured, the WrapGF / WrapGR weights), past a return roller above it (the upper-rear
                      slope) - so the three ramp regions hold vertices; no station on the straights, so still no link pitch; one
                      wheel on the other side (the side filter)
+  fx_r_tracks_inverted  the 8-vertex belt wound inside-out under Fix inside-out: the tread's island of polygons is REVERSED
+  fx_r_tracks_double / fx_r_tracks_insideout / fx_r_tracks_twosided / fx_r_tracks_roads_double  the finishing passes with a moving tread,
+                     whose mesh holds polygons after its subdivision: Double-sided (the shell of a polygon mesh), Fix inside-out (its
+                     islands), a Two-sided sheet beside it (the tread's loop triangles in the tree), and both passes on the ribbon belt
   fx_r_tracks_hybrid the rigid-links fixtures' pitched belts (120 stations: a link pitch IS found) on the conveyor, no treadmode: the
                      link cells - a bone per wrap cell, a shuttle bone per straight run, the nine carriers removed; the cell
                      clamp; every link bone keyed on every frame along the measured path
@@ -355,7 +359,7 @@ def boxes_in_one(r, name, material, count):
     return len(r.meshes) - 1
 
 
-def tracked_roads(out, models):
+def tracked_roads(out, models, key="fx_r_tracks_roads", **fields):
     """fx_r_tracks_roads: a ribbon belt round a sprocket, two road wheels, an idler and under a return roller (glTF: x forward, y up, z the side)."""
     r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
     r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.5, -0.5), material=ma), scale=[2.0, 0.6, 1.0])
@@ -383,7 +387,7 @@ def tracked_roads(out, models):
         a, b, c, d = 2 * j, 2 * j + 1, 2 * k + 1, 2 * k
         idx += [a, b, c, a, c, d]
     r.node("Belt", mesh=raw_mesh(r, "Belt", ma, pos, idx)); parts.append(("Belt", 6, {}))
-    recipe(out, "fx_r_tracks_roads", r.write(models, "fx_r_tracks_roads"), parts)
+    recipe(out, key, r.write(models, key), parts, **fields)
 
 
 def rigid_tread_fixtures(out, models):
@@ -818,12 +822,19 @@ def main(out):
     # groups came from a set in hash order; the recoil variant hangs a 1.4-unit tube (brake included) 8 units below the tracks: the
     # arc's pivot is R = 0.28 / tan(3 deg) = 5.3 above the bore, the tracks' centre 7.7 above it, so a sign test reading the track
     # centre (the old script's rebound _tc) swings the muzzle the other way. A brake pins the muzzle.
-    def tracked(key, gun=False):
+    def tracked(key, gun=False, sheet=False, inverted=False, **more):
         r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
         r.node("Hull", mesh=r.mesh("Hull", at=(-1.5, 0.0, -1.0), size=2.0, material=ma), scale=[1.5, 1.0, 1.0])
         for i, (x, z) in enumerate(((1.6, 1.2), (-1.6, 1.2), (1.6, -1.2), (-1.6, -1.2))):
             r.node("W%d" % i, mesh=r.mesh("W%d" % i, at=(-0.5, -0.5, -0.5), material=ma), translation=[x, 0.0, z], scale=[0.8 if i < 2 else 0.6, 0.8 if i < 2 else 0.6, 0.25])
-        r.node("Belt", mesh=r.mesh("Belt", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, -0.3, 1.25], scale=[4.0, 0.1, 0.2])
+        if inverted:
+            # the same belt wound INSIDE-OUT (every triangle facing its own inside): the inside-out fix reverses the island
+            pos = [(x, y, z) for x in (-2.0, 2.0) for y in (-0.35, -0.25) for z in (1.15, 1.35)]
+            idx = [0, 1, 3, 0, 3, 2, 4, 6, 7, 4, 7, 5, 0, 4, 5, 0, 5, 1, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 5, 7, 1, 7, 3]
+            idx = [i for t in range(0, len(idx), 3) for i in (idx[t], idx[t + 2], idx[t + 1])]
+            r.node("Belt", mesh=raw_mesh(r, "Belt", ma, pos, idx))
+        else:
+            r.node("Belt", mesh=r.mesh("Belt", at=(-0.5, -0.5, -0.5), material=ma), translation=[0.0, -0.3, 1.25], scale=[4.0, 0.1, 0.2])
         parts = [("Hull", 0, {})] + [("W%d" % i, 1, {}) for i in range(4)] + [("Belt", 6, {})]
         fields = {}
         if gun:
@@ -831,9 +842,18 @@ def main(out):
             r.node("Brake", mesh=r.mesh("Brake", at=(1.5, -8.1, -0.2), size=0.4, material=ma))
             parts += [("Tube", 7, {}), ("Brake", 11, {})]
             fields = dict(gunPivot=0.3, recoilDist=0.2, recoilFrames=16, recoilLead=0)
+        if sheet:
+            # a free-standing sheet above the hull, marked Two-sided (role 25): its back shows, the tread beside it is part of the model it is measured against
+            pos = [(-0.4, 2.0, -0.3), (0.4, 2.0, -0.3), (0.4, 2.6, -0.3), (-0.4, 2.6, -0.3)]
+            r.node("Sheet", mesh=raw_mesh(r, "Sheet", ma, pos, [0, 1, 2, 0, 2, 3])); parts.append(("Sheet", 25, {}))
+        fields.update(more)
         recipe(out, key, r.write(models, key), parts, **fields)
     tracked("fx_r_tracks_fallback"); tracked("fx_r_tracks_recoil", gun=True)
+    # the finishing passes on a tread mesh of POLYGONS (2026-11-16): the whole-model doubling, the inside-out fix, a Two-sided part beside it
+    tracked("fx_r_tracks_double", doubleSided=True); tracked("fx_r_tracks_insideout", fixInsideOut=True); tracked("fx_r_tracks_twosided", sheet=True)
+    tracked("fx_r_tracks_inverted", inverted=True, fixInsideOut=True)
     tracked_roads(out, models)
+    tracked_roads(out, models, key="fx_r_tracks_roads_double", doubleSided=True, fixInsideOut=True)
     rigid_tread_fixtures(out, models)
     two_sided_fixtures(out, models)
     # Stage 4 e3: Deploy direction/elevation and Recoil timing/stance; no frame_set in either action.

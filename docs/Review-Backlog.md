@@ -522,7 +522,9 @@ compiler's operand order. Next: (d) part d6, the tread rig.
 (d) part d6, the TREAD RIG - FIRST PART DONE 2026-11-16 (the subdivision, polygon meshes through the rows and the export, the
 carrier-skinned conveyor: three fixtures equal to Blender through the export; `docs/Testing.md`) and SECOND PART the same day (the
 link cells, the link and shuttle bones, their keys: `fx_r_tracks_hybrid` and the Bradley equal through the export) and THIRD PART
-(the rigid links: the five rigid fixtures in the stage comparison). OPEN: the three stage 5 passes on a polygon tread (inside-out fix, double-sided shell, the Two-sided scene) with the exporter's
+(the rigid links: the five rigid fixtures in the stage comparison) and FOURTH PART (the stage 5 passes on a polygon tread: five
+fixtures). OPEN, each named in the code: a part that is both a live tread and Two-sided; a tread with no sprocket or idler cluster
+(the script's own ValueError); the exporter's validate() of polygons. Was open before the fourth part: the three stage 5 passes on a polygon tread (inside-out fix, double-sided shell, the Two-sided scene) with the exporter's
 validate() of polygons. The history: DEFERRED 2026-10-17 (step (e) taken first). Measured before starting: no comparable job reaches it -
 the Bradley, the one recipe with live tracks, is an FBX source (the C# reads none: left at stage 1 by name), the Jagdpanzer's
 tracks are static -, so it would turn no recipe equal; and it is structural, not one more branch: the tread's

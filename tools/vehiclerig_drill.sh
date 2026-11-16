@@ -233,7 +233,8 @@ n_export=$(echo "$X5" | awk '{print $3}'); n_bytes=$(echo "$X5" | awk '{print $7
 # THE TREAD FIXTURES ARE COMPARED, NOT LEFT (d6, 2026-11-16): the tread rig is modelled (BlenderVehicleRig.Tread.cs) - the carrier
 # skinning, the link bones, the rigid links -, so each of its fixtures must come out equal through the export - a leave here,
 # however well named, is coverage lost - and the two rigid-links errors must be the script's own deaths.
-for key in fx_r_tracks_fallback fx_r_tracks_recoil fx_r_tracks_roads fx_r_tracks_hybrid fx_links fx_links_dense fx_links_tight; do
+for key in fx_r_tracks_fallback fx_r_tracks_recoil fx_r_tracks_roads fx_r_tracks_hybrid fx_links fx_links_dense fx_links_tight \
+           fx_r_tracks_double fx_r_tracks_insideout fx_r_tracks_inverted fx_r_tracks_twosided fx_r_tracks_roads_double; do
   grep -qE "^EXPORT $key: equal - .* byte-identical GLB" "$TMPD/s1.txt" || { grep -E "^(FAIL|STAGE[0-9]) $key" "$TMPD/s1.txt" | head -3 | cut -c1-300; echo "FAIL — vehicle_rig drill: the tread fixture $key is not equal to Blender through the export (d6)"; exit 1; }
 done
 grep -qE "^STAGE3 DIES:3:fx_links_full: equal - dies: RuntimeError: rigid links need at least 4 bones per track" "$TMPD/s1.txt" || { echo "FAIL — vehicle_rig drill: the rigid-links budget error (fx_links_full) is not held as the script's death in stage 3"; exit 1; }

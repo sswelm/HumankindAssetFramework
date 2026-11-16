@@ -10,6 +10,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Vehicle Lab: Double-sided, Fix inside-out and Two-sided work with a moving tread in C# (2026-11-16; d6, fourth part).**
+  The three finishing passes read triangles, and a tread's mesh holds four-sided and larger faces after its subdivision, so
+  a recipe combining them still went to Blender. Now: face normals for a face of any size (a quad by its diagonals, a larger
+  face by Newell's sum - Blender's own three cases), the shell copies a face with every corner it has, the inside-out fix
+  takes a face's centre over its own corner count, and the Two-sided pass reads a tread as the model around its parts (its
+  loop triangles in the tree, one twin entry per polygon). Five fixtures - the shell on the 8-vertex belt and on the ribbon
+  belt, the fix on an outward belt and on one wound inside-out (its island reversed), a Two-sided sheet beside a tread - are
+  equal to Blender at every stage, the GLBs byte for byte. **Still Blender, by name:** one case, a part marked both a moving
+  tread and Two-sided.
 - **Vehicle Lab: Rigid links run in C# - the tread rig is complete (2026-11-16; d6, third part).** Rigid links (the Tread
   type popup, PR #278) gives every molded link its own bone and rebuilds the band from copies of one link, so a link never
   bends. In C# now: the bone budget (what the 126-bone wall leaves a track once its nine carriers are gone), the choice of
@@ -21,7 +30,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   with byte-identical GLBs (the largest: 125 bones, 852 curves, 528,384 keys), two equal as the script's error. One cost
   found on the way and fixed: keying every link on every frame re-evaluated every curve each frame (the square of the
   clip) - a 2,000-frame circuit took 2 min 15 s in a unit test, 2 s after the evaluation was limited to the bones a link's
-  pose is set against. **Still Blender, by name:** Double-sided / Fix inside-out / a Two-sided part beside a moving tread.
+  pose is set against.
 - **Vehicle Lab: a moving tread's link bones run in C# - the Bradley's rig equals Blender's (2026-11-16; d6, second part).**
   Every real tank's tread has a link pitch, and for those the script cuts the loop into cells along a measured path: a bone
   per cell on the wheels' wraps, one shuttle bone per straight run, the nine carrier bones removed, and every link bone

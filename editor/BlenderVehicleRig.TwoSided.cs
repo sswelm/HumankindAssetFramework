@@ -33,6 +33,20 @@ public static partial class BlenderVehicleRig
     }
 
     /// <summary>_two_sided_newell(pw): per edge a float32 Vector of three products taken in double, added in float32.</summary>
+    /// <summary>_two_sided_newell(pw) for a face of any size: per corner the Vector of the three products (Python doubles, each stored
+    /// float32), added to the sum in float32.</summary>
+    static float[] TwoSidedNewellOf(float[][] pw)
+    {
+        var n = new float[3];
+        for (int i = 0; i < pw.Length; i++)
+        {
+            var p = pw[i]; var q = pw[(i + 1) % pw.Length];
+            float x = (float)(((double)p[1] - q[1]) * ((double)p[2] + q[2])), y = (float)(((double)p[2] - q[2]) * ((double)p[0] + q[0])), z = (float)(((double)p[0] - q[0]) * ((double)p[1] + q[1]));
+            n[0] = (float)(n[0] + x); n[1] = (float)(n[1] + y); n[2] = (float)(n[2] + z);
+        }
+        return n;
+    }
+
     static float[] TwoSidedNewell(float[] a, float[] b, float[] c)
     {
         var n = new float[3];
@@ -108,7 +122,10 @@ public static partial class BlenderVehicleRig
     internal static TwoSidedScene BuildTwoSidedScene(IList<BlenderRigAnim.SceneObject> everything)
     {
         var sc = new TwoSidedScene { Base = new int[everything.Count], FaceBase = new int[everything.Count], Twin = new Dictionary<TwoSidedKey, List<float[]>>(), Dirs = TwoSidedDirs(64) };
-        int nv = everything.Sum(o => o.Mesh.Vertices), nt = everything.Sum(o => o.Mesh.Faces.Length / 3);
+        // a mesh of polygons (a subdivided tread) gives its LOOP TRIANGLES to the tree (FbxModel.Tessellate: Mesh.loop_triangles) and
+        // one twin entry per POLYGON, as the script's loop over _m.polygons does
+        var tess = everything.Select(o => o.Mesh.PolyStart != null ? FbxModel.Tessellate(o.Mesh.Positions, o.Mesh.Faces, o.Mesh.PolyStart) : null).ToList();
+        int nv = everything.Sum(o => o.Mesh.Vertices), nt = Enumerable.Range(0, everything.Count).Sum(i => tess[i] != null ? tess[i].Count : everything[i].Mesh.Faces.Length / 3);
         sc.World = new float[3 * nv]; sc.Tris = new int[3 * nt]; sc.OwnerObject = new int[nt];
         int vo = 0, to = 0;
         for (int oi = 0; oi < everything.Count; oi++)
@@ -119,6 +136,29 @@ public static partial class BlenderVehicleRig
             {
                 float x = me.Positions[3 * v], y = me.Positions[3 * v + 1], z = me.Positions[3 * v + 2];
                 sc.World[3 * (vo + v)] = MulPointRow(it, 0, x, y, z); sc.World[3 * (vo + v) + 1] = MulPointRow(it, 1, x, y, z); sc.World[3 * (vo + v) + 2] = MulPointRow(it, 2, x, y, z);
+            }
+            if (tess[oi] != null)
+            {
+                var tl = tess[oi];
+                for (int t = 0; t < tl.Count; t++)
+                {
+                    sc.Tris[3 * (to + t)] = vo + me.Faces[tl[t].C0]; sc.Tris[3 * (to + t) + 1] = vo + me.Faces[tl[t].C1]; sc.Tris[3 * (to + t) + 2] = vo + me.Faces[tl[t].C2];
+                    sc.OwnerObject[to + t] = oi;
+                }
+                for (int pf = 0; pf < me.FaceCount; pf++)
+                {
+                    int c0 = me.CornerStart(pf), n = me.CornerCount(pf);
+                    var pw = new float[n][]; for (int k = 0; k < n; k++) { int v = 3 * (vo + me.Faces[c0 + k]); pw[k] = new[] { sc.World[v], sc.World[v + 1], sc.World[v + 2] }; }
+                    // the key is the SET of corner positions: a face with more than three distinct ones equals no triangle's set
+                    var distinct = new List<float[]>();
+                    foreach (var q in pw) if (!distinct.Any(u => u[0] == q[0] && u[1] == q[1] && u[2] == q[2])) distinct.Add(q);
+                    if (distinct.Count > 3) continue;
+                    var pkey = new TwoSidedKey(distinct[0], distinct[Math.Min(1, distinct.Count - 1)], distinct[distinct.Count - 1]);
+                    if (!sc.Twin.TryGetValue(pkey, out var plist)) sc.Twin[pkey] = plist = new List<float[]>(1);
+                    plist.Add(TwoSidedNewellOf(pw));
+                }
+                vo += me.Vertices; to += tl.Count;
+                continue;
             }
             int nf = me.Faces.Length / 3;
             for (int f = 0; f < nf; f++)

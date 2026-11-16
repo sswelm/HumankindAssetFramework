@@ -13,9 +13,48 @@ public static partial class BlenderVehicleRig
 
     // BM_mesh_normals_update: disk edges then radial loops, angle-weighted face normals; loose/zero
     // normals fall back to the vertex coordinate. This differs from Mesh's vertex-normal accumulation.
+    /// <summary>BM_face_normal_update on every face of any size (BM_face_calc_normal): a triangle normal_tri_v3, a quad normal_quad_v3
+    /// (the cross of its diagonals), a larger face Newell's sum from its last corner (bm_face_calc_poly_normal); normalize_v3.</summary>
+    static void FaceNormalsAny(BMesh bm)
+    {
+        var P = bm.VCo;
+        for (int f = 0; f < bm.FaceCount; f++)
+        {
+            if (!bm.FAlive[f]) continue;
+            int n = bm.FLen[f], l0 = bm.FLFirst[f]; var no = new float[3];
+            if (n == 3)
+            {
+                int l1 = bm.LNext[l0], l2 = bm.LNext[l1];
+                BlenderDecimate.NormalTri(P, bm.LV[l0], bm.LV[l1], bm.LV[l2], out no[0], out no[1], out no[2]);
+            }
+            else if (n == 4)
+            {
+                int l1 = bm.LNext[l0], l2 = bm.LNext[l1], l3 = bm.LNext[l2]; int v1 = 3 * bm.LV[l0], v2 = 3 * bm.LV[l1], v3 = 3 * bm.LV[l2], v4 = 3 * bm.LV[l3];
+                float ax = (float)(P[v1] - P[v3]), ay = (float)(P[v1 + 1] - P[v3 + 1]), az = (float)(P[v1 + 2] - P[v3 + 2]);
+                float bx = (float)(P[v2] - P[v4]), by = (float)(P[v2 + 1] - P[v4 + 1]), bz = (float)(P[v2 + 2] - P[v4 + 2]);
+                no[0] = (float)((float)(ay * bz) - (float)(az * by)); no[1] = (float)((float)(az * bx) - (float)(ax * bz)); no[2] = (float)((float)(ax * by) - (float)(ay * bx));
+                NormalizeF(no);
+            }
+            else
+            {
+                int prev = 3 * bm.LV[bm.LPrev[l0]], l = l0;
+                do
+                {
+                    int cur = 3 * bm.LV[l];
+                    no[0] = (float)(no[0] + (float)((float)(P[prev + 1] - P[cur + 1]) * (float)(P[prev + 2] + P[cur + 2])));
+                    no[1] = (float)(no[1] + (float)((float)(P[prev + 2] - P[cur + 2]) * (float)(P[prev] + P[cur])));
+                    no[2] = (float)(no[2] + (float)((float)(P[prev] - P[cur]) * (float)(P[prev + 1] + P[cur + 1])));
+                    prev = cur; l = bm.LNext[l];
+                } while (l != l0);
+                NormalizeF(no);
+            }
+            bm.FNo[3 * f] = no[0]; bm.FNo[3 * f + 1] = no[1]; bm.FNo[3 * f + 2] = no[2];
+        }
+    }
+
     static void BmNormals(BMesh bm)
     {
-        BlenderDecimate.FaceNormalsUpdate(bm);
+        FaceNormalsAny(bm);
         for (int v = 0; v < bm.VertCount; v++)
         {
             if (!bm.VAlive[v]) continue;
@@ -79,7 +118,7 @@ public static partial class BlenderVehicleRig
     // converter predates skinning; restore those layers here, including duplicates in discovery order.
     static BlenderRigAnim.MeshData FinishBm(BMesh bm, BlenderWeld.Layers layers, BlenderRigAnim.MeshData old, List<int> vertexSource)
     {
-        var d = ToMeshData(bm, layers, old); d.Groups = new List<string>(old.Groups); d.ArmatureModifier = old.ArmatureModifier;
+        var d = old.PolyStart != null ? ToMeshDataPolygons(bm, layers, old) : ToMeshData(bm, layers, old); d.Groups = new List<string>(old.Groups); d.ArmatureModifier = old.ArmatureModifier;
         if (old.DefNr != null)
         {
             d.DefNr = vertexSource.Select(v => new List<int>(old.DefNr[v])).ToArray();
@@ -108,7 +147,7 @@ public static partial class BlenderVehicleRig
                 {
                     int face = stack.Pop(); island.Add(face); int first = bm.FLFirst[face], l = first; var center = new float[3];
                     do { for (int k = 0; k < 3; k++) center[k] = (float)(center[k] + bm.VCo[3 * bm.LV[l] + k]); l = bm.LNext[l]; } while (l != first);
-                    center = Scale(center, 1f / 3f); var rad = new[] { 0f, (float)(center[1] - cy), (float)(center[2] - cz) };
+                    center = Scale(center, (float)(1.0f / (float)bm.FLen[face])); /* calc_center_median: the corners' sum times 1.0f / len */ var rad = new[] { 0f, (float)(center[1] - cy), (float)(center[2] - cz) };
                     if (VecLength(rad) > 1e-6) { var rn = Normalized(rad); sum += Dot(new[] { bm.FNo[3 * face], bm.FNo[3 * face + 1], bm.FNo[3 * face + 2] }, rn); n++; }
                     do
                     {
@@ -142,8 +181,8 @@ public static partial class BlenderVehicleRig
                 {
                     int e = bm.LE[src]; if (!em.ContainsKey(e)) em[e] = bm.EdgeCreate(vm[bm.EV1[e]], vm[bm.EV2[e]], e);
                 }
-                var newLoops = new int[3]; int copy = bm.FaceCreate(loops.Select(x => vm[bm.LV[x]]).ToArray(), loops.Select(x => em[bm.LE[x]]).ToArray(), 3, f, newLoops); copies.Add(copy);
-                for (int k = 0; k < 3; k++) { layers.CopyLoop(loops[k], newLoops[k]); }
+                var newLoops = new int[loops.Count]; int copy = bm.FaceCreate(loops.Select(x => vm[bm.LV[x]]).ToArray(), loops.Select(x => em[bm.LE[x]]).ToArray(), loops.Count, f, newLoops); copies.Add(copy);
+                for (int k = 0; k < loops.Count; k++) { layers.CopyLoop(loops[k], newLoops[k]); }   // a face of any size: a tread's polygons keep every corner
             }
             if (inset.HasValue)
             {
@@ -249,15 +288,13 @@ public static partial class BlenderVehicleRig
         if (VehicleProbe.Input.PyStrip(a.PreviewFbx).Length > 0) { s.Fallback = "stage 5: the FBX preview export is not modelled yet"; return null; }
         var st = (RigState)s.VehicleState;
         var meshes = s.Objects.Where(o => o.Type == "MESH" && o.Mesh.Faces.Length > 0).ToList();
-        // a subdivided tread holds polygons: the passes below read triangles, so a recipe that would run one on such a mesh is named
+        // a subdivided tread holds polygons: the inside-out fix and the doubling walk a BMesh of any face size; the Two-sided pass
+        // reads a polygon mesh as the model around its parts (its loop triangles), not as a part of its own
         bool Poly(BlenderRigAnim.SceneObject o) => o.Mesh.PolyStart != null;
         if (meshes.Any(Poly))
         {
-            bool insideOut = a.FixInsideOut && meshes.Any(o => Poly(o) && !(OarMesh(o) || CanvasMesh(o) || o.Name.StartsWith("Mesh___rud__", StringComparison.Ordinal) || o.Name.StartsWith("Mesh___keep__", StringComparison.Ordinal) || o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal)));
-            bool twoSidedScene = meshes.Any(o => o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal));
-            bool doubled = a.DoubleSided && meshes.Any(o => Poly(o) && !OarMesh(o) && !o.Name.StartsWith("Mesh___keep__", StringComparison.Ordinal) && !o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal));
-            string pass = insideOut ? "the inside-out fix" : twoSidedScene ? "the Two-sided pass beside" : doubled ? "the double-sided shell" : null;
-            if (pass != null) { s.Fallback = "stage 5: " + pass + " of a tread mesh of polygons (d6) is not modelled yet"; return null; }
+            // a part that is a live tread AND Two-sided keeps its Two-sided mesh name: the pass's own faces would be polygons
+            if (meshes.Any(o => Poly(o) && o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal))) { s.Fallback = "stage 5: the Two-sided pass on a tread mesh of polygons (d6) is not modelled yet"; return null; }
         }
         int reversed = 0, kept = 0;
         if (a.FixInsideOut)

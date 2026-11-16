@@ -284,7 +284,7 @@ public static partial class BlenderVehicleRig
     {
         int nv = d.Vertices, nf = d.FaceCount;
         if (d.Edges == null) throw new InvalidOperationException("a stage mesh without its edge list");
-        if (d.PolyStart != null && (faceNormals || vertexNormals)) throw new NotSupportedException("the normals of a mesh of polygons");
+        if (d.PolyStart != null && vertexNormals) throw new NotSupportedException("the vertex normals of a mesh of polygons");
         BMesh bm;
         var swf = System.Diagnostics.Stopwatch.StartNew(); bool timing = Environment.GetEnvironmentVariable("VEHICLERIG_DEBUG_TIME") == "1";
         if (HafNativeKernels.Available && d.PolyStart == null)
@@ -319,7 +319,7 @@ public static partial class BlenderVehicleRig
                 bm.FMat[i] = d.FaceMaterial[f];
             }
             if (timing) Console.Error.WriteLine($"TIME     faces {swf.ElapsedMilliseconds} ms ({nf})");
-            if (faceNormals) BlenderDecimate.FaceNormalsUpdate(bm);
+            if (faceNormals) { if (d.PolyStart != null) FaceNormalsAny(bm); else BlenderDecimate.FaceNormalsUpdate(bm); }
         }
         foreach (var u in d.UvAll) layers.Uv.Add((float[])u.Clone());
         if (d.UvAll.Count == 0 && d.Uv != null) layers.Uv.Add((float[])d.Uv.Clone());
