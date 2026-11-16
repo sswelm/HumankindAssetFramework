@@ -10,6 +10,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Vehicle Lab: the Two-sided role runs in C# (2026-11-16; "everything need to be converted to C#").** The 11-15 Bake
+  Tests run failed six rows as "C# coverage lost": features added to `vehicle_rig.py` alone since 10-31. Two-sided is the
+  first one ported. Its pass asks, per face, which triangle a ray meets FIRST and how far away - and where two triangles
+  sit at one distance (a plain duplicate face) Blender's answer is whichever its tree walk reaches first. So
+  `BlenderBvh.cs` is Blender's own tree (BLI_kdopbvh.cc: the implicit four-way build, the partition on each leaf box's
+  maximum, the walk direction by the ray's sign on the split axis), held to Blender's `BVHTree.ray_cast` on 2,080 casts,
+  index and distance to the bit; a fifth soup of 6,218 triangles was checked once and is not in the suite. The pass
+  (`BlenderVehicleRig.TwoSided.cs`) follows the script's arithmetic: float32 Vectors, Python doubles for the walk-back
+  step, `Vector == Vector` within one float step. The live drill: all three Two-sided fixtures and the u-boat recipes equal
+  to Blender at every stage, the GLBs byte for byte (162 of 176 jobs equal, 14 left by name - 16 before). The rule that
+  goes with it is in docs/Decisions.md: a Lab or Factory feature lands in the script and in the port together.
 - **Model Factory: Reduce no longer leaves folded faces (2026-11-16; the Zeppelin's one red rig-route row).** At
   "Reduce to ~tris" 28,770 the two rig routes differed by two triangles: 28,770 through the FBX route, 28,768 through
   the GLB route. Measured on the Lab's own output: 0 back-to-back pairs with Reduce off, 2 with it on - the collapse

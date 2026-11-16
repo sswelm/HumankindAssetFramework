@@ -2397,8 +2397,16 @@ with all animation keys emitted. Color layers are also retained in their own poi
 corner colors move with mirrored faces, and mesh copies own their color buffers; focused unit tests cover these
 attributes, which the current scene-row format does not record.
 
-**The Two-sided role's export pass (2026-11-14) is held in Blender alone.** The C# leaves a job that carries `twosided=` by name
-(`BlenderVehicleRig.TwoSidedLeave`), so no stage comparison reaches the pass. `tools/vehiclerig-drill/blender_two_sided_check.py`
+**The Two-sided role's export pass is held twice (2026-11-16).** From 2026-11-14 to 11-16 the C# left a job carrying `twosided=`
+by name and only Blender ran the pass. It is modelled now (`BlenderVehicleRig.TwoSided.cs`; the ray casts through
+`BlenderBvh.cs`, Blender's own tree and walk), so the three fixtures below also join the stage comparison: every stage's rows
+and the exported GLB's bytes against Blender's (first live run: 176 jobs, 162 equal, 14 left; 119 of 119 exports byte-identical;
+the u-boat recipes among the equal ones). `Tests/BlenderBvhTests.cs` holds the tree to Blender's own `BVHTree.ray_cast` on four
+soups with duplicate and reversed faces (2,080 casts, index and distance to the bit; `tools/vehiclerig-drill/blender_bvh_oracle.py`
+prints the file) and the 64 directions to the script's. Planted once: the twin rule off fails the unit suite; the open-pocket
+test off fails the drill. Only a `twosided=` names file that cannot be read is still left by name. The comparison of two
+implementations does not say which faces a CORRECT pass doubles; that contract stays with
+`tools/vehiclerig-drill/blender_two_sided_check.py`, which
 runs the production script on the fixture `fx_two_sided` (`recipes_twosided`: one Tower mesh of a closed cube wound outward, a
 closed cube wound inside-out, a free-standing sheet, an authored opposite pair, and a sheet under a cover in a walled well that no
 straight line reaches from outside) and holds the result to the INPUT: the log's counts (16 doubled, 16 left, 4 twins, 16 new

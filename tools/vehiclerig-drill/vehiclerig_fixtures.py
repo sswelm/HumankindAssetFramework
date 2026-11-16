@@ -404,7 +404,8 @@ def two_sided_fixtures(out, models):
     doubled. The Well (a Body part) is four walls 2 high around the small sheet and a cover 0.1 above it that stops 0.3
     to one side: no straight line from the sheet's back clears both the cover and a wall (past the cover's edge a ray
     climbs at most 0.1 in 0.24, a wall 3 away needs 2 in 3), so only the open-pocket test finds it - the air beside it,
-    past the cover, sees the sky. Blender-only: the C# leaves the job by name (BlenderVehicleRig.TwoSidedLeave)."""
+    past the cover, sees the sky. blender_two_sided_check.py holds Blender's result to this description; the stage
+    comparison holds the C# pass (BlenderVehicleRig.TwoSided.cs) to Blender's, rows and GLB bytes (2026-11-16)."""
     r = Rig(); ma = r.material("Steel")
     r.node("Hull", mesh=r.mesh("Hull", at=(-2, .7, -.8), material=ma), scale=[4, 1, 1.6])
     pos = []; idx = []

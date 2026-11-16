@@ -483,6 +483,8 @@ public static partial class BlenderVehicleRig
             }
             return set;
         }
+        var twoSided = NameSet("twosided", "two-sided");
+        if (twoSided.Count > 0) s.Logs3.Add("VEHICLE TWO-SIDED: " + twoSided.Count + " part(s) — a face whose back shows is doubled at export, every other face left");
         var rudders = NameSet("rudders", "rudder");
         if (rudders.Count > 0) s.Logs3.Add("VEHICLE RUDDER: " + rudders.Count + " part(s) — double-sided at export, always visible, authored winding kept");
         var preserve = NameSet("preserve", "preserve");
@@ -794,6 +796,7 @@ public static partial class BlenderVehicleRig
         {
             string key = oarParts.Contains(o.Name) ? "__oar__" + o.Name
                        : rudders.Contains(o.Name) ? "__rud__" + o.Name
+                       : twoSided.Contains(o.Name) ? "__two__" + o.Name
                        : preserve.Contains(o.Name) ? "__keep__" + o.Name
                        : flip.Contains(o.Name) ? "__flip__" + o.Name
                        : rigOnSail.Contains(o.Name) ? "__rigsail__"
