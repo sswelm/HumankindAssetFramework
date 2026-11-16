@@ -10,6 +10,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Model Factory: Reduce no longer leaves folded faces (2026-11-16; the Zeppelin's one red rig-route row).** At
+  "Reduce to ~tris" 28,770 the two rig routes differed by two triangles: 28,770 through the FBX route, 28,768 through
+  the GLB route. Measured on the Lab's own output: 0 back-to-back pairs with Reduce off, 2 with it on - the collapse
+  squashes a small tetrahedron on the tail strut flat and leaves two triangles on the same three vertices. Blender's
+  FBX export keeps both, its glTF export keeps one. `rig_anim.py` and its C# twin (`BlenderRigAnim.RemoveFoldedFaces`)
+  now remove the later face of such a pair right after the decimate; a mesh without a pair is not touched. The live
+  rig_anim drill holds both versions equal on the Zeppelin's own job. My first three accounts were wrong (a part
+  name that was the joined mesh, the Lab's weld, the source), and I then hand-edited the source; the user: "it should
+  be part of the tooling".
 - **Vehicle Lab: the Generate preview stood still - the skin did not follow the pose (2026-11-14; "play doesn't work
   anymore").** A propeller, then a cart's wheels, would not turn in the Lab after Generate. The file was right (the
   propeller's 1,153 vertices on `Wheel_00`, 31 rotation keys) and the window ticked and sampled: in a separate batch

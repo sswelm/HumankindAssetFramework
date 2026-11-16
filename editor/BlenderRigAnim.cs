@@ -252,6 +252,39 @@ public static class BlenderRigAnim
         public int ActiveColor = -1;              // color_attributes.render_color_index: 0 when the importer made a layer, kept from the active object through the join
     }
 
+    /// <summary>rig_anim.py's folded-face removal after the decimate (2026-11-16): a face on the same three vertices as an
+    /// EARLIER face (in any order or winding) is removed, the earlier one stays - bmesh.ops.delete with FACES_ONLY, so the
+    /// vertices and the edges stay (they are the earlier face's too) and every per-face and per-corner array closes up in
+    /// order. Returns the count; a mesh without such a pair is left untouched.</summary>
+    internal static int RemoveFoldedFaces(MeshData d)
+    {
+        int nf = d.Faces.Length / 3; var seen = new HashSet<(int, int, int)>(); var keep = new bool[nf]; int kept = 0;
+        for (int f = 0; f < nf; f++)
+        {
+            int a = d.Faces[3 * f], b = d.Faces[3 * f + 1], c = d.Faces[3 * f + 2], t;
+            if (a > b) { t = a; a = b; b = t; }
+            if (b > c) { t = b; b = c; c = t; }
+            if (a > b) { t = a; a = b; b = t; }
+            if (seen.Add((a, b, c))) { keep[f] = true; kept++; }
+        }
+        if (kept == nf) return 0;
+        T[] Close<T>(T[] src, int perFace)
+        {
+            if (src == null) return null;
+            var r = new T[kept * perFace]; int o = 0;
+            for (int f = 0; f < nf; f++) if (keep[f]) { Array.Copy(src, f * perFace, r, o, perFace); o += perFace; }
+            return r;
+        }
+        d.Faces = Close(d.Faces, 3); d.FaceMaterial = Close(d.FaceMaterial, 1); d.FaceSharp = Close(d.FaceSharp, 1);
+        d.CustomNormal = Close(d.CustomNormal, 6);
+        int active = d.Uv == null ? -1 : d.UvAll.IndexOf(d.Uv);
+        if (active < 0) d.Uv = Close(d.Uv, 6);
+        for (int i = 0; i < d.UvAll.Count; i++) d.UvAll[i] = Close(d.UvAll[i], 6);
+        if (active >= 0) d.Uv = d.UvAll[active];
+        for (int i = 0; i < d.Colors.Count; i++) if (!d.Colors[i].point) d.Colors[i] = (d.Colors[i].name, false, Close(d.Colors[i].bytes, 12));
+        return nf - kept;
+    }
+
     /// <summary>mesh_flip_faces on triangles: corners 1 and 2 swap, every per-corner array (the UV layers, the custom normals)
     /// permuted with them.</summary>
     internal static int[] FlipFaces(MeshData d)
@@ -1800,6 +1833,8 @@ public static class BlenderRigAnim
             EvaluateFrame(s, s.FrameCurrent);   // modifier_apply's evaluated depsgraph
             Decimate(me, (float)ratio);
             s.Logs4.Add("RIGANIM decimate " + total + " -> " + (me.Faces.Length / 3) + " tris (ratio " + PyFixed(ratio, 3) + ")");
+            int folded = RemoveFoldedFaces(me);
+            if (folded > 0) { s.Logs4.Add("RIGANIM folded faces: " + folded + " removed after the decimate (a second face on an earlier face's vertices)"); Note(s, "folded faces removed after the decimate"); }
             Note(s, "the decimate done");
         }
         // ---- the rebind
