@@ -12,6 +12,16 @@ out = sys.argv[1]
 os.makedirs(out, exist_ok=True)
 jobs = [l.rstrip("\r") for l in open(sys.argv[2], encoding="utf-8").read().split("\n") if l.startswith("JOB\t") or l.startswith("FAST\t")]
 lines = None; stage3_lines = None; e2_seeds = {}; e3_seeds = {}; s5_seeds = {}
+# The jobs the stage models LEAVE to Blender by name (the drill's own stage output, VEHICLERIG_STAGES_OUT): a left job is
+# compared at no stage, so a tamper written on it reaches no model and passes. 2026-11-16: the first qualifying block was
+# a new saved recipe carrying a role the C# left by name, and S1_LOG_dropped was "accepted".
+left_keys = set()
+_stages_out = os.environ.get("VEHICLERIG_STAGES_OUT", "")
+if _stages_out and os.path.exists(_stages_out):
+    for _l in open(_stages_out, encoding="utf-8", errors="replace"):
+        _m = re.match(r"STAGE\d+ (.+?): left to Blender", _l)
+        if _m:
+            left_keys.add(_m.group(1))
 for d in sys.argv[3:]:
     rows = [l.rstrip("\r") for l in open(d, encoding="utf-8").read().split("\n") if l.strip()]
     starts = [i for i, l in enumerate(rows) if l.startswith("JOB\t")] + [len(rows)]
@@ -20,7 +30,7 @@ for d in sys.argv[3:]:
         # a glTF job that runs every stage model (no FBX source, no dissolve tier): the S1_/S2_ tampers must reach the MODEL's compare
         key0 = block[0].split("\t")[1]
         job0 = next((j for j in jobs if j.split("\t")[1] == key0), None)
-        src_ok = job0 is not None and job0.split("\t")[3].lower().rsplit(".", 1)[-1] in ("glb", "gltf")
+        src_ok = job0 is not None and job0.split("\t")[3].lower().rsplit(".", 1)[-1] in ("glb", "gltf") and key0 not in left_keys
         soup = any(l.startswith("LOG\t2\tVEHICLE RIGGING ") or l.startswith("LOG\t2\tVEHICLE SHROUD ") or l.startswith("LOG\t2\tVEHICLE RAILING ") for l in block)
         if key0 == "fx_r_wheels" and "STAGE\t3" in block: stage3_lines = block
         if key0 in ("fx_e2_rowing", "fx_e2_stances") and "STAGE\t4" in block: e2_seeds[key0] = block
@@ -31,6 +41,7 @@ for d in sys.argv[3:]:
 if lines is None:
     raise RuntimeError("no job ran through all five stages with groups, fcurves and a GLB: nothing to damage")
 key = lines[0].split("\t")[1]
+print("the damaged copies are written on %s (%d job(s) left to Blender by name were not eligible)" % (key, len(left_keys)), file=sys.stderr)
 mine = [j for j in jobs if j.split("\t")[1] == key]
 open(os.path.join(out, "jobs.txt"), "w", encoding="utf-8", newline="\n").write("\n".join(mine) + "\n")
 # the same job under an "EXIT:" key (jobs_exit.txt): a dump of it running through all five stages must be refused

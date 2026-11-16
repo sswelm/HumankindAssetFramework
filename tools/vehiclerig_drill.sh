@@ -223,7 +223,7 @@ n_export=$(echo "$X5" | awk '{print $3}'); n_bytes=$(echo "$X5" | awk '{print $7
 # every compared export is the COMPLETE file, byte for byte (review of #187: the row comparison passed a GLB whose bytes were never equal)
 [ "$n_bytes" = "$n_export" ] || { echo "FAIL — vehicle_rig drill: $n_bytes of $n_export exported GLBs are byte-identical to Blender's ($X5)"; exit 1; }
 # Negative guards on the REAL dump: a missing or inconsistent record must never pass as evidence.
-python "$ROOT/tools/vehiclerig-drill/missing_vehiclerig.py" "$WTMP/missing" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/tampers_raw.txt" || { echo "FAIL — could not construct the damaged dumps"; exit 1; }
+VEHICLERIG_STAGES_OUT="$WTMP/s1.txt" python "$ROOT/tools/vehiclerig-drill/missing_vehiclerig.py" "$WTMP/missing" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/tampers_raw.txt" || { echo "FAIL — could not construct the damaged dumps"; exit 1; }
 tr -d '\r' < "$TMPD/tampers_raw.txt" > "$TMPD/tampers.txt"
 "$TMPD/vehiclerig.exe" "$WTMP/missing/jobs.txt" "$WTMP/missing/intact.txt" > "$TMPD/intact_out.txt" 2>&1; controlrc=$?
 if [ "$controlrc" -ne 0 ] || ! grep -qE "^PASS " "$TMPD/intact_out.txt"; then head -5 "$TMPD/intact_out.txt"; echo "FAIL — vehicle_rig drill rejected the intact control (rc=$controlrc)"; exit 1; fi
