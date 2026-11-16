@@ -106,7 +106,7 @@ cat "$TMPD/rigid_stage_jobs.txt" >> "$TMPD/jobs.txt"
 tr -d '\r' < "$TMPD/fxexit_raw.txt" > "$TMPD/fxexit_jobs_in.txt"
 python "$ROOT/tools/vehiclerig-drill/vehiclerig_fixtures.py" --exits "$TMPD/fxexit_jobs_in.txt" > "$TMPD/fxexit_jobs.txt" || { echo "FAIL — could not derive the vehicle_rig exit fixtures"; exit 1; }
 cat "$TMPD/fxexit_jobs.txt" >> "$TMPD/jobs.txt"
-n_fx=$(( $(grep -cE "^(JOB|FAST)	" "$TMPD/fxjobs_raw.txt") + $(grep -cE "^JOB	" "$TMPD/fxexit_jobs.txt") + $(grep -cE "^JOB	" "$TMPD/twosided_jobs_lf.txt") + $(grep -cE "^JOB	" "$TMPD/rigid_stage_jobs.txt") )); n_jobs=$((n_reg + n_fx)); n_fast=$(grep -c "^FAST	" "$TMPD/jobs.txt")
+n_fx=$(( $(grep -cE "^(JOB|FAST)	" "$TMPD/fxjobs_raw.txt") + $(grep -cE "^(JOB|FAST)	" "$TMPD/fxexit_jobs.txt") + $(grep -cE "^JOB	" "$TMPD/twosided_jobs_lf.txt") + $(grep -cE "^JOB	" "$TMPD/rigid_stage_jobs.txt") )); n_jobs=$((n_reg + n_fx)); n_fast=$(grep -E "^FAST	" "$TMPD/jobs.txt" | grep -vcE "^FAST	(EXIT|DIES):")
 [ "$n_fx" -gt 0 ] || { echo "FAIL — the vehicle_rig fixtures gave no job"; exit 1; }
 [ "$(grep -cE "^JOB	(EXIT|DIES):" "$TMPD/fxexit_jobs.txt")" -ge 8 ] || { echo "FAIL — the vehicle_rig exit fixtures gave fewer than 8 EXIT:/DIES: jobs"; exit 1; }
 
@@ -210,7 +210,7 @@ TOTAL=$(grep -E "^TOTAL" "$TMPD/cs.txt" | tail -1); echo "$TOTAL"
 [ "$rc" -eq 0 ] || { echo "FAIL — vehicle_rig drill: the stage dump is incomplete or inconsistent"; exit 1; }
 n_full=$(echo "$TOTAL" | awk '{print $5}'); n_fastrun=$(echo "$TOTAL" | awk '{print $7}'); n_stop=$(echo "$TOTAL" | awk '{print $9}')
 n_stages=$(echo "$TOTAL" | awk '{print $13}'); n_logs=$(echo "$TOTAL" | awk '{print $15}'); n_bones=$(echo "$TOTAL" | awk '{print $23}'); n_fc=$(echo "$TOTAL" | awk '{print $25}'); n_glb=$(echo "$TOTAL" | awk '{print $29}')
-n_exit=$(grep -cE "^JOB	(EXIT|DIES):" "$TMPD/jobs.txt")
+n_exit=$(grep -cE "^(JOB|FAST)	(EXIT|DIES):" "$TMPD/jobs.txt")
 [ "$n_full" -eq $((n_jobs - n_fast - n_exit)) ] && [ "$n_fastrun" -eq "$n_fast" ] && [ "$n_stop" -eq "$n_exit" ] || { echo "FAIL — vehicle_rig drill: not every recipe completed (full $n_full of $((n_jobs - n_fast - n_exit)), fast $n_fastrun of $n_fast, stopped $n_stop of $n_exit)"; exit 1; }
 # STEPS (b) and (c), STAGES 1 and 2: the C# model of the first two stages (editor/BlenderVehicleRig.cs, .Stage2.cs) against every
 # job's rows of those stages, as strings - the dump's own float32 bits and hashes. Every dumped job must be equal row for row,
@@ -239,6 +239,14 @@ for key in fx_r_tracks_fallback fx_r_tracks_recoil fx_r_tracks_roads fx_r_tracks
 done
 grep -qE "^STAGE3 DIES:3:fx_links_full: equal - dies: RuntimeError: rigid links need at least 4 bones per track" "$TMPD/s1.txt" || { echo "FAIL — vehicle_rig drill: the rigid-links budget error (fx_links_full) is not held as the script's death in stage 3"; exit 1; }
 grep -qE "^STAGE5 DIES:5:fx_links_fallback: equal - dies: RuntimeError: rigid links exceed the 126-bone budget" "$TMPD/s1.txt" || { echo "FAIL — vehicle_rig drill: the rigid-links bone-wall error (fx_links_fallback) is not held as the script's death in stage 5"; exit 1; }
+# THE FAST PATH IS COMPARED, NOT LEFT (2026-11-16): the source-skeleton fast path is modelled (BlenderVehicleRig.Fast.cs), so its
+# three export fixtures must come out equal - every VEHICLE line and the file's bytes - and its three refusals the script's exit.
+for key in fx_fast_wall_126 fx_fast_wall_127 fx_fast_two_x; do
+  grep -qE "^FAST $key: equal - .* byte-identical GLB" "$TMPD/s1.txt" || { grep -E "^(FAIL|STAGE1) $key" "$TMPD/s1.txt" | head -3 | cut -c1-300; echo "FAIL — vehicle_rig drill: the fast-path fixture $key is not equal to Blender through the export"; exit 1; }
+done
+for key in fx_x_fast_bone fx_x_fast_flip fx_x_fast_second; do
+  grep -qE "^STAGE1 EXIT:1:$key: equal - the script's exit in stage 1" "$TMPD/s1.txt" || { echo "FAIL — vehicle_rig drill: the fast path's refusal $key is not held as the script's exit"; exit 1; }
+done
 # Negative guards on the REAL dump: a missing or inconsistent record must never pass as evidence.
 VEHICLERIG_STAGES_OUT="$WTMP/s1.txt" python "$ROOT/tools/vehiclerig-drill/missing_vehiclerig.py" "$WTMP/missing" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/tampers_raw.txt" || { echo "FAIL — could not construct the damaged dumps"; exit 1; }
 tr -d '\r' < "$TMPD/tampers_raw.txt" > "$TMPD/tampers.txt"

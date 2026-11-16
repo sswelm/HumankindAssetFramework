@@ -2827,6 +2827,19 @@ reversed - written because the first two never reversed one) and `fx_r_tracks_tw
 doubled). Left by name: a part that is both a live tread and Two-sided (`stage 5: the Two-sided pass on a tread mesh of polygons
 (d6)`). `VehicleRigTreadTests` (10). NOT checked: nothing ran in Unity or in the game.
 
+The source-skeleton fast path (2026-11-16, rigfast): `BlenderVehicleRig.Fast.cs`. The script runs it inside what the drill calls
+stage 1 and exits 0 after its own export, so a FAST job has no stage rows: the drill holds its exit, every VEHICLE line (the
+DONE line's output path normalized) and the exported file through `GlbRowsCompare` - rows and bytes -, and the in-process
+wrapper's file and lines. Fixtures: `fx_fast_wall_126` and `fx_fast_wall_127` (one bone spun -Z; the second prints the bone-wall
+warning) - both were left by name until now -, `fx_fast_two_x` (two bones, the axis forced to X, +90 degrees), and three
+refusals under EXIT:1 keys on FAST lines (`fx_x_fast_bone`: a spin bone the skeleton has not, with the bone list;
+`fx_x_fast_flip`; `fx_x_fast_second`: a second model). The drill script counts a FAST line with an EXIT: key as a stop, not as
+a fast run, and requires all six by name. The source's own clip is exported beside the new one (the fixture's source has an
+action called Spin already, so the new one is Spin.001). Planted: the Euler written to the next axis fails the channel rows and
+the bytes of all three exports. `VehicleRigFastPathTests` (8) hold the refusals' lines and their order on a model without a
+skeleton. NOT covered: the Ehrhardt (the one saved fast-path recipe) is a skinned FBX and is left at the vehicle import by
+name, as before; nothing ran in Unity or in the game.
+
 The gun's recoil defects (2026-11-07): the recoil-side entries open since October, fixed in `vehicle_rig.py` and in the C#
 port in the same PR so the parity drill holds each fix (the fixtures are TAKEN by the port, unlike the tread's). (1) The arc's
 bore came from `gun_axis` (trunnion -> muzzle): at a pivot of 1.0 the trunnion is the muzzle and the difference is a float32

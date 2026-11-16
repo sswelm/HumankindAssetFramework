@@ -5,7 +5,7 @@
 // per-source brightness, the flatten (every mesh a root with its world transform, its skinning and modifiers cleared, the
 // helpers dropped), the single-mesh loose split, the per-part placements, the ignored parts deleted, the orientation, and
 // transform_apply(location, rotation, scale) into every mesh. What is named as Blender's here (Fallback) the Lab's Generate
-// runs through Blender as before: the source-skeleton fast path (rigfast) and a .fbx/.obj/.blend source (until the native
+// runs through Blender as before: a .fbx/.obj/.blend source (until the native
 // readers); every other decline is a FAIL in the drill. Rules read from the script and from Blender's sources
 // (5.1): `o.matrix_world = m` writes the properties through BKE_object_apply_mat4 (VehicleProbe.ApplyMat4's round trip),
 // the next view_layer.update() rebuilds the world from them; `o.parent = None` keeps the local transform (the script copies

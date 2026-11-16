@@ -174,7 +174,8 @@ or cannot write its output stops with an error instead.
   - **the probe**: a skinned mesh on an animated model or with a placed part, morph targets, an animated second model,
     a part placement on a model with bone-hung meshes, a model with bone-hung meshes whose first clip has CUBICSPLINE
     keys, and a mesh with a skin but no joint weights;
-  - **Generate**: **Use source skeleton (fast path)**; a part marked both a moving tread and Two-sided (a moving tread
+  - **Generate**: a skinned or animated `.fbx` source (with or without **Use source skeleton (fast path)**, which itself
+    runs in C# on a glTF source since 2026-11-16); a part marked both a moving tread and Two-sided (a moving tread
     itself - carrier bones, link bones, Rigid links, with Double-sided, Fix inside-out or Two-sided parts beside it -
     runs in C# since 2026-11-16; **Static tracks (no movement)** always did); and a mesh placed on a joint node.
 - **FBX is read natively** (2026-11-02). A static `.fbx` goes through the same in-process path as a `.glb`: the
