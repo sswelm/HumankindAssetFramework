@@ -241,7 +241,7 @@ public static partial class BlenderVehicleRig
         return why == null ? null : "stage 5: the GLB export (" + why + ") is not modelled yet";
     }
 
-    public static BlenderDeployExport.Result RunStage5(BlenderRigAnim.Stage1 s, Args a, bool preserveJpegAlpha = false)
+    public static BlenderDeployExport.Result RunStage5(BlenderRigAnim.Stage1 s, Args a, bool preserveJpegAlpha = false, Action checkpoint = null)
     {
         if (s.Fallback != null || s.Exits || s.Dies != null) return null;
         if (!PrepareExportMaterials(s, a, out var materials, out var materialNames)) return null;
@@ -264,7 +264,7 @@ public static partial class BlenderVehicleRig
         if (flipped > 0) s.Logs5.Add("VEHICLE FLIP applied: " + flipped + " part(s) winding reversed once" + (a.FixInsideOut ? " (on top of the inside-out fix — cancelling where it flipped)" : ""));
         // the Two-sided parts first: the model they are measured against holds no copies yet
         var twoTargets = meshes.Where(o => o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal)).ToList();
-        if (twoTargets.Count > 0) TwoSidedPass(s, twoTargets, meshes);
+        if (twoTargets.Count > 0) TwoSidedPass(s, twoTargets, meshes, checkpoint);
         var targets = a.DoubleSided ? meshes.Where(o => !OarMesh(o) && !o.Name.StartsWith("Mesh___keep__", StringComparison.Ordinal) && !o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal)).ToList()
             : meshes.Where(o => (CanvasMesh(o) || o.Name.StartsWith("Mesh___rud__", StringComparison.Ordinal)) && !o.Name.StartsWith("Mesh___rigsail__", StringComparison.Ordinal)).ToList();
         if (targets.Count > 0)
