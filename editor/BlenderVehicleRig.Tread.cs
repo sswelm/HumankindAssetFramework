@@ -504,4 +504,60 @@ public static partial class BlenderVehicleRig
                 + Py(cellL, 3) + ", loop " + Py(L, 2) + ", cut phase " + Py(bestOff, 3) + ")");
         return null;
     }
+    /// <summary>normalize_v3_v3 in float32: the length (0 for a vector whose squared length is not above 1e-35, which becomes zero).</summary>
+    static float NormalizeF(float[] v)
+    {
+        float d = (float)((float)((float)(v[0] * v[0]) + (float)(v[1] * v[1])) + (float)(v[2] * v[2]));
+        if (d > 1.0e-35f)
+        {
+            d = (float)Math.Sqrt((double)d); float f = (float)(1.0f / d);
+            v[0] = (float)(v[0] * f); v[1] = (float)(v[1] * f); v[2] = (float)(v[2] * f);
+            return d;
+        }
+        v[0] = v[1] = v[2] = 0f; return 0f;
+    }
+
+    /// <summary>Vector.rotation_difference(other): both normalized (float32), then rotation_between_vecs_to_quat - the axis their
+    /// cross product, the angle angle_normalized_v3v3 (2 asinf(|a - b| / 2), from pi on the far side), the quaternion
+    /// (cosf(angle / 2), axis sinf(angle / 2)); a pair with no cross product is the identity, or half a turn about ortho_v3_v3.</summary>
+    internal static float[] RotationDifference(float[] self, float[] other)
+    {
+        var va = (float[])self.Clone(); var vb = (float[])other.Clone(); NormalizeF(va); NormalizeF(vb);
+        var axis = Cross(va, vb);
+        float Dotf(float[] x, float[] y) => (float)((float)((float)(x[0] * y[0]) + (float)(x[1] * y[1])) + (float)(x[2] * y[2]));
+        float SafeAsin(float x) => x <= -1.0f ? (float)(-Math.PI / 2.0) : x >= 1.0f ? (float)(Math.PI / 2.0) : BlenderTrig.Asinf(x);
+        float Len(float[] x, float[] y) { var dd = new[] { (float)(x[0] - y[0]), (float)(x[1] - y[1]), (float)(x[2] - y[2]) }; return (float)Math.Sqrt((double)Dotf(dd, dd)); }
+        if (NormalizeF(axis) > 1.1920929e-7f)   // FLT_EPSILON
+        {
+            float angle;
+            if (Dotf(va, vb) >= 0.0f) angle = (float)(2.0f * SafeAsin((float)(Len(va, vb) / 2.0f)));
+            else { var nb = new[] { -vb[0], -vb[1], -vb[2] }; angle = (float)((float)Math.PI - (float)(2.0f * SafeAsin((float)(Len(va, nb) / 2.0f)))); }
+            float phi = (float)(0.5f * angle), si = BlenderTrig.Sinf(phi), co = BlenderTrig.Cosf(phi);
+            return new[] { co, (float)(axis[0] * si), (float)(axis[1] * si), (float)(axis[2] * si) };
+        }
+        if (Dotf(va, vb) > 0.0f) return new[] { 1f, 0f, 0f, 0f };
+        // opposed: half a turn about a vector square to the first (ortho_v3_v3 by its dominant axis; axis_angle_to_quat normalizes it)
+        float ax = Math.Abs(va[0]), ay = Math.Abs(va[1]), az = Math.Abs(va[2]);
+        int dom = ax > ay ? (ax > az ? 0 : 2) : (ay > az ? 1 : 2);
+        float[] o = dom == 0 ? new[] { (float)(-va[1] - va[2]), va[0], va[0] } : dom == 1 ? new[] { va[1], (float)(-va[0] - va[2]), va[1] } : new[] { va[2], va[2], (float)(-va[0] - va[1]) };
+        if (NormalizeF(o) == 0.0f) return new[] { 1f, 0f, 0f, 0f };
+        float phiH = (float)(0.5f * (float)Math.PI), siH = BlenderTrig.Sinf(phiH), coH = BlenderTrig.Cosf(phiH);
+        return new[] { coH, (float)(o[0] * siH), (float)(o[1] * siH), (float)(o[2] * siH) };
+    }
+
+    /// <summary>Matrix.Translation(v): the identity with v in its last column (row-major, as MatMulMathutils takes it).</summary>
+    static float[] TranslationRow(float x, float y, float z) { var m = new float[16]; m[0] = m[5] = m[10] = m[15] = 1f; m[3] = x; m[7] = y; m[11] = z; return m; }
+
+    /// <summary>The pose matrix of a link bone carried along the path: Translation(P1) @ q.to_matrix().to_4x4() @ Translation(-P0) @
+    /// rest (mathutils products, row-major) with q = t0.rotation_difference(t1).</summary>
+    internal static float[] LinkPoseMatrix(float[] p0, float[] t0, float[] p1, float[] t1, float[] restRowMajor)
+    {
+        var q = RotationDifference(t0, t1);
+        var m3 = BlenderChannelExport.QuatToMat3(q);   // Blender's mat[column][row]
+        var r4 = new float[16]; r4[15] = 1f;
+        for (int row = 0; row < 3; row++) for (int col = 0; col < 3; col++) r4[4 * row + col] = m3[col][row];
+        var m = VehicleProbe.MatMulMathutils(TranslationRow(p1[0], p1[1], p1[2]), r4);
+        m = VehicleProbe.MatMulMathutils(m, TranslationRow(-p0[0], -p0[1], -p0[2]));
+        return VehicleProbe.MatMulMathutils(m, restRowMajor);
+    }
 }
