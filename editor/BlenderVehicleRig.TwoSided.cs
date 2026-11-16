@@ -239,18 +239,26 @@ public static partial class BlenderVehicleRig
     /// <summary>_two_sided_pass(targets, everything): each target in turn - the faces whose back shows, doubled in place -
     /// and its line. Every target is judged against the model as it was BUILT (the tree is made once), while each
     /// target's own faces are read as they are when its turn comes - a target is its own mesh, so that is the same.</summary>
-    static void TwoSidedPass(BlenderRigAnim.Stage1 s, List<BlenderRigAnim.SceneObject> targets, List<BlenderRigAnim.SceneObject> everything)
+    static void TwoSidedPass(BlenderRigAnim.Stage1 s, List<BlenderRigAnim.SceneObject> targets, List<BlenderRigAnim.SceneObject> everything, Action checkpoint)
     {
+        checkpoint?.Invoke();
         var sc = BuildTwoSidedScene(everything);
         foreach (var o in targets)
         {
             int oi = everything.IndexOf(o), nf = o.Mesh.Faces.Length / 3, first = sc.FaceBase[oi];
             var verdict = new sbyte[nf];   // 1 doubled, -1 an authored twin, 0 left
-            System.Threading.Tasks.Parallel.For(0, nf, f =>
+            // Poll on the calling thread between bounded batches. A poll inside Parallel.For would
+            // wrap cancellation/deadline exceptions in AggregateException, turning them into a Blender fallback.
+            for (int firstFace = 0; firstFace < nf; firstFace += 128)
             {
-                bool back = TwoSidedBackShows(sc, first + f, out int skipped);
-                verdict[f] = back ? (sbyte)1 : skipped < 0 ? (sbyte)-1 : (sbyte)0;
-            });
+                checkpoint?.Invoke();
+                System.Threading.Tasks.Parallel.For(firstFace, Math.Min(firstFace + 128, nf), f =>
+                {
+                    bool back = TwoSidedBackShows(sc, first + f, out int skipped);
+                    verdict[f] = back ? (sbyte)1 : skipped < 0 ? (sbyte)-1 : (sbyte)0;
+                });
+            }
+            checkpoint?.Invoke();
             var both = new List<int>(); int twinned = 0;
             for (int f = 0; f < nf; f++) { if (verdict[f] == 1) both.Add(f); else if (verdict[f] == -1) twinned++; }
             int v0 = o.Mesh.Vertices;
