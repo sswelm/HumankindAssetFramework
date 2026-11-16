@@ -46,6 +46,7 @@
     <Compile Include="..\editor\BlenderVehicleRig.Stage5.cs" Link="BlenderVehicleRig.Stage5.cs" />
     <Compile Include="..\editor\BlenderVehicleRig.TwoSided.cs" Link="BlenderVehicleRig.TwoSided.cs" />
     <Compile Include="..\editor\BlenderVehicleRig.Tread.cs" Link="BlenderVehicleRig.Tread.cs" />
+    <Compile Include="..\editor\BlenderVehicleRig.Fast.cs" Link="BlenderVehicleRig.Fast.cs" />
     <Compile Include="..\editor\BlenderBvh.cs" Link="BlenderBvh.cs" />
     <Compile Include="..\editor\BlenderSubdivide.cs" Link="BlenderSubdivide.cs" />
     <Compile Include="..\editor\BlenderVehicleRigInProcess.cs" Link="BlenderVehicleRigInProcess.cs" />

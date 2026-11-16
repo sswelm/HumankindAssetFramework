@@ -661,8 +661,8 @@ static class StageDrill
             // an .obj/.blend source: not read, the model declines it by name; an .fbx is read through the FBX reader as the Lab reads it
             // (HafModelLoader.ReadForVehicle, step 6f) - one the vehicle import leaves (skinned, animated, the reader's own limit) is named
             HafModel m = null; string leave = null;
-            // Match BlenderVehicleRigInProcess.Run: argument failures and rigfast never import the source.
-            if (args.Problem == null && args.Mode == "rig" && args.PreDie == null && BlenderVehicleRig.SourceFallback(args) == null)
+            // Match BlenderVehicleRigInProcess.Run: an argument failure never imports the source; the fast path reads it as the rig path does.
+            if (args.Problem == null && (args.Mode == "rig" || args.Mode == "rigfast") && args.PreDie == null && BlenderVehicleRig.SourceFallback(args) == null)
                 m = HafModelLoader.ReadForVehicle(args.Input, out leave);
             try { model = m == null && leave != null ? new BlenderRigAnim.Stage1 { Fallback = leave } : BlenderVehicleRig.RunStage1(m, args, ReadSecond); }
             catch (SecondLeave e) { model = new BlenderRigAnim.Stage1 { Fallback = e.Message }; }
@@ -681,6 +681,57 @@ static class StageDrill
                 || (args.Unsupported != null && model.Fallback == args.Unsupported);
             if (!named) { Console.WriteLine($"FAIL {key}: stage 1 model leaves this job to Blender: {model.Fallback}"); return false; }
             Left++; Console.WriteLine($"STAGE1 {key}: left to Blender by name: {model.Fallback}"); return true;
+        }
+        if (model.FastExport != null)
+        {
+            // THE FAST PATH (rigfast, 2026-11-16): the script spins the source's own bones, exports and exits 0 inside stage 1 - no
+            // stage rows exist. Held: the exit, every VEHICLE line (the DONE line's output path normalized), the exported file.
+            var fx = (BlenderDeployExport.Result)model.FastExport;
+            if (!d.Fast || d.StoppedAt != 1 || d.Exit != "0") problems.Add("fast path model: the fast path ran to its export here, Blender " + (d.StoppedAt == 0 ? "ran the mesh path through" : $"stopped at stage {d.StoppedAt} with exit {d.Exit ?? d.Died}"));
+            else
+            {
+                var theirs = d.LogsOfStop.ToList();
+                for (int i = 0; i < theirs.Count; i++) if (theirs[i].StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal))
+                {
+                    int at = theirs[i].LastIndexOf(" -> ", StringComparison.Ordinal); string path = at >= 0 ? theirs[i].Substring(at + 4) : "";
+                    if (!path.EndsWith("/" + key.Replace(':', '_') + "_Spin.glb", StringComparison.Ordinal)) problems.Add("fast path model: the DONE output basename differs");
+                    else theirs[i] = theirs[i].Substring(0, at + 4) + args.OutGlb;
+                }
+                if (!theirs.SequenceEqual(model.Logs)) problems.Add("fast path model: the VEHICLE lines differ: here [" + string.Join(" | ", model.Logs) + "], Blender [" + string.Join(" | ", theirs) + "]");
+                if (problems.Count == 0)
+                {
+                    var xp = new List<string>();
+                    var stats = GlbRowsCompare.Compare(fx, d.ExportRows, xp, new Dictionary<string, long>(), name => fx.ChannelRows.Animations.First(an => an.Name == name).Channels.Count, true, true, null);
+                    foreach (string issue in xp) problems.Add("fast path export: " + issue);
+                    if (problems.Count == 0 && InProcess)
+                    {
+                        string path = Path.Combine(Path.GetTempPath(), "vehicle_inproc_" + Guid.NewGuid().ToString("N") + ".glb");
+                        try
+                        {
+                            var tokens = d.Argv.ToList(); tokens[2] = path; tokens[3] = "";
+                            var result = BlenderVehicleRigInProcess.Run(tokens);
+                            if (!result.Written) problems.Add("the in-process wrapper did not write the fast path's file: " + (result.UseBlender ?? result.ScriptError ?? "script exit"));
+                            else
+                            {
+                                var expectedFile = BlenderGlbWriter.Build(fx);
+                                if (expectedFile.Fallback != null || !File.ReadAllBytes(path).SequenceEqual(expectedFile.Glb)) problems.Add("the in-process wrapper's fast-path file differs from the oracle-checked export");
+                                var logs = result.Log.Where(l => !l.StartsWith("VEHICLE timing:", StringComparison.Ordinal))
+                                    .Select(l => l.StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal) ? l.Substring(0, l.LastIndexOf(" -> ", StringComparison.Ordinal) + 4) + args.OutGlb : l);
+                                if (!logs.SequenceEqual(model.Logs)) problems.Add("the wrapper's ordered VEHICLE lines differ from the fast path model's");
+                                if (problems.Count == 0) InProcessEqual++;
+                            }
+                        }
+                        finally { if (File.Exists(path)) File.Delete(path); }
+                    }
+                    if (problems.Count == 0)
+                    {
+                        RowsEqual += model.Logs.Count; Equal++; Exported5++; ExportRows5 += d.ExportRows.Count; if (stats.GlbEqual) BytesEqual5++;
+                        Console.WriteLine("FAST " + key + ": equal - the fast path's " + model.Logs.Count + " VEHICLE lines, " + stats.Nodes + " nodes, " + stats.Channels + " channels" + (stats.GlbEqual ? ", byte-identical GLB" : ""));
+                    }
+                }
+            }
+            if (problems.Count > 0) { foreach (var p in problems) Console.WriteLine($"FAIL {key}: {p}"); return false; }
+            return true;
         }
         var rows = model.Exits || model.Dies != null ? null : BlenderRigAnim.Render(model, 1, fcSlot: true);
         if (rows != null) DumpModelRows(key, 1, rows, model.Logs);

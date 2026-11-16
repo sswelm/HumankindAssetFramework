@@ -35,6 +35,7 @@ public static partial class BlenderVehicleRig
         public List<string> PartTx;                 // the parttx= lines, or null
         public bool TracksStatic;                   // argv[16] "1": the tread loops rigid, no link bones (the line at argument time)
         public bool TreadLinks;                     // a `treadmode=links` argument on live tracks: one bone per molded link
+        public bool PreserveJpegAlpha;              // not an argument: the caller's export option, for the fast path (it exports inside stage 1)
         public int TreadAdvCells = 3;               // max(1, min(8, int(float(argv[12])))) or 3: the conveyor's advance per loop, in cells
         public double TreadCellsPerLink = 4.0;      // max(0.25, min(4.0, float(argv[15]))) or 4: cells per molded link (the Lab's Tread detail)
         public bool DoubleSided, FixInsideOut;
@@ -418,8 +419,7 @@ public static partial class BlenderVehicleRig
         var s = new BlenderRigAnim.Stage1 { Model = m };
         if (a.Problem != null) { s.Logs.AddRange(a.Logs); s.Exits = true; return s; }
         if (SourceFallback(a) != null) { s.Fallback = SourceFallback(a); return s; }
-        if (a.Mode == "rigfast") { s.Fallback = "the source-skeleton fast path (rigfast): spun on the artist skeleton, not modelled"; return s; }
-        if (a.Mode != "rig") { s.Fallback = "the mode '" + a.Mode + "' is not the rig path"; return s; }
+        if (a.Mode != "rig" && a.Mode != "rigfast") { s.Fallback = "the mode '" + a.Mode + "' is not the rig path"; return s; }
         if (a.PreDie != null) { s.Dies = a.PreDie; return s; }
         // the import, as the importer leaves it (no material-less drop, no armature required, the animation kept); the argument-time
         // lines (a.Logs) come later: the rig path prints them after the merge
@@ -445,6 +445,7 @@ public static partial class BlenderVehicleRig
         //      matrix baked into its vertices, its helpers dropped
         if (a.Merge2 != null)
         {
+            if (a.Mode == "rigfast") { s.Logs.Add("VEHICLE ERROR: a second model is not supported on the source-skeleton fast path \u2014 the merged pair needs the mesh path"); s.Exits = true; return s; }
             // before the second import: the four '|' fields and the file; the offset, rotation and scale are read AFTER the import
             var f4 = a.Merge2.Split('|');
             if (f4.Length != 4) { s.Logs.Add("VEHICLE ERROR: malformed merge2 argument: merge2=" + a.Merge2); s.Exits = true; return s; }
@@ -532,6 +533,8 @@ public static partial class BlenderVehicleRig
         if (a.FoldDie != null) { s.Dies = a.FoldDie; return s; }
         if (a.DialsDie != null) { s.Dies = a.DialsDie; return s; }
         s.Logs.AddRange(a.Logs);
+        // ---- the source-skeleton fast path ends here: it spins the artist's own bones, exports and exits (BlenderVehicleRig.Fast.cs)
+        if (a.Mode == "rigfast") return RunFast(s, a, a.PreserveJpegAlpha);
         // ---- the flatten: every mesh a root keeping its world transform, skinning and modifiers cleared; the helpers dropped
         var meshes = s.Objects.Where(o => o.Type == "MESH" && o.Mesh.Vertices > 0).ToList();
         foreach (var o in meshes)

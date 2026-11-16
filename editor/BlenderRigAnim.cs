@@ -371,6 +371,7 @@ public static class BlenderRigAnim
         public string PrimaryAction;                                 // stage 3: the primary clip's action as it ends (the GLB route's clip name)
         public List<(string role, string action)> RoleActions = new List<(string, string)>();   // stage 3: each state role's action (role_acts), in the script's order
         public object VehicleState;                                  // vehicle_rig: what stage 3 hands stage 4 (BlenderVehicleRig.RigState)
+        public object FastExport;                                    // vehicle_rig's source-skeleton fast path: its export (BlenderDeployExport.Result) - the run ended in stage 1, exit 0
         public readonly List<string> Logs5 = new List<string>();      // vehicle_rig's finishing/export stage
     }
 
