@@ -148,14 +148,24 @@ public static class BlenderRigExport
             var armObj = objs.FirstOrDefault(q => q.Type == "ARMATURE" && q.Name == me.ArmatureModifier);
             if (armObj == null) { x.Fallback = "'" + o.Name + "': its Armature modifier names no armature of the scene"; return x; }
             if (o.Parent != armObj) { x.Fallback = "'" + o.Name + "': a mesh that is not under its armature at the export"; return x; }
-            int nf = me.Faces.Length / 3;
-            var r = new BlenderReduce.Result
+            int nf = me.FaceCount;
+            // a mesh of POLYGONS (a subdivided tread): its corner normals are decided on the polygons, then the exporter tessellates
+            float[] polygonNormals = null; BlenderReduce.Result r;
+            if (me.PolyStart != null)
             {
-                VertexCount = me.Vertices, FaceCount = nf, Positions = me.Positions, Faces = me.Faces, Edges = me.Edges ?? new int[0], FaceMaterial = me.FaceMaterial,
-                FaceSharp = me.FaceSharp ?? new bool[nf], EdgeSharp = vehicle ? me.EdgeSharp : null, CustomNormal = me.CustomNormal, DefNr = me.DefNr, DefWeight = me.DefWeight, Ratio = 1f,
-            };
-            foreach (var uv in me.UvAll) r.Uv.Add(uv);
-            foreach (var c in me.Colors) r.Colors.Add(c);
+                r = PolygonResult(me, out polygonNormals, out string polyWhy);
+                if (polyWhy != null) { x.Fallback = "'" + o.Name + "': " + polyWhy; return x; }
+            }
+            else
+            {
+                r = new BlenderReduce.Result
+                {
+                    VertexCount = me.Vertices, FaceCount = nf, Positions = me.Positions, Faces = me.Faces, Edges = me.Edges ?? new int[0], FaceMaterial = me.FaceMaterial,
+                    FaceSharp = me.FaceSharp ?? new bool[nf], EdgeSharp = vehicle ? me.EdgeSharp : null, CustomNormal = me.CustomNormal, DefNr = me.DefNr, DefWeight = me.DefWeight, Ratio = 1f,
+                };
+                foreach (var uv in me.UvAll) r.Uv.Add(uv);
+                foreach (var c in me.Colors) r.Colors.Add(c);
+            }
             r.ActiveColor = me.ActiveColor;
             foreach (var name in me.Materials)
             {
@@ -170,7 +180,7 @@ public static class BlenderRigExport
             for (int i = 0; i < bones.Count; i++) jointOf[names.BoneOfJoint[bones[i]]] = i;
             var groupJoint = me.Groups.Select(g => jointOf.TryGetValue(g, out int j) ? j : -1).ToArray();
             var skin = new BlenderExport.Skin { ObjectWorld = o.World, ArmatureWorld = armObj.World, GroupJoint = groupJoint, JointCount = bones.Count };
-            var p = BlenderExport.MeshPrimitives(r, skin);
+            var p = polygonNormals != null ? BlenderExport.MeshPrimitives(r, skin, polygonNormals) : BlenderExport.MeshPrimitives(r, skin);
             prims[o] = p; slotsOf[o] = r.Slots;
             // no vertex groups: the joint attributes are written (every vertex on the would-be neutral index) but the mesh gets
             // no skin (skins.py gathers none without vertex groups) and no neutral bone (measured, fx_s4_rebind)
@@ -452,5 +462,50 @@ public static class BlenderRigExport
         }
         int objectProps = s.Armature == null ? 0 : act.Slots.Where(sl => sl.Object == s.Armature.Object).SelectMany(sl => sl.FCurves).Where(fc => fc.Bone == null && fc.Keys.Count > 0).Select(fc => fc.Prop).Distinct().Count();
         return 3 * bones + objectProps;
+    }
+    /// <summary>A mesh of polygons as the exporter reads it: Mesh.corner_normals of the POLYGON mesh (VehicleProbe.PolygonCornerNormals:
+    /// the fans, the custom-normal shorts), then Mesh.loop_triangles (FbxModel.Tessellate: a quad along 0-2 unless that folds it, an
+    /// n-gon by BLI_polyfill_calc) - a mesh of triangles whose corners carry their polygon corner's vertex, UVs and colours, and the
+    /// normals beside it (3 per triangle corner, Blender's frame). A mesh the exporter's validate() would change is named: the
+    /// validation of polygons is not modelled.</summary>
+    internal static BlenderReduce.Result PolygonResult(BlenderRigAnim.MeshData me, out float[] triNormals, out string why)
+    {
+        triNormals = null; why = null;
+        int nf = me.FaceCount, nv = me.Vertices;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (int f = 0; f < nf; f++)
+        {
+            int c0 = me.CornerStart(f), n = me.CornerCount(f);
+            var vs = new int[n]; Array.Copy(me.Faces, c0, vs, 0, n); Array.Sort(vs);
+            bool bad = n < 3; for (int i = 1; i < n; i++) bad |= vs[i] == vs[i - 1];
+            if (bad || !seen.Add(string.Join(",", vs))) { why = "a mesh of polygons the exporter's validate() would change (a face repeating a vertex, or two faces on the same vertices)"; return null; }
+        }
+        var sharpFace = me.FaceSharp ?? new bool[nf];
+        var sharpEdges = me.EdgeSharp == null ? null : VehicleProbe.SharpEdgeSet(me.Edges, me.EdgeSharp);
+        var cn = VehicleProbe.PolygonCornerNormals(me.Positions, me.Faces, me.PolyStart, sharpFace, sharpEdges, me.CustomNormal);
+        var tris = FbxModel.Tessellate(me.Positions, me.Faces, me.PolyStart); int nt = tris.Count;
+        var r = new BlenderReduce.Result
+        {
+            VertexCount = nv, FaceCount = nt, Positions = me.Positions, Faces = new int[3 * nt], FaceMaterial = new int[nt], FaceSharp = new bool[nt], Edges = me.Edges ?? new int[0],
+            EdgeSharp = me.EdgeSharp, DefNr = me.DefNr, DefWeight = me.DefWeight, Ratio = 1f,
+        };
+        triNormals = new float[9 * nt];
+        foreach (var _ in me.UvAll) r.Uv.Add(new float[6 * nt]);
+        var cornerBytes = new List<byte[]>(); foreach (var c in me.Colors) cornerBytes.Add(c.point ? c.bytes : new byte[12 * nt]);
+        for (int t = 0; t < nt; t++)
+        {
+            var tri = tris[t]; int[] corners = { tri.C0, tri.C1, tri.C2 };
+            for (int k = 0; k < 3; k++)
+            {
+                int c = corners[k];
+                r.Faces[3 * t + k] = me.Faces[c];
+                for (int i = 0; i < 3; i++) triNormals[9 * t + 3 * k + i] = cn[3 * c + i];
+                for (int u = 0; u < me.UvAll.Count; u++) { r.Uv[u][6 * t + 2 * k] = me.UvAll[u][2 * c]; r.Uv[u][6 * t + 2 * k + 1] = me.UvAll[u][2 * c + 1]; }
+                for (int l = 0; l < me.Colors.Count; l++) if (!me.Colors[l].point) Array.Copy(me.Colors[l].bytes, 4 * c, cornerBytes[l], 12 * t + 4 * k, 4);
+            }
+            r.FaceMaterial[t] = me.FaceMaterial[tri.Face]; r.FaceSharp[t] = sharpFace[tri.Face];
+        }
+        for (int l = 0; l < me.Colors.Count; l++) r.Colors.Add((me.Colors[l].name, me.Colors[l].point, cornerBytes[l]));
+        return r;
     }
 }

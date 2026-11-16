@@ -829,6 +829,9 @@ static class StageDrill
     {
         if (fallback == null) return false;
         if (fallback == "stage 5: the export of brightness-edited image bytes is not modelled yet" || fallback == "stage 5: the FBX preview export is not modelled yet") return true;
+        // a subdivided tread holds polygons (d6): the three passes that read triangles, each named whole
+        foreach (string pass in new[] { "the inside-out fix", "the Two-sided pass beside", "the double-sided shell" })
+            if (fallback == "stage 5: " + pass + " of a tread mesh of polygons (d6) is not modelled yet") return true;
         const string head = "stage 5: the GLB export (", tail = ") is not modelled yet";
         if (!fallback.StartsWith(head, StringComparison.Ordinal) || !fallback.EndsWith(tail, StringComparison.Ordinal) || fallback.Length <= head.Length + tail.Length) return false;
         string why = fallback.Substring(head.Length, fallback.Length - head.Length - tail.Length);
@@ -847,7 +850,8 @@ static class StageDrill
             @"the animation " + name + @" (?:has no curve left|reaches no frame of the scene's range) \(the export named it all the same\)",
             @"an action starting below frame 0 \(" + name + @" at -[0-9]+: the SLIDE of negative frames is not modelled\)",
             @"an action of [0-9]+ frames \(" + name + @": the sampler would run for hours\)",
-            @"a bone in rotation mode [^\s]+ \(" + name + @": only QUATERNION and XYZ are modelled\)"
+            @"a bone in rotation mode [^\s]+ \(" + name + @": only QUATERNION and XYZ are modelled\)",
+            name + @": a mesh of polygons the exporter's validate\(\) would change \(a face repeating a vertex, or two faces on the same vertices\)"
         })
             if (System.Text.RegularExpressions.Regex.IsMatch(why, @"\A(?:" + pattern + @")\z")) return true;
         return false;

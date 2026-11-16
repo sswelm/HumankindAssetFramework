@@ -75,7 +75,12 @@ Stage 3 (step (d), part d3: the turret, the gun assembly, the trails):
                      put the breech 1.22 below the hull's floor (the raised muzzle-pivot fixture also takes the warning)
   fx_r_tracks_fallback  LIVE tracks (no tracksStatic) on the wheeled rig: an 8-vertex belt has no link pitch, so the tread takes the
                      carrier-blend fallback - its vertex groups were created from a SET (random order per run until 2026-11-06); the
-                     drill dumps it twice and holds the runs equal; the C# leaves the tread rig (d6) by name
+                     drill dumps it twice and holds the runs equal; the C# models it (BlenderVehicleRig.Tread.cs, 2026-11-16)
+  fx_r_tracks_roads  LIVE tracks on a running gear the 8-vertex belt never meets: a ribbon belt wrapped round a sprocket and an idler
+                     (dense arcs: the wrap bands MEASURED on eight or more vertices), under two road wheels below the belt's centre
+                     (their under-bands measured, the WrapGF / WrapGR weights), past a return roller above it (the upper-rear
+                     slope) - so the three ramp regions hold vertices; no station on the straights, so still no link pitch; one
+                     wheel on the other side (the side filter)
   fx_r_tracks_recoil the same live tracks with a tube along x under recoil 8 units BELOW them: the recoil sign test read the module-level
                      _tc the track loops had rebound to the last track's centre; the arc's pivot is R (= slide / tan 3 deg) above the
                      bore, so the sign flips once the tracks' centre is more than R above the tube - here it is, and the old script
@@ -345,6 +350,37 @@ def boxes_in_one(r, name, material, count):
             "indices": r.b.accessor(idx, "H", "SCALAR", minmax=False), "material": material}
     r.meshes.append({"name": name, "primitives": [prim]})
     return len(r.meshes) - 1
+
+
+def tracked_roads(out, models):
+    """fx_r_tracks_roads: a ribbon belt round a sprocket, two road wheels, an idler and under a return roller (glTF: x forward, y up, z the side)."""
+    r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+    r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.5, -0.5), material=ma), scale=[2.0, 0.6, 1.0])
+    parts = [("Hull", 0, {})]
+    # name, x, y (up), diameter, side
+    wheels = (("Sprocket", 1.5, 0.9, 0.7, 1.2), ("Idler", -1.5, 0.9, 0.6, 1.2), ("RoadF", 1.3, 0.3, 0.4, 1.2), ("RoadR", -1.3, 0.3, 0.4, 1.2),
+              ("Roller", 0.0, 1.1, 0.3, 1.2), ("Other", 0.0, 0.4, 0.5, -1.2))
+    for name, x, y, d, side in wheels:
+        r.node(name, mesh=r.mesh(name, at=(-0.5, -0.5, -0.5), material=ma), translation=[x, y, side], scale=[d, d, 0.25])
+        parts.append((name, 1, {}))
+    path = []
+    def arc(cx, cy, rad, a0, a1, step):
+        n = int(round(abs(a1 - a0) / step))
+        for i in range(n + 1):
+            a = math.radians(a0 + (a1 - a0) * i / n)
+            path.append((cx + rad * math.cos(a), cy + rad * math.sin(a)))
+    arc(1.5, 0.9, 0.45, 90.0, -90.0, 7.5)       # round the sprocket, top to bottom
+    arc(1.3, 0.3, 0.25, 0.0, -90.0, 5.0)        # under the first road wheel
+    arc(-1.3, 0.3, 0.25, -90.0, -180.0, 5.0)    # under the last road wheel
+    arc(-1.5, 0.9, 0.40, 270.0, 90.0, 7.5)      # round the idler, bottom to top
+    pos = [(x, y, 1.25 + w) for x, y in path for w in (-0.1, 0.1)]
+    idx = []
+    for j in range(len(path)):
+        k = (j + 1) % len(path)
+        a, b, c, d = 2 * j, 2 * j + 1, 2 * k + 1, 2 * k
+        idx += [a, b, c, a, c, d]
+    r.node("Belt", mesh=raw_mesh(r, "Belt", ma, pos, idx)); parts.append(("Belt", 6, {}))
+    recipe(out, "fx_r_tracks_roads", r.write(models, "fx_r_tracks_roads"), parts)
 
 
 def rigid_tread_fixtures(out, models):
@@ -789,6 +825,7 @@ def main(out):
             fields = dict(gunPivot=0.3, recoilDist=0.2, recoilFrames=16, recoilLead=0)
         recipe(out, key, r.write(models, key), parts, **fields)
     tracked("fx_r_tracks_fallback"); tracked("fx_r_tracks_recoil", gun=True)
+    tracked_roads(out, models)
     rigid_tread_fixtures(out, models)
     two_sided_fixtures(out, models)
     # Stage 4 e3: Deploy direction/elevation and Recoil timing/stance; no frame_set in either action.

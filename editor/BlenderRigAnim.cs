@@ -235,7 +235,15 @@ public static class BlenderRigAnim
 
     public sealed class MeshData
     {
-        public int Vertices; public int[] Faces;  // 3 per face
+        public int Vertices; public int[] Faces;  // 3 per face - or, with PolyStart, each face's corners one after another
+        /// <summary>null for a mesh of triangles (every mesh but a subdivided tread). Else the first corner of each face and, last,
+        /// the corner count: face f owns corners PolyStart[f] .. PolyStart[f + 1] - 1 (Blender's loop_start / loop_total). The
+        /// per-corner arrays (Uv, CustomNormal, corner colours) follow the corners. A consumer that reads Faces three by three
+        /// must refuse such a mesh by name or walk it by FaceCount / CornerStart.</summary>
+        public int[] PolyStart;
+        public int FaceCount => PolyStart != null ? PolyStart.Length - 1 : Faces.Length / 3;
+        public int CornerStart(int f) => PolyStart != null ? PolyStart[f] : 3 * f;
+        public int CornerCount(int f) => PolyStart != null ? PolyStart[f + 1] - PolyStart[f] : 3;
         public float[] Positions;                 // 3 per vertex, Blender's frame (skinned into the bind pose for a skinned mesh)
         public int[] FaceMaterial;                // material slot per face
         public float[] Uv;                        // the active UV layer, 2 per corner, or null
@@ -378,6 +386,7 @@ public static class BlenderRigAnim
     internal static string JoinMeshes(Stage1 s, SceneObject active, List<SceneObject> order)
     {
         var joined = active;
+        if (order.Any(o => o.Mesh.PolyStart != null)) return "the join of a mesh of polygons (a subdivided tread) is not modelled yet";
         var worldToActive = BlenderEigen.InvertM4(active.World);
         int nv = order.Sum(o => o.Mesh.Vertices), nf = order.Sum(o => o.Mesh.Faces.Length / 3);
         var d = new MeshData { Vertices = nv, Positions = new float[3 * nv], Faces = new int[3 * nf], FaceMaterial = new int[nf], FaceSharp = new bool[nf] };
@@ -2392,12 +2401,12 @@ public static class BlenderRigAnim
             row.AddRange(HexMatrix(o.World)); row.AddRange(o.ParentInverse != null ? HexMatrix(o.ParentInverse) : identity);
             r.Objs.Add(row.ToArray());
             if (o.Mesh == null) continue;
-            var d = o.Mesh; int nf = d.Faces.Length / 3;
+            var d = o.Mesh; int nf = d.FaceCount;
             var starts = new int[nf]; var totals = new int[nf];
-            for (int f = 0; f < nf; f++) { starts[f] = 3 * f; totals[f] = 3; }
+            for (int f = 0; f < nf; f++) { starts[f] = d.CornerStart(f); totals[f] = d.CornerCount(f); }
             r.Meshes.Add(new[]
             {
-                "MESH", N, o.Name, d.Vertices.ToString(CultureInfo.InvariantCulture), nf.ToString(CultureInfo.InvariantCulture), (3 * nf).ToString(CultureInfo.InvariantCulture),
+                "MESH", N, o.Name, d.Vertices.ToString(CultureInfo.InvariantCulture), nf.ToString(CultureInfo.InvariantCulture), d.Faces.Length.ToString(CultureInfo.InvariantCulture),
                 Sha(Bytes(d.Positions)), Sha(Bytes(d.Faces)), Sha(Bytes(starts).Concat(Bytes(totals)).ToArray()), Sha(Bytes(d.FaceMaterial)), d.Uv == null ? "-" : Sha(Bytes(d.Uv)),
                 d.Materials.Count == 0 ? "-" : string.Join(";", d.Materials.Select(x => x ?? "(none)")), d.Groups.Count == 0 ? "-" : string.Join(";", d.Groups),
                 d.ArmatureModifier == null ? "-" : "ARMATURE:Armature:" + d.ArmatureModifier,

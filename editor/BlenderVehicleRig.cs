@@ -34,6 +34,7 @@ public static partial class BlenderVehicleRig
         public double Bright1 = 1.0, Bright2 = 1.0;
         public List<string> PartTx;                 // the parttx= lines, or null
         public bool TracksStatic;                   // argv[16] "1": the tread loops rigid, no link bones (the line at argument time)
+        public bool TreadLinks;                     // a `treadmode=links` argument on live tracks: one bone per molded link
         public bool DoubleSided, FixInsideOut;
         internal readonly List<(HafModel model, BlenderNames.Result names, double bright)> MaterialInputs = new List<(HafModel, BlenderNames.Result, double)>();
         public readonly List<string> Logs = new List<string>();   // the VEHICLE lines the rig path prints at argument time (a bad orientation, static tracks), after the merge
@@ -170,6 +171,7 @@ public static partial class BlenderVehicleRig
             a.Reduce[role] = PyClamp95(v);
         }
         a.TracksStatic = argv.Count > 16 && At(16).Trim() == "1";
+        a.TreadLinks = !a.TracksStatic && argv.Any(x => VehicleProbe.Input.PyStrip(x) == "treadmode=links");
         a.DoubleSided = VehicleProbe.Input.PyStrip(At(41)) == "1";
         a.FixInsideOut = VehicleProbe.Input.PyStrip(At(46)) == "1";
         // the reduce tags in the script's order - defaultreduce, shroudreduce, gunreduce, turretreduce, windowreduce, railingreduce -, the names before the LAST
@@ -841,6 +843,7 @@ public static partial class BlenderVehicleRig
         Materials = new List<string>(d.Materials), Groups = new List<string>(d.Groups), DefNr = d.DefNr, DefWeight = d.DefWeight, ArmatureModifier = d.ArmatureModifier,
         Edges = d.Edges == null ? null : (int[])d.Edges.Clone(), EdgeSharp = d.EdgeSharp == null ? null : (bool[])d.EdgeSharp.Clone(), FaceSharp = d.FaceSharp == null ? null : (bool[])d.FaceSharp.Clone(), CustomNormal = d.CustomNormal == null ? null : (short[])d.CustomNormal.Clone(),
         UvAll = d.UvAll.Select(u => (float[])u.Clone()).ToList(), Colors = d.Colors.Select(c => (c.name, c.point, (byte[])c.bytes.Clone())).ToList(), ActiveColor = d.ActiveColor,
+        PolyStart = d.PolyStart == null ? null : (int[])d.PolyStart.Clone(),
     };
 
     /// <summary>`o.matrix_world = m`: the properties through BKE_object_apply_mat4 (the object is a root here), the world

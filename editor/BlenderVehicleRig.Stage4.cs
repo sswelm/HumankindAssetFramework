@@ -49,6 +49,7 @@ public static partial class BlenderVehicleRig
         public double RecoilSlide, RecoilRadius;
         public Dictionary<int, float[]> EvaluatedPose;
         public List<float[]> WheelAxes = new List<float[]>();
+        public List<TrackInfo> Tracks = new List<TrackInfo>();   // the live treads, in track_infos' order
     }
 
     const int MaxClipFrames = 100000;
@@ -171,7 +172,8 @@ public static partial class BlenderVehicleRig
                 float v = BlenderFCurve.Evaluate(curves[k3], f, constant: true);
                 int id = st.BoneId[k3.bone];
                 if (assignedSince.Contains((k3.bone, k3.prop))) continue;
-                var values = k3.prop == "rotation_euler" ? (ad.PoseEuler.TryGetValue(id, out var pe) ? (float[])pe.Clone() : new float[3]) : (float[])ad.PoseProps[id][1].Clone();
+                var values = k3.prop == "rotation_euler" ? (ad.PoseEuler.TryGetValue(id, out var pe) ? (float[])pe.Clone() : new float[3])
+                           : k3.prop == "location" ? (float[])ad.PoseProps[id][0].Clone() : (float[])ad.PoseProps[id][1].Clone();
                 // animsys_write_orig_anim_rna writes only unequal values. For a zero, intervening frame_set evaluations
                 // matter: a constant -0 channel preserves an original +0, while a nonzero sample followed by -0 writes it.
                 // Replay only that ambiguity, after the last assignment/materialization; ordinary values need only the end.
@@ -195,7 +197,7 @@ public static partial class BlenderVehicleRig
                     }
                 }
                 values[k3.index] = v;
-                if (k3.prop == "rotation_euler") ad.PoseEuler[id] = values; else ad.PoseProps[id][1] = values;
+                if (k3.prop == "rotation_euler") ad.PoseEuler[id] = values; else if (k3.prop == "location") ad.PoseProps[id][0] = values; else ad.PoseProps[id][1] = values;
                 evaluatedAt[k3] = frameHistory.Count;
             }
         }
@@ -269,6 +271,11 @@ public static partial class BlenderVehicleRig
             if (!EvaluateObjects(s, s.FrameCurrent)) return;
         }
 
+        void SetLoc(string bone, float[] loc)
+        {
+            assignedSince.Add((bone, "location")); assignedAt[(bone, "location")] = frameHistory.Count;
+            ad.PoseProps[st.BoneId[bone]][0] = loc;
+        }
         // ---- ROWING, then Furl and the holds through Spin (vehicle_rig.py 2986-3177)
         float[] LocalAxis(string bone, float[] axis)
         {
@@ -384,8 +391,14 @@ public static partial class BlenderVehicleRig
         double ddRef = 0.0; bool firstM = true;
         foreach (var cl in clusters) { if (firstM || cl.m > ddRef) ddRef = cl.m; firstM = false; }   // max((cl["m"] ...), default=0.0)
         var carrier = new HashSet<int>(); var idler = new HashSet<int>();
+        // the live treads' wrap carriers: each tread's frontmost and rearmost cluster, the rear one the idler
+        foreach (var tr in st.Tracks)
+        {
+            if (tr.Front >= 0) carrier.Add(tr.Front);
+            if (tr.Rear >= 0) { carrier.Add(tr.Rear); idler.Add(tr.Rear); }
+        }
         bool hadStatic = a.TracksStatic && a.Names.TryGetValue("tracks", out var tl) && tl.Count > 0;
-        if (hadStatic && clusters.Count > 0)
+        if (hadStatic && carrier.Count == 0 && clusters.Count > 0)
         {
             foreach (bool sidePos in new[] { true, false })
             {
@@ -497,6 +510,65 @@ public static partial class BlenderVehicleRig
             s.Logs4.Add("VEHICLE rolling-contact: " + airborne.Count + " wheel(s) above the ground band keep the dialed " + BlenderRigAnim.PyFixed(degrees, 0) + " deg (propellers/fans do not roll): "
                         + string.Join(", ", airborne.OrderBy(b => b, StringComparer.Ordinal)));
             Note(s, "an airborne wheel");
+        }
+
+        // ---- the TREAD conveyor (d6, vehicle_rig.py 3573-3701): the wrap bones turn by the advance over the band's radius, the
+        // carriers slide by the advance along their region's flow, in the bone's own frame; two keys each, 0 and the clip's end
+        if (st.Tracks.Count > 0 && clusters.Count > 0)
+        {
+            double driveD = PyMaxOf(clusters.Select(c => c.m)), convDeg = degrees / 3.0;
+            double advance = Math.PI * driveD * (Math.Abs(convDeg) / 360.0);
+            float flow = degrees >= 0 ? 1f : -1f; double sign = degrees >= 0 ? 1.0 : -1.0;
+            for (int ti = 0; ti < st.Tracks.Count; ti++)
+            {
+                var t = st.Tracks[ti];
+                double pMeas = t.Pitch, adv = 0.04 <= pMeas && pMeas <= 0.3 ? pMeas : advance;
+                s.Logs4.Add("VEHICLE tread '" + t.Part + "' advance: " + BlenderRigAnim.PyFixed(adv, 3) + "/loop ("
+                            + (adv == pMeas ? "= measured link pitch" : "quantum fallback, pitch " + BlenderRigAnim.PyFixed(pMeas, 3) + " rejected") + ")");
+                var wrapCl = new[] { t.Front, t.Rear, t.RoadF, t.RoadR };
+                for (int k = 0; k < 4; k++)
+                {
+                    string wbn = t.Bones[5 + k];
+                    double R = t.BandRot.TryGetValue(wbn, out var br) ? br : 0.0;
+                    if (R <= 1e-6) { double dOwn = wrapCl[k] >= 0 && clusters[wrapCl[k]].m > 1e-6 ? clusters[wrapCl[k]].m : driveD; R = dOwn * 0.5; }
+                    double theta = (adv / R) * (180.0 / Math.PI) * sign;
+                    SetPose(wbn, "XYZ", null, null);
+                    FrameSet(0);
+                    SetPose(wbn, "XYZ", new float[3], null);
+                    Insert(wbn, "rotation_euler", new float[3], 0);
+                    FrameSet(clip);
+                    var we = new[] { 0f, (float)((theta * spinRepeats) * (Math.PI / 180.0)), 0f };
+                    SetPose(wbn, "XYZ", we, null);
+                    Insert(wbn, "rotation_euler", we, clip);
+                }
+                var moves = new (string bone, float[] dir)[]
+                {
+                    (t.Bones[0], Scale(new[] { -1f, 0f, 0f }, flow)), (t.Bones[1], Scale(new[] { 1f, 0f, 0f }, flow)),
+                    (t.Bones[2], Scale(t.FDir, flow)), (t.Bones[3], Scale(t.RDir, flow)), (t.Bones[4], Scale(t.RtDir, flow)),
+                };
+                for (int k = 0; k < moves.Length; k++)
+                {
+                    var (bname, dir) = moves[k];
+                    var unit = LocalAxis(bname, dir); if (unit == null) { s.Fallback = "stage 4: a tread carrier bone with no inverse is not modelled yet"; return; }
+                    var local = Scale(unit, (float)adv);
+                    // rotation_mode = 'XYZ' on a bone still in QUATERNION converts its rotation (BKE_rotMode_change_values): the identity
+                    // quaternion's XYZ Euler is (0, -0, 0) - atan2f(-m[0][2], cy) of a zero
+                    bool wasQuat = !ad.RotMode.TryGetValue(st.BoneId[bname], out var oldMode) || oldMode == "QUATERNION";
+                    SetPose(bname, "XYZ", null, null);
+                    if (wasQuat) ad.PoseEuler[st.BoneId[bname]] = new[] { 0f, -0f, 0f };
+                    FrameSet(0);
+                    SetLoc(bname, new float[3]);
+                    Insert(bname, "location", new float[3], 0);
+                    FrameSet(clip);
+                    if (ti == st.Tracks.Count - 1 && k == moves.Length - 1) { EvaluatePose(clip); st.EvaluatedPose = VehiclePoseMats(ad); }
+                    var end = Scale(local, (float)spinRepeats);
+                    SetLoc(bname, end);
+                    Insert(bname, "location", end, clip);
+                }
+            }
+            s.Logs4.Add("VEHICLE tread conveyor v5: " + st.Tracks.Count + " tread(s), tread quantum " + BlenderRigAnim.PyFixed(convDeg, 1) + " deg (wheels " + BlenderRigAnim.PyFixed(degrees, 1)
+                        + "), advance " + BlenderRigAnim.PyFixed(advance, 3) + "/loop (drive d=" + BlenderRigAnim.PyFixed(driveD, 2) + "): wraps ride DEDICATED wrap bones, ramps slide their slope, straights shuttle");
+            Note(s, "the tread conveyor keyed on its carrier and wrap bones");
         }
 
         if (anyFrameSet && !EvaluateObjects(s, s.FrameCurrent)) return;

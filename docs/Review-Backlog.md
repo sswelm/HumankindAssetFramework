@@ -519,7 +519,11 @@ source-reading review found CPython 3.12+'s sum() of floats COMPENSATED (Neumaie
 sum (the oar metrics, the PC1 rows, the pivots mean, and d4's least-spread rotor axle), pinned by Blender-measured unit cases. An
 infinite blade roll (NaN geometry; Blender then dies in stage 4) is left to Blender by name: a NaN's sign bit follows each
 compiler's operand order. Next: (d) part d6, the tread rig.
-(d) part d6, the TREAD RIG - DEFERRED 2026-10-17 (step (e) taken first). Measured before starting: no comparable job reaches it -
+(d) part d6, the TREAD RIG - FIRST PART DONE 2026-11-16 (the subdivision, polygon meshes through the rows and the export, the
+carrier-skinned conveyor: three fixtures equal to Blender through the export; `docs/Testing.md`). OPEN: the link cells (a tread
+whose link pitch is found - the Bradley), the hybrid link/shuttle bones and their second edit-mode session, the rigid links, and
+the three stage 5 passes on a polygon tread (inside-out fix, double-sided shell, the Two-sided scene) with the exporter's
+validate() of polygons. The history: DEFERRED 2026-10-17 (step (e) taken first). Measured before starting: no comparable job reaches it -
 the Bradley, the one recipe with live tracks, is an FBX source (the C# reads none: left at stage 1 by name), the Jagdpanzer's
 tracks are static -, so it would turn no recipe equal; and it is structural, not one more branch: the tread's
 `bmesh.ops.subdivide_edges(cuts=1, use_grid_fill=True)` (bmo_subdivide.cc, 1,435 lines) leaves N-GONS where a face has one or

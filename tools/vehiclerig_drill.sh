@@ -43,7 +43,7 @@ if [ "$rc" -ne 0 ] || [ ! -s "$TMPD/VehicleRigJobs.exe" ]; then echo "$OUT" | gr
 # the drill with the stage models (editor/BlenderVehicleRig.cs) and the editor files they are built from - the rig_anim drill's list
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/vehiclerig.exe" \
   -r:"$WAPI/mscorlib.dll" -r:"$WAPI/System.dll" -r:"$WAPI/System.Core.dll" -r:"$WAPI/Facades/netstandard.dll" -r:"$WAPI/System.Numerics.dll" -r:"$WTMP/Newtonsoft.Json.dll" \
-  "$WROOT/tools/vehiclerig-drill/VehicleRigDrill.cs" "$WROOT/tools/deploy-drill/GlbRowsCompare.cs" "$WROOT/tools/deploy-drill/MaterialDrill.cs" "$E/BlenderVehicleRig.cs" "$E/FbxDocument.cs" "$E/FbxScene.cs" "$E/FbxAnimation.cs" "$E/FbxTriangulate.cs" "$E/FbxImport.cs" "$E/FbxModel.cs" "$E/FbxMaterials.cs" "$E/PngCodec.cs" "$E/FbxArmature.cs" "$E/FbxActions.cs" "$E/HafModelLoader.cs" "$E/VehicleProbe.PolygonNormals.cs" "$E/BlenderVehicleRig.Stage2.cs" "$E/BlenderVehicleRig.Stage3.cs" "$E/BlenderVehicleRig.Stage4.cs" "$E/BlenderVehicleRig.Stage5.cs" "$E/BlenderVehicleRig.TwoSided.cs" "$E/BlenderBvh.cs" "$E/BlenderSubdivide.cs" "$E/BlenderVehicleRigInProcess.cs" "$E/BlenderNumpy.cs" "$E/BlenderWeld.cs" "$E/BlenderDissolve.cs" "$E/BlenderPolyfill.cs" "$E/VehicleRigArgs.cs" "$E/EditorRules.cs" \
+  "$WROOT/tools/vehiclerig-drill/VehicleRigDrill.cs" "$WROOT/tools/deploy-drill/GlbRowsCompare.cs" "$WROOT/tools/deploy-drill/MaterialDrill.cs" "$E/BlenderVehicleRig.cs" "$E/FbxDocument.cs" "$E/FbxScene.cs" "$E/FbxAnimation.cs" "$E/FbxTriangulate.cs" "$E/FbxImport.cs" "$E/FbxModel.cs" "$E/FbxMaterials.cs" "$E/PngCodec.cs" "$E/FbxArmature.cs" "$E/FbxActions.cs" "$E/HafModelLoader.cs" "$E/VehicleProbe.PolygonNormals.cs" "$E/BlenderVehicleRig.Stage2.cs" "$E/BlenderVehicleRig.Stage3.cs" "$E/BlenderVehicleRig.Stage4.cs" "$E/BlenderVehicleRig.Stage5.cs" "$E/BlenderVehicleRig.TwoSided.cs" "$E/BlenderVehicleRig.Tread.cs" "$E/BlenderBvh.cs" "$E/BlenderSubdivide.cs" "$E/BlenderVehicleRigInProcess.cs" "$E/BlenderNumpy.cs" "$E/BlenderWeld.cs" "$E/BlenderDissolve.cs" "$E/BlenderPolyfill.cs" "$E/VehicleRigArgs.cs" "$E/EditorRules.cs" \
   "$E/BlenderRigAnim.cs" "$E/BlenderRigExport.cs" "$E/BlenderRigAnimInProcess.cs" "$E/BlenderDeploy.cs" "$E/BlenderDeployExport.cs" "$E/BlenderMaterialExport.cs" "$E/BlenderChannelExport.cs" "$E/BlenderGlbWriter.cs" "$E/PyFloatRepr.cs" "$E/BlenderFCurve.cs" \
   "$E/BlenderExport.cs" "$E/BlenderReduce.cs" "$E/BlenderDecimate.cs" "$E/BlenderExportTree.cs" \
   "$E/HafModel.cs" "$E/GlbReader.cs" "$E/HafTransforms.cs" "$E/BlenderNames.cs" "$E/BlenderPosedState.cs" "$E/BlenderTrig.cs" "$E/BlenderEigen.cs" "$E/BlenderMesh.cs" "$E/BMesh.cs" "$E/BlenderColor.cs" \
@@ -163,8 +163,8 @@ if [ "$brc" -ne 0 ] || [ "$n_b" -ne "$n_jobs" ]; then
   cat "$TMPD"/blender_raw_*.txt | grep -E "^FAIL|Traceback|Error" | head -8
   echo "FAIL — vehicle_rig drill: Blender dumped $n_b of $n_jobs jobs (exit $brc)"; exit 1
 fi
-# THE TREAD FALLBACK IS THE SAME IN TWO BLENDER RUNS (2026-11-06, the d6 oracle): the carrier-blend fallback the C# leaves by name
-# (fx_r_tracks_fallback: live tracks, an 8-vertex belt with no link pitch) made its vertex groups from a SET, in Python's randomized
+# THE TREAD FALLBACK IS THE SAME IN TWO BLENDER RUNS (2026-11-06, the d6 oracle): the carrier-blend fallback (modelled in C# since
+# 2026-11-16; fx_r_tracks_fallback: live tracks, an 8-vertex belt with no link pitch) made its vertex groups from a SET, in Python's randomized
 # string-hash order - the group indices, and every vertex's group order, changed from run to run (Blender ignores PYTHONHASHSEED).
 # The fixture is dumped once more in a Blender run of its own and the two dumps held equal row for row, the WORK row, the seal
 # and the work folder's name in the paths aside. A record made in another run replays here as every other dump does.
@@ -172,7 +172,8 @@ n_fb2=0
 for key in fx_r_tracks_fallback fx_r_tracks_recoil; do
   [ "$(grep -cE "^JOB	$key	" "$TMPD/jobs.txt")" -eq 1 ] || { echo "FAIL — vehicle_rig drill: required tread fixture $key missing or duplicated"; exit 1; }
 done
-# The C# port leaves live tracks before comparing actions. Measure the exported skin and joint independently;
+# Blender's own export measured directly, beside the stage comparison (written while the C# port left live tracks; kept as a
+# second, independent reading). Measure the exported skin and joint independently;
 # the old-centre/no-kick controls must export complete files and fail the movement assertion, never just crash.
 grep -hE "^JOB	(fx_r_tracks_fallback|fx_r_tracks_recoil)	" "$TMPD"/shard_[0-9]*.txt > "$TMPD/shard_fb2.txt"
 mkdir -p "$TMPD/work_fb2"
@@ -222,6 +223,11 @@ n_export=$(echo "$X5" | awk '{print $3}'); n_bytes=$(echo "$X5" | awk '{print $7
 [ -n "$n_export" ] && [ "$n_export" -gt 0 ] && [ "$n_export" = "$n_inprocess" ] || { echo "FAIL — not every supported export was written by the Generate wrapper ($X5)"; exit 1; }
 # every compared export is the COMPLETE file, byte for byte (review of #187: the row comparison passed a GLB whose bytes were never equal)
 [ "$n_bytes" = "$n_export" ] || { echo "FAIL — vehicle_rig drill: $n_bytes of $n_export exported GLBs are byte-identical to Blender's ($X5)"; exit 1; }
+# THE TREAD FIXTURES ARE COMPARED, NOT LEFT (d6, 2026-11-16): the carrier-skinned conveyor is modelled (BlenderVehicleRig.Tread.cs), so
+# each of its three fixtures must come out equal through the export - a leave here, however well named, is coverage lost.
+for key in fx_r_tracks_fallback fx_r_tracks_recoil fx_r_tracks_roads; do
+  grep -qE "^EXPORT $key: equal - .* byte-identical GLB" "$TMPD/s1.txt" || { grep -E "^(FAIL|STAGE[0-9]) $key" "$TMPD/s1.txt" | head -3 | cut -c1-300; echo "FAIL — vehicle_rig drill: the tread fixture $key is not equal to Blender through the export (d6)"; exit 1; }
+done
 # Negative guards on the REAL dump: a missing or inconsistent record must never pass as evidence.
 VEHICLERIG_STAGES_OUT="$WTMP/s1.txt" python "$ROOT/tools/vehiclerig-drill/missing_vehiclerig.py" "$WTMP/missing" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/tampers_raw.txt" || { echo "FAIL — could not construct the damaged dumps"; exit 1; }
 tr -d '\r' < "$TMPD/tampers_raw.txt" > "$TMPD/tampers.txt"
