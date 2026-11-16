@@ -994,6 +994,21 @@ else:
     bpy.ops.object.select_all(action='DESELECT'); joined.select_set(True); bpy.context.view_layer.objects.active = joined
     bpy.ops.object.modifier_apply(modifier=mdec.name)
     print("RIGANIM decimate %d -> %d tris (ratio %.3f)" % (total, sum(len(p.vertices) - 2 for p in me.polygons), ratio))
+    # FOLDED FACES (2026-11-16, the Zeppelin). The collapse can squash a small closed shape flat (a tetrahedron on a strut):
+    # what is left is two triangles on the SAME three vertices, back to back. Blender's FBX export keeps both, its glTF
+    # export keeps one, so the two rig routes differed by those triangles and the rig-route row failed. A second face on
+    # three vertices an earlier face already holds adds no shape: it is removed here, the earlier one stays (faces only:
+    # its edges and vertices are the earlier face's too). A mesh without such a pair is not touched at all.
+    _seen = set(); _fold = []
+    for _p in me.polygons:
+        _k = tuple(sorted(_p.vertices))
+        if _k in _seen: _fold.append(_p.index)
+        else: _seen.add(_k)
+    if _fold:
+        _fb = bmesh.new(); _fb.from_mesh(me); _fb.faces.ensure_lookup_table()
+        bmesh.ops.delete(_fb, geom=[_fb.faces[_i] for _i in _fold], context='FACES_ONLY')
+        _fb.to_mesh(me); _fb.free()
+        print("RIGANIM folded faces: %d removed after the decimate (a second face on an earlier face's vertices)" % len(_fold))
 
 # GUARANTEE the skin binding: whichever object won the join, the joined mesh keeps every source mesh's vertex groups
 # (weights) regardless — so if the join dropped the armature modifier, re-adding one bound to `arm` fully restores

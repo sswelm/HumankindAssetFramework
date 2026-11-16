@@ -287,7 +287,9 @@ their settings and work together**:
   could be 128 MB. DXT1 sizes: 2048 ≈ 2 MB, 1024 ≈ 0.5 MB, 512 ≈ 0.1 MB, 256 ≈ 32 KB.) Re-bake to apply.
 - **Reduce to ~tris (0 = off)** — quadric-decimate a heavy model to about this many triangles (via Blender) to fit the
   engine's shared mesh buffer. The value is a **triangle ceiling, not a vertex count or quota**: a model already under it
-  passes through untouched, and the imported vertex count may be higher because UV/material seams split vertices. There
+  passes through untouched, and the imported vertex count may be higher because UV/material seams split vertices. The
+  result can land a few triangles under the target: when the reduction squashes a small shape flat it leaves two
+  triangles back to back on the same three vertices, and the second of each such pair is removed. There
   is no fixed per-model engine ceiling; the current pawn layer is a shared ~1,000,000-vertex pool for all loaded model
   types. The 24,000 default is a roster-friendly starting point, not a correctness requirement. Use the F8 mesh-budget
   readout and the bake's `verts=`/`tris=` lines to make the final trade-off. No Blender? Use **Weld & simplify** instead
