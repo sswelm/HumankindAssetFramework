@@ -1001,6 +1001,9 @@ else:
     # its edges and vertices are the earlier face's too). A mesh without such a pair is not touched at all.
     _seen = set(); _fold = []
     for _p in me.polygons:
+        # A small mesh can pass through the modifier without triangulation. Quads/ngons with the same vertex set can
+        # have different edge loops and describe different surfaces; only triangles have this order-independent key.
+        if len(_p.vertices) != 3: continue
         _k = tuple(sorted(_p.vertices))
         if _k in _seen: _fold.append(_p.index)
         else: _seen.add(_k)

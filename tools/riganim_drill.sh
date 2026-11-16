@@ -64,6 +64,15 @@ TMPD="$(mktemp -d "${TMPDIR:-${TEMP:-/tmp}}/haf-riganim.XXXXXXXXXX")"; trap 'rm 
 cp "$NEWTONSOFT" "$TMPD/Newtonsoft.Json.dll"
 cp "$ROOT/editor/Plugins/x86_64/hafkernels.dll" "$TMPD/hafkernels.dll"   # the native kernels beside the exe (HafNativeKernels.cs); absent, the managed twins run
 WAPI="$(cygpath -m "$API" 2>/dev/null || echo "$API")"; WTMP="$(cygpath -m "$TMPD" 2>/dev/null || echo "$TMPD")"
+# Direct FBX input can retain non-triangular faces when the modifier leaves a small mesh alone.
+# Exercise the production Reduce block itself: distinct polygon boundaries must survive the triangle cleanup.
+oracle_blender folded_faces "$TMPD/folded_faces_raw.txt" --key "$ROOT/tools/riganim-drill/blender_folded_faces_check.py" "$SCRIPT" -- --background --factory-startup --python-exit-code 1 --python "$(cygpath -m "$ROOT/tools/riganim-drill/blender_folded_faces_check.py")" -- "$(cygpath -m "$SCRIPT")"
+foldedrc=$?; oracle_check
+tr -d '\r' < "$TMPD/folded_faces_raw.txt" > "$TMPD/folded_faces.txt"
+if [ "$foldedrc" -ne 0 ] || ! grep -q '^FOLDED PASS: 11 cases;' "$TMPD/folded_faces.txt"; then
+  tail -25 "$TMPD/folded_faces.txt"; echo "FAIL — rig_anim folded-face regression checks"; exit 1
+fi
+grep '^FOLDED PASS:' "$TMPD/folded_faces.txt"
 E="$WROOT/editor"
 # the drill and the stage 1 model (BlenderRigAnim.cs) with the editor files it is built from - the deploy drill's list
 OUT=$(dotnet "$CSC" -nologo -noconfig -nostdlib -optimize+ -out:"$WTMP/riganim.exe" \
