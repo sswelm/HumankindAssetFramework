@@ -129,6 +129,7 @@ public static partial class BlenderVehicleRig
         { s.Fallback = "stage 4: the rowing stroke of non-finite angles is not modelled yet"; return; }
         if ((st.SailClip && a.SailFold && a.SailFoldFrames > MaxClipFrames) || (st.FlagClip && a.FlagFoldOn && a.FlagFoldFrames > MaxClipFrames))
         { s.Fallback = "stage 4: the Furl clip of more than 100,000 frames is not modelled yet"; return; }
+        if (st.Tracks.Any(t => t.Job != null)) { s.Fallback = "stage 4: the tread's link-bone conveyor (d6) is not modelled yet"; return; }
         var ad = s.Armature; var arm = st.Arm;
         st.EvaluatedPose = VehiclePoseMats(ad);
         // the shared clip

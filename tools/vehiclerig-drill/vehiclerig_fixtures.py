@@ -386,7 +386,7 @@ def tracked_roads(out, models):
 def rigid_tread_fixtures(out, models):
     """A pitched, closed belt (not the eight-vertex carrier fallback), with and without auxiliary roles."""
     for key, trails in (("fx_links", 0), ("fx_links_dense", 70), ("fx_links_tight", 108),
-                        ("fx_links_full", 120), ("fx_links_fallback", 108)):
+                        ("fx_links_full", 120), ("fx_links_fallback", 108), ("fx_r_tracks_hybrid", 0)):
         r = Rig(); ma = r.material("Steel")
         r.node("Hull", mesh=r.mesh("Hull", at=(-2, .7, -.8), material=ma), scale=[4, 1, 1.6])
         parts = [("Hull", 0, {})]
@@ -430,6 +430,11 @@ def rigid_tread_fixtures(out, models):
             name = "Trail%03d" % i
             r.node(name, mesh=r.mesh(name, size=.02, material=ma), translation=[0, 1 + i * .03, 0])
             parts.append((name, 10, {}))
+        if key == "fx_r_tracks_hybrid":
+            # the same pitched belts on the CONVEYOR (no treadmode): link bones on the wraps, shuttle bones on the straights -
+            # a job of the stage comparison (recipes), not of the rigid-links check
+            recipe(out, key, r.write(models, key), parts, frames=4)
+            continue
         recipe(out, key, r.write(models, key), parts, sub="recipes_rigid", treadMode=1, frames=4)
 
 

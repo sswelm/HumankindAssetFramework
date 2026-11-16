@@ -26,6 +26,20 @@ public static partial class BlenderVehicleRig
         public float[] FDir = { -1f, 0f, 0f }, RDir = { -1f, 0f, 0f }, RtDir = { 1f, 0f, 0f };   // _tread_dirs
         public Dictionary<string, double> BandRot = new Dictionary<string, double>(StringComparer.Ordinal);   // _band_rot by wrap bone
         public bool Skinned;                        // the skinning ran (a part the scene no longer holds never does)
+        public TreadJob Job;                        // the link job, when the tread's link pitch was found (_link_jobs)
+    }
+
+    /// <summary>_link_jobs' entry: the measured ring path and the cells cut along it.</summary>
+    public sealed class TreadJob
+    {
+        public string Prefix;                       // the carrier names' stem: Track_00_L_
+        public int NC; public double CellL, L, Off; // the cells, a cell's length, the loop's length, the cut phase
+        public double[] S; public float[][] Pts;    // the path: 512 samples (x, 0, z) and their running length (513 entries)
+        public List<int> Cells = new List<int>();   // the cells with a bone of their own (the wrap arcs and their margin)
+        public List<List<int>> Runs = new List<List<int>>();   // the straight runs: one shuttle bone each
+        public int[] CellOf; public double[] SRest; // per vertex its cell; per cell its place along the path at rest
+        public double AdvCells;                     // the advance per loop, in cells
+        public string[] Aux;                        // the nine carrier bones, removed for the link bones
     }
 
     /// <summary>A Python dict of group -> weight: insertion order kept, a repeated key overwrites in place.</summary>
@@ -41,7 +55,8 @@ public static partial class BlenderVehicleRig
 
     /// <summary>The skinning of one tread part. Returns null, or why the part is left to Blender. The part's mesh is replaced
     /// by the subdivided one, its groups and weights set; t receives the pitch, the flow directions and the band radii.</summary>
-    static string TreadSkin(BlenderRigAnim.Stage1 s, BlenderRigAnim.SceneObject o, TrackInfo t, IList<(double m, float[] c)> clusters, Args a)
+    static string TreadSkin(BlenderRigAnim.Stage1 s, BlenderRigAnim.SceneObject o, TrackInfo t, IList<(double m, float[] c)> clusters, Args a, List<string> log,
+                            int clusterBones, bool turrets, bool guns, int trackCount)
     {
         var d0 = o.Mesh; int nv0 = d0.Vertices;
         string botb = t.Bones[0], topb = t.Bones[1], rampfb = t.Bones[2], ramprb = t.Bones[3], ramprtb = t.Bones[4];
@@ -79,7 +94,7 @@ public static partial class BlenderVehicleRig
             }
         }
         t.Pitch = pitch; t.Fund = fund;
-        s.Logs3.Add("VEHICLE tread '" + o.Name + "' link pitch: " + Py(pitch, 3) + ", physical link " + Py(fund, 3) + " (from " + xs.Count + " bottom-run verts)");
+        log.Add("VEHICLE tread '" + o.Name + "' link pitch: " + Py(pitch, 3) + ", physical link " + Py(fund, 3) + " (from " + xs.Count + " bottom-run verts)");
 
         // ---- the subdivision
         var wrapRs = new List<double>();
@@ -102,7 +117,7 @@ public static partial class BlenderVehicleRig
         }
         var d = ToMeshDataPolygons(bm, layers, d0);
         int nv = d.Vertices;
-        s.Logs3.Add("VEHICLE tread '" + o.Name + "' subdivided: " + nv0 + " -> " + nv + " verts (edge target " + Py(thr, 3) + ")");
+        log.Add("VEHICLE tread '" + o.Name + "' subdivided: " + nv0 + " -> " + nv + " verts (edge target " + Py(thr, 3) + ")");
         Note(s, "a tread subdivided for its wrap arcs");
         if (d.PolyStart != null) Note(s, "a tread mesh of polygons");
 
@@ -173,7 +188,7 @@ public static partial class BlenderVehicleRig
         var (rrC, rrR, fullGr, fadeGr, rotGr) = UnderBand(roadR);
         double advEst = 0.04 <= pitch && pitch <= 0.3 ? pitch : Math.PI * PyMaxOf(clusters.Select(c => c.m)) * (Math.Abs(a.Degrees) / 3.0) / 360.0;
         t.BandRot[wrapfb] = rotF; t.BandRot[wraprb] = rotR; t.BandRot[wrapgfb] = rotGf; t.BandRot[wrapgrb] = rotGr;
-        s.Logs3.Add("VEHICLE tread '" + o.Name + "' wrap bands: sprocket " + Py(fullF, 2) + "/" + Py(fadeF, 2) + " (r=" + Py(sprR, 2) + "), idler " + Py(fullR, 2) + "/" + Py(fadeR, 2) + " (r=" + Py(idlR, 2)
+        log.Add("VEHICLE tread '" + o.Name + "' wrap bands: sprocket " + Py(fullF, 2) + "/" + Py(fadeF, 2) + " (r=" + Py(sprR, 2) + "), idler " + Py(fullR, 2) + "/" + Py(fadeR, 2) + " (r=" + Py(idlR, 2)
                     + "), roadF " + Py(fullGf, 2) + "/" + Py(fadeGf, 2) + " (r=" + Py(rfR, 2) + "), roadR " + Py(fullGr, 2) + "/" + Py(fadeGr, 2) + " (r=" + Py(rrR, 2) + ")");
 
         string ShuttleRegion(float[] p)
@@ -258,7 +273,28 @@ public static partial class BlenderVehicleRig
         }
         wmap = smoothed;
 
-        if (fund > 0.03) return "the tread's link-cell rig (d6: a link pitch was found) is not modelled yet";
+        if (fund > 0.03)
+        {
+            var why = TreadLinkCells(o, t, clusters, a, log, d, fund, clusterBones, turrets, guns, trackCount, highCls,
+                                     hasF, hasR, sprC, sprR, idlC, idlR, rotF, rotR, rrC, rrR, rotGr, rfC, rfR, rotGf);
+            if (why != null) return why;
+            // the carrier groups stay empty in link mode and are dropped; each vertex goes whole to its cell's bone - the run's
+            // shuttle or the cell's own link -, the groups made in the order their first vertex comes
+            var job = t.Job; var runOf = new Dictionary<int, int>();
+            for (int ri = 0; ri < job.Runs.Count; ri++) foreach (int ci in job.Runs[ri]) runOf[ci] = ri;
+            d.Groups = new List<string>(); var linkIx = new Dictionary<string, int>(StringComparer.Ordinal);
+            d.DefNr = new List<int>[nv]; d.DefWeight = new List<float>[nv];
+            for (int v = 0; v < nv; v++)
+            {
+                int ci = job.CellOf[v];
+                string bn = runOf.TryGetValue(ci, out int ri) ? job.Prefix + "S" + ri.ToString("00", System.Globalization.CultureInfo.InvariantCulture) : job.Prefix + "L" + ci.ToString("00", System.Globalization.CultureInfo.InvariantCulture);
+                if (!linkIx.TryGetValue(bn, out int g)) { linkIx[bn] = g = d.Groups.Count; d.Groups.Add(bn); }
+                d.DefNr[v] = new List<int> { g }; d.DefWeight[v] = new List<float> { 1f };
+            }
+            Note(s, "a tread cut into link cells: link bones on the wraps, shuttle bones on the runs");
+            o.Mesh = d; t.Skinned = true;
+            return null;
+        }
 
         // ---- the groups: one per carrier bone by name; a vertex's weights in its dict's order
         d.Groups = groupNames; var groupIx = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -275,9 +311,197 @@ public static partial class BlenderVehicleRig
                 stats[g] = (stats.TryGetValue(g, out int n) ? n : 0) + 1;
             }
         }
-        s.Logs3.Add("VEHICLE tread '" + o.Name + "' skinned (carrier blend fallback): " + string.Join(", ", stats.Select(kv => kv.Key + "=" + kv.Value)));
+        log.Add("VEHICLE tread '" + o.Name + "' skinned (carrier blend fallback): " + string.Join(", ", stats.Select(kv => kv.Key + "=" + kv.Value)));
         Note(s, "a tread skinned on its carrier bones (no link pitch)");
         o.Mesh = d; t.Skinned = true;
+        return null;
+    }
+    static double PyMod(double a, double b) { double r = a % b; if (r != 0.0) { if ((b < 0) != (r < 0)) r += b; } else r = 0.0; return r; }   // Python's float %: the divisor's sign
+    static int BisectRight(double[] a, double x) { int lo = 0, hi = a.Length; while (lo < hi) { int mid = (lo + hi) / 2; if (x < a[mid]) hi = mid; else lo = mid + 1; } return lo; }
+    /// <summary>Vector.lerp(other, fac): interp_vn_vn(other, self, 1.0f - fac) - t = 1.0f - fac, s = 1.0f - t, each component s * other + t * self.</summary>
+    static float[] VecLerp(float[] self, float[] other, double fac)
+    {
+        float t = (float)(1.0f - (float)fac), sw = (float)(1.0f - t); var r = new float[3];
+        for (int i = 0; i < 3; i++) r[i] = (float)((float)(sw * other[i]) + (float)(t * self[i]));
+        return r;
+    }
+
+    /// <summary>_path_eval(job, s): the point on the ring path at s and the path's direction there.</summary>
+    internal static void PathEval(TreadJob job, double sAt, out float[] p, out float[] dir)
+    {
+        int n = job.Pts.Length;
+        sAt = PyMod(sAt, job.L);
+        int b = Math.Min(n - 1, Math.Max(0, BisectRight(job.S, sAt) - 1)), b2 = (b + 1) % n;
+        double seg = job.S[b + 1] - job.S[b], f = seg > 1e-9 ? (sAt - job.S[b]) / seg : 0.0;
+        p = VecLerp(job.Pts[b], job.Pts[b2], f);
+        var tv = Sub(job.Pts[b2], job.Pts[b]);
+        if (VecLength(tv) < 1e-9) tv = Sub(job.Pts[(b2 + 1) % n], job.Pts[b]);
+        dir = Normalized(tv);
+    }
+
+    /// <summary>The link cells of a tread whose link pitch was found (vehicle_rig.py 2625-2970, the conveyor: no rigid links): the
+    /// belt path round the wheels' band circles (tangent to tangent, arcs sampled every 0.02), resampled to 512 points, pulled onto
+    /// the tread's own centre line (the vertices' mean per sample, smoothed over one link each side); the loop cut into cells at
+    /// the phase that crosses the fewest edges; the cells on a wrap arc (and the advance's margin around it) each get a bone, the
+    /// straight runs one shuttle bone. Python doubles; the path's points are float32 Vectors.</summary>
+    static string TreadLinkCells(BlenderRigAnim.SceneObject o, TrackInfo t, IList<(double m, float[] c)> clusters, Args a, List<string> log, BlenderRigAnim.MeshData d, double fund,
+                                 int clusterBones, bool turrets, bool guns, int trackCount, List<int> highCls, bool hasF, bool hasR,
+                                 float[] sprC, double sprR, float[] idlC, double idlR, double rotF, double rotR, float[] rrC, double rrR, double rotGr, float[] rfC, double rfR, double rotGf)
+    {
+        int nv = d.Vertices;
+        double sto = PyMax2(0.03, idlR > 0.0 && rotR > idlR ? rotR - idlR : 0.08);
+        var circ = new List<(double x, double z, double r)>();
+        if (hasF && rotF > 0.02) circ.Add((sprC[0], sprC[2], rotF));
+        foreach (int k in highCls.Select((k, i) => (k, i)).OrderBy(q => -(double)clusters[q.k].c[0]).ThenBy(q => q.i).Select(q => q.k))   // the top rollers, front to rear (a stable sort)
+            circ.Add((clusters[k].c[0], clusters[k].c[2], clusters[k].m * 0.5 + sto));
+        if (hasR && rotR > 0.02) circ.Add((idlC[0], idlC[2], rotR));
+        if (rrR > 0.0 && rotGr > 0.02) circ.Add((rrC[0], rrC[2], rotGr));
+        if (rfR > 0.0 && rotGf > 0.02) circ.Add((rfC[0], rfC[2], rotGf));
+        int ncr = circ.Count;
+        if (ncr < 2) return "the tread's link-cell rig on fewer than two band circles (d6) is not modelled yet";
+        var norms = new (double x, double z)[ncr];
+        for (int i = 0; i < ncr; i++)
+        {
+            var (x1, z1, r1) = circ[i]; var (x2, z2, r2) = circ[(i + 1) % ncr];
+            double dxb = x2 - x1, dzb = z2 - z1, db = PyHypot(dxb, dzb); if (db == 0.0) db = 1e-9;
+            double exb = dxb / db, ezb = dzb / db;
+            double cpb = PyMax2(-1.0, PyMin2(1.0, (r1 - r2) / db)), spb = Math.Sqrt(1.0 - cpb * cpb);
+            norms[i] = (exb * cpb + ezb * spb, ezb * cpb - exb * spb);
+        }
+        var raw = new List<float[]>(); var cum = new List<double> { 0.0 }; var arcRaw = new List<(double a, double b)>();
+        void RawAdd(float[] p) { if (raw.Count > 0) cum.Add(cum[cum.Count - 1] + VecLength(Sub(p, raw[raw.Count - 1]))); raw.Add(p); }
+        for (int i = 0; i < ncr; i++)
+        {
+            var (xc, zc, rc2) = circ[i]; var na = norms[(i - 1 + ncr) % ncr]; var nd = norms[i];
+            double a0b = BlenderTrig.Atan2(na.z, na.x), a1b = BlenderTrig.Atan2(nd.z, nd.x);
+            while (a1b < a0b - 1e-9) a1b += 2 * Math.PI;
+            double stepsD = (a1b - a0b) * rc2 / 0.02;
+            if (double.IsNaN(stepsD) || stepsD > 1e7) return "the tread's link-cell rig on a band circle without a finite arc (d6) is not modelled yet";
+            int steps = Math.Max(1, (int)stepsD);
+            double arcS0 = 0.0; bool started = false;
+            for (int k = 0; k < steps; k++)
+            {
+                double ab = a0b + (a1b - a0b) * k / steps;
+                RawAdd(new[] { (float)(xc + rc2 * BlenderTrig.Cos(ab)), 0f, (float)(zc + rc2 * BlenderTrig.Sin(ab)) });
+                if (!started) { arcS0 = cum[cum.Count - 1]; started = true; }   // after the first sample: the jump before it stays outside the arc
+            }
+            RawAdd(new[] { (float)(xc + rc2 * nd.x), 0f, (float)(zc + rc2 * nd.z) });
+            arcRaw.Add((arcS0, cum[cum.Count - 1]));
+        }
+        int nr = raw.Count; var SP = new double[nr + 1];
+        for (int k = 0; k < nr; k++) SP[k + 1] = SP[k] + VecLength(Sub(raw[(k + 1) % nr], raw[k]));
+        double LP = SP[nr];
+        const int M = 512;
+        var pts = new float[M][];
+        for (int m = 0; m < M; m++)
+        {
+            double sT = m / (double)M * LP;
+            int k = Math.Min(nr - 1, Math.Max(0, BisectRight(SP, sT) - 1));
+            double seg = SP[k + 1] - SP[k], fr = seg > 1e-9 ? (sT - SP[k]) / seg : 0.0;
+            pts[m] = VecLerp(raw[k], raw[(k + 1) % nr], fr);
+        }
+        double[] RunningLength(float[][] P) { var r = new double[M + 1]; for (int i = 0; i < M; i++) r[i + 1] = r[i] + VecLength(Sub(P[(i + 1) % M], P[i])); return r; }
+        double[] Project(float[][] P, double[] SS)
+        {
+            var res = new double[nv];
+            for (int v = 0; v < nv; v++)
+            {
+                double vx = d.Positions[3 * v], vz = d.Positions[3 * v + 2], bd = 1e18; int bmi = 0;
+                for (int m = 0; m < M; m++)
+                {
+                    double ax = P[m][0] - vx, az = P[m][2] - vz, dd = ax * ax + az * az;
+                    if (dd < bd) { bd = dd; bmi = m; }
+                }
+                res[v] = SS[bmi];
+            }
+            return res;
+        }
+        var S = RunningLength(pts); double L = S[M];
+        var sOf = Project(pts, S);
+        // the centre line: the vertices' mean per sample, a gap filled between its neighbours; the offset smoothed over one link each side
+        var cbx = new double[M]; var cbz = new double[M]; var cbc = new int[M];
+        for (int v = 0; v < nv; v++)
+        {
+            double binD = sOf[v] / L * M;
+            if (double.IsNaN(binD)) return "the tread's link-cell rig on a path without a length (d6) is not modelled yet";
+            int bi = Math.Min(M - 1, (int)binD);
+            cbx[bi] += d.Positions[3 * v]; cbz[bi] += d.Positions[3 * v + 2]; cbc[bi]++;
+        }
+        var ctr = new float[M][];
+        for (int i = 0; i < M; i++) if (cbc[i] != 0) ctr[i] = new[] { (float)(cbx[i] / cbc[i]), 0f, (float)(cbz[i] / cbc[i]) };
+        for (int i = 0; i < M; i++)
+        {
+            if (ctr[i] != null) continue;
+            int j = 1; while (ctr[(i + j) % M] == null) j++;
+            int k2 = 1; while (ctr[((i - k2) % M + M) % M] == null) k2++;
+            ctr[i] = VecLerp(ctr[((i - k2) % M + M) % M], ctr[(i + j) % M], k2 / (double)(k2 + j));
+        }
+        var delta = new float[M][]; for (int m = 0; m < M; m++) delta[m] = Sub(ctr[m], pts[m]);
+        int hw2 = Math.Max(4, (int)PyRound(fund / (L / M)));
+        float invCount = (float)(1.0f / (float)(2 * hw2 + 1.0));
+        var moved = new float[M][];
+        for (int m = 0; m < M; m++)
+        {
+            var acc = new float[3];
+            for (int k = -hw2; k <= hw2; k++) acc = Add(acc, delta[((m + k) % M + M) % M]);
+            moved[m] = Add(pts[m], Scale(acc, invCount));
+        }
+        pts = moved; S = RunningLength(pts); L = S[M];
+        sOf = Project(pts, S);
+        double cpl = a.TreadCellsPerLink;
+        double ncD = PyRound(L / (fund / cpl));
+        if (double.IsNaN(ncD) || ncD > 1e7) return "the tread's link-cell rig on a path without a finite length (d6) is not modelled yet";
+        int NC = Math.Max(8, (int)ncD);
+        int nonLink = clusterBones + 1 + (turrets ? 1 : 0) + (guns ? 1 : 0);
+        int linkBudget = Math.Max(8, (int)Math.Floor((240 - nonLink) / (double)Math.Max(1, trackCount)));
+        if (NC > linkBudget)
+        {
+            log.Add("VEHICLE tread '" + o.Name + "' CELL CLAMP: " + NC + " cells -> " + linkBudget + " (" + clusterBones + " wheels+aux leave " + linkBudget
+                    + " cells/track) — cells grow accordingly; lower Tread detail to regain smoothness headroom");
+            NC = linkBudget;
+        }
+        double cellL = L / NC;
+        // the cut phase: of 24 offsets, the first that crosses the fewest edges
+        double bestOff = 0.0; int bestCross = -1; int ne = d.Edges.Length / 2;
+        for (int k = 0; k < 24; k++)
+        {
+            double off = k / 24.0 * cellL; int cross = 0;
+            for (int e = 0; e < ne; e++)
+                if ((int)(PyMod(sOf[d.Edges[2 * e]] + off, L) / cellL) != (int)(PyMod(sOf[d.Edges[2 * e + 1]] + off, L) / cellL)) cross++;
+            if (bestCross < 0 || cross < bestCross) { bestOff = off; bestCross = cross; }
+        }
+        var cellOf = new int[nv];
+        for (int v = 0; v < nv; v++) cellOf[v] = Math.Min(NC - 1, (int)(PyMod(sOf[v] + bestOff, L) / cellL));
+        var arcs = arcRaw.Select(r => (a: r.a * L / LP, b: r.b * L / LP)).Where(r => r.b - r.a >= cellL).ToList();
+        double margin = a.TreadAdvCells * cellL;
+        bool InArcs(double sq)
+        {
+            foreach (var (a0r, a1r) in arcs)
+            {
+                double lo2 = a0r - margin, hi2 = a1r + margin, sw = sq;
+                if (lo2 < 0 && sw > L + lo2) sw -= L;
+                if (hi2 > L && sw < hi2 - L) sw += L;
+                if (lo2 <= sw && sw <= hi2) return true;
+            }
+            return false;
+        }
+        var job = new TreadJob { Prefix = t.Bones[0].Substring(0, t.Bones[0].Length - 3), NC = NC, CellL = cellL, L = L, S = S, Pts = pts, Off = bestOff, CellOf = cellOf, AdvCells = a.TreadAdvCells, Aux = (string[])t.Bones.Clone() };
+        var shuttle = new List<int>();
+        foreach (int ci in new SortedSet<int>(cellOf))
+            (InArcs(PyMod((ci + 0.5) * cellL - bestOff, L)) ? job.Cells : shuttle).Add(ci);
+        foreach (int ci in shuttle)
+        {
+            if (job.Runs.Count > 0 && ci == job.Runs[job.Runs.Count - 1].Last() + 1) job.Runs[job.Runs.Count - 1].Add(ci);
+            else job.Runs.Add(new List<int> { ci });
+        }
+        if (job.Runs.Count > 1 && job.Runs[0][0] == 0 && job.Runs[job.Runs.Count - 1].Last() == NC - 1)
+        {
+            job.Runs[0] = job.Runs[job.Runs.Count - 1].Concat(job.Runs[0]).ToList(); job.Runs.RemoveAt(job.Runs.Count - 1);
+        }
+        job.SRest = new double[NC]; for (int ci = 0; ci < NC; ci++) job.SRest[ci] = PyMod((ci + 0.5) * cellL - bestOff, L);
+        t.Job = job;
+        log.Add("VEHICLE tread '" + o.Name + "' HYBRID v2: " + job.Cells.Count + " link bones on wraps + " + job.Runs.Count + " shuttle run(s) covering " + shuttle.Count + " cells (cell "
+                + Py(cellL, 3) + ", loop " + Py(L, 2) + ", cut phase " + Py(bestOff, 3) + ")");
         return null;
     }
 }

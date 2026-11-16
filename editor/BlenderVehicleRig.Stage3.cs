@@ -765,8 +765,42 @@ public static partial class BlenderVehicleRig
             Note(s, "the oar bones");
         }
 
+        // ---- the TREAD skinning, computed here (it reads the parts and the clusters only). A tread with a link pitch decides bones:
+        // its nine carriers go, a bone per wrap cell and one per straight run come - the script makes those in a second edit-mode
+        // session after the skinning loop, and an edit bone keeps its head, tail and roll through such a session, so one build of
+        // the rest gives the same armature. The lines a tread prints are kept for its turn in the skinning loop.
+        var treadLogs = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var removedBones = new HashSet<int>(); var linkJobs = new List<TreadJob>();
+        bool turretsAny = a.Names.TryGetValue("turrets", out var turretList6) && turretList6.Count > 0;
+        bool gunsAny = new[] { "guns", "muzzles", "cradles" }.Any(r => a.Names.TryGetValue(r, out var gl) && gl.Count > 0);
+        foreach (var o in objs)
+        {
+            if (oarParts.Contains(o.Name) || !trackByName.TryGetValue(o.Name, out var track)) continue;
+            var tlog = new List<string>(); treadLogs[o.Name] = tlog;
+            var why = TreadSkin(s, o, track, clusters.Select(cl => (cl.m, cl.c)).ToList(), a, tlog, clusterBoneIds.Count, turretsAny, gunsAny, liveTracks.Count);
+            if (why != null) { s.Fallback = "stage 3: " + why; return; }
+            if (track.Job != null) linkJobs.Add(track.Job);
+        }
+        foreach (var job in linkJobs)
+        {
+            foreach (string an in job.Aux) { int ix = boneNames.IndexOf(an); if (ix >= 0) removedBones.Add(RigBoneBase + ix); }
+            float[] LinkTail(float[] p) => new[] { (float)(p[0] + 0f), (float)(p[1] + 0f), (float)(p[2] + 0.1f) };
+            foreach (int ci in job.Cells)   // only the cells that own vertices
+            {
+                PathEval(job, job.SRest[ci], out var p0, out _);
+                AddBone(job.Prefix + "L" + ci.ToString("00", CultureInfo.InvariantCulture), p0, LinkTail(p0), body);
+            }
+            for (int ri = 0; ri < job.Runs.Count; ri++)   // one shuttle bone per straight run, at its middle cell
+            {
+                var run = job.Runs[ri];
+                PathEval(job, job.SRest[run[run.Count / 2]], out var p0, out _);
+                AddBone(job.Prefix + "S" + ri.ToString("00", CultureInfo.InvariantCulture), p0, LinkTail(p0), body);
+            }
+        }
+        if (linkJobs.Count > 0) Note(s, "the tread's link and shuttle bones (its carriers removed)");
+
         // ED_armature_from_edit: the rest; armature.bones in depth-first order (children in creation order)
-        var ids = Enumerable.Range(RigBoneBase, boneNames.Count).ToList();
+        var ids = Enumerable.Range(RigBoneBase, boneNames.Count).Where(b => !removedBones.Contains(b)).ToList();
         var children = ids.ToDictionary(b => b, b => new List<int>()); var roots = new List<int>();
         foreach (int b in ids) { int p = parentOf[b - RigBoneBase]; if (p >= 0) children[p].Add(b); else roots.Add(b); }
         var rest = new VehicleProbe.ArmatureResult();
@@ -799,10 +833,9 @@ public static partial class BlenderVehicleRig
         foreach (var o in objs)
         {
             string bname = boneOf.TryGetValue(o.Name, out var wb) ? wb : bodyBone;
-            if (!oarParts.Contains(o.Name) && trackByName.TryGetValue(o.Name, out var track))
+            if (!oarParts.Contains(o.Name) && trackByName.ContainsKey(o.Name))
             {
-                var why = TreadSkin(s, o, track, clusters.Select(cl => (cl.m, cl.c)).ToList(), a);
-                if (why != null) { s.Fallback = "stage 3: " + why; return; }
+                s.Logs3.AddRange(treadLogs[o.Name]);   // skinned above, before the rest was built
                 o.Mesh.ArmatureModifier = armObjName; o.Parent = armObj;
                 continue;
             }
@@ -847,6 +880,12 @@ public static partial class BlenderVehicleRig
             }
             d.ArmatureModifier = armObjName;
             o.Parent = armObj;   // `o.parent = arm`: the local transform and the parent inverse kept; the armature is the identity
+        }
+
+        if (linkJobs.Count > 0)
+        {
+            s.Logs3.Add("VEHICLE armature: " + ids.Count + " bones total (budget 126: bone indices break past 127)");
+            s.Logs3.Add("VEHICLE hybrid bones: " + string.Join(", ", linkJobs.Select(j => j.Prefix + " links x" + j.Cells.Count + " + shuttles x" + j.Runs.Count)));
         }
 
         // ---- the join per bone
@@ -894,7 +933,7 @@ public static partial class BlenderVehicleRig
         };
         foreach (int id in clusterBoneIds) rs.ClusterBones.Add(boneNames[id - RigBoneBase]);
         rs.Tracks = trackInfos;
-        for (int i = 0; i < boneNames.Count; i++) rs.BoneId[boneNames[i]] = RigBoneBase + i;
+        for (int i = 0; i < boneNames.Count; i++) if (!removedBones.Contains(RigBoneBase + i)) rs.BoneId[boneNames[i]] = RigBoneBase + i;
         s.VehicleState = rs;
     }
 
