@@ -458,7 +458,7 @@ public static class BlenderDecimate
         return (float)((float)(dx * dx) + (float)(dy * dy)) < 0.00001f;   // layerEqual_propfloat2
     }
 
-    static void UvInterp(float[] uv, int src0, int src1, float w0, float w1, int dst)   // layerInterp_propfloat2, two sources
+    internal static void UvInterp(float[] uv, int src0, int src1, float w0, float w1, int dst)   // layerInterp_propfloat2, two sources
     {
         float rx = 0f, ry = 0f;
         rx = (float)(rx + (float)(uv[2 * src0] * w0)); ry = (float)(ry + (float)(uv[2 * src0 + 1] * w0));
@@ -480,7 +480,7 @@ public static class BlenderDecimate
         return (byte)r;
     }
 
-    static void ColorInterp(byte[] c, int src0, int src1, float w0, float w1, int dst)   // layerInterp_mloopcol, two sources
+    internal static void ColorInterp(byte[] c, int src0, int src1, float w0, float w1, int dst)   // layerInterp_mloopcol, two sources
     {
         float r = 0f, g = 0f, b = 0f, a = 0f;
         r = (float)(r + (float)(c[4 * src0] * w0)); g = (float)(g + (float)(c[4 * src0 + 1] * w0)); b = (float)(b + (float)(c[4 * src0 + 2] * w0)); a = (float)(a + (float)(c[4 * src0 + 3] * w0));

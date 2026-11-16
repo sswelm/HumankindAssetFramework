@@ -620,4 +620,95 @@ public sealed class BMesh
         EdgeKill(eSrc);
         return true;
     }
+
+    // ---------------------------------------------------------------- the two Euler splits (bmesh_core.cc), 2026-11-16
+
+    /// <summary>bmesh_kernel_split_edge_make_vert(tv, e): a new vertex on e. Before: tv --e-- other. After: tv --eNew-- vNew --e-- other.
+    /// vNew is created at tv's position with tv's flags and normal (BM_vert_create with an example), eNew with e's flags; e leaves
+    /// tv's disk for vNew's (appended), eNew is appended to vNew's disk and then to tv's. Every loop on e, in radial order from the
+    /// head, gets a new loop at vNew right after it in its face; of the pair, the one whose stretch lies on e goes to e's radial
+    /// cycle and the other to eNew's, the new loop appended first. splitLoops receives the pairs (the loop, its new loop): the new
+    /// loop's custom data is the loop's (bm_loop_create with an example), which the caller's layers copy.</summary>
+    public int SplitEdgeMakeVert(int tv, int e, out int eNew, List<int> splitLoops)
+    {
+        int vNew = VertCreate(VCo[3 * tv], VCo[3 * tv + 1], VCo[3 * tv + 2]);
+        VFlag[vNew] = (byte)(VFlag[tv] & ~FlagSelect); VNo[3 * vNew] = VNo[3 * tv]; VNo[3 * vNew + 1] = VNo[3 * tv + 1]; VNo[3 * vNew + 2] = VNo[3 * tv + 2];
+        eNew = EdgeCreate(tv, vNew, e);
+        DiskEdgeRemove(eNew, tv);
+        DiskEdgeRemove(eNew, vNew);
+        DiskVertReplace(e, vNew, tv);
+        DiskEdgeAppend(eNew, vNew);
+        DiskEdgeAppend(eNew, tv);
+        int lNext = EL[e];
+        EL[e] = None;
+        while (lNext != None)
+        {
+            int l = lNext;
+            FLen[LF[l]]++;
+            lNext = LRadialNext[l] != l ? LRadialNext[l] : None;
+            // bmesh_radial_loop_unlink
+            if (LRadialNext[l] != l) { LRadialPrev[LRadialNext[l]] = LRadialPrev[l]; LRadialNext[LRadialPrev[l]] = LRadialNext[l]; }
+            LRadialNext[l] = LRadialPrev[l] = None;
+            int lNew = LoopCreate(vNew, None, LF[l]);
+            LPrev[lNew] = l; LNext[lNew] = LNext[l];
+            LNext[l] = lNew; LPrev[LNext[lNew]] = lNew;
+            int vAfter = LV[LNext[lNew]];
+            bool onE = (EV1[e] == vNew && EV2[e] == vAfter) || (EV1[e] == vAfter && EV2[e] == vNew);   // BM_verts_in_edge
+            if (onE) { RadialLoopAppend(e, lNew); RadialLoopAppend(eNew, l); }
+            else { RadialLoopAppend(eNew, lNew); RadialLoopAppend(e, l); }
+            splitLoops?.Add(l); splitLoops?.Add(lNew);
+        }
+        return vNew;
+    }
+
+    /// <summary>bmesh_kernel_split_face_make_edge(f, lV1, lV2): a new edge between two corners of f cuts it in two. The edge is
+    /// created plain (no example); the new face takes f's flags, normal and material; a new loop at lV2's vertex closes f (lF1,
+    /// with lV2's custom data) and one at lV1's vertex closes the new face (lF2, with lV1's). f keeps the stretch from lV1 up to
+    /// lV2, the new face the stretch from lV2 up to lV1. Each face's first loop follows Blender's rule (the face that holds the
+    /// original first loop keeps it; the other starts at the matching corner). Returns the new face; lF1 and lF2 are the two
+    /// loops on the new edge (Blender's r_l is lF2).</summary>
+    public int SplitFaceMakeEdge(int f, int lV1, int lV2, out int eNew, out int lF1, out int lF2)
+    {
+        int v1 = LV[lV1], v2 = LV[lV2];
+        eNew = EdgeCreate(v1, v2);
+        int f2 = freeF.Count > 0 ? freeF.Pop() : FaceCount++;
+        Grow(ref FLFirst, FaceCount); Grow(ref FLen, FaceCount); Grow(ref FMat, FaceCount); Grow(ref FNo, 3 * FaceCount); Grow(ref FAlive, FaceCount); Grow(ref FFlag, FaceCount);
+        FAlive[f2] = true; TotFace++;
+        FFlag[f2] = (byte)(FFlag[f] & ~FlagSelect); FMat[f2] = FMat[f]; FNo[3 * f2] = FNo[3 * f]; FNo[3 * f2 + 1] = FNo[3 * f + 1]; FNo[3 * f2 + 2] = FNo[3 * f + 2];
+        lF1 = LoopCreate(v2, eNew, f);
+        lF2 = LoopCreate(v1, eNew, f2);
+        LPrev[lF1] = LPrev[lV2];
+        LPrev[lF2] = LPrev[lV1];
+        LNext[LPrev[lV2]] = lF1;
+        LNext[LPrev[lV1]] = lF2;
+        LNext[lF1] = lV1;
+        LNext[lF2] = lV2;
+        LPrev[lV1] = lF1;
+        LPrev[lV2] = lF2;
+        bool firstInF1 = false;
+        int lIter = lF1;
+        do { if (lIter == FLFirst[f]) firstInF1 = true; } while ((lIter = LNext[lIter]) != lF1);
+        if (firstInF1)
+        {
+            if (LPrev[FLFirst[f]] == lF1) FLFirst[f2] = LPrev[lF2];
+            else if (LNext[FLFirst[f]] == lF1) FLFirst[f2] = LNext[lF2];
+            else FLFirst[f2] = lF2;
+        }
+        else
+        {
+            FLFirst[f2] = FLFirst[f];
+            if (LPrev[FLFirst[f]] == lF2) FLFirst[f] = LPrev[lF1];
+            else if (LNext[FLFirst[f]] == lF2) FLFirst[f] = LNext[lF1];
+            else FLFirst[f] = lF1;
+        }
+        int f2len = 0; lIter = FLFirst[f2];
+        do { LF[lIter] = f2; f2len++; } while ((lIter = LNext[lIter]) != FLFirst[f2]);
+        RadialLoopAppend(eNew, lF1);
+        RadialLoopAppend(eNew, lF2);
+        FLen[f2] = f2len;
+        int f1len = 0; lIter = FLFirst[f];
+        do { f1len++; } while ((lIter = LNext[lIter]) != FLFirst[f]);
+        FLen[f] = f1len;
+        return f2;
+    }
 }
