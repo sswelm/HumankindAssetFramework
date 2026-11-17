@@ -254,9 +254,12 @@ public static partial class BlenderVehicleRig
         if (meshes.Any(Poly))
         {
             bool insideOut = a.FixInsideOut && meshes.Any(o => Poly(o) && !(OarMesh(o) || CanvasMesh(o) || o.Name.StartsWith("Mesh___rud__", StringComparison.Ordinal) || o.Name.StartsWith("Mesh___keep__", StringComparison.Ordinal) || o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal)));
+            bool windingFlip = meshes.Any(o => Poly(o) && o.Name.StartsWith("Mesh___flip__", StringComparison.Ordinal));
             bool twoSidedScene = meshes.Any(o => o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal));
-            bool doubled = a.DoubleSided && meshes.Any(o => Poly(o) && !OarMesh(o) && !o.Name.StartsWith("Mesh___keep__", StringComparison.Ordinal) && !o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal));
-            string pass = insideOut ? "the inside-out fix" : twoSidedScene ? "the Two-sided pass beside" : doubled ? "the double-sided shell" : null;
+            bool doubled = meshes.Any(o => Poly(o) && (a.DoubleSided
+                ? !OarMesh(o) && !o.Name.StartsWith("Mesh___keep__", StringComparison.Ordinal) && !o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal)
+                : (CanvasMesh(o) || o.Name.StartsWith("Mesh___rud__", StringComparison.Ordinal)) && !o.Name.StartsWith("Mesh___rigsail__", StringComparison.Ordinal)));
+            string pass = insideOut ? "the inside-out fix" : windingFlip ? "the winding flip" : twoSidedScene ? "the Two-sided pass beside" : doubled ? "the double-sided shell" : null;
             if (pass != null) { s.Fallback = "stage 5: " + pass + " of a tread mesh of polygons (d6) is not modelled yet"; return null; }
         }
         int reversed = 0, kept = 0;

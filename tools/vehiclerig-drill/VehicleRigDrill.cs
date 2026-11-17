@@ -615,18 +615,18 @@ static class StageDrill
 
     /// <summary>AN FBX SOURCE'S COMPOSED IMAGES (2026-11-16, the Bradley): the FBX reader builds a metallic-roughness image from two
     /// files' pixels and encodes it; Blender's side of this drill carries the PNG its own image writer made (other chunks, another
-    /// deflate), so the bytes differ where the PIXELS are the same. For an .fbx job, a PNG whose bytes differ from its IMG row is
+    /// deflate), so the bytes differ where the PIXELS are the same. Only a PNG identified as composed by the reader is
     /// decoded on both sides - Blender's out of its own file, whose bytes must hash to the row -; with every pixel equal Blender's
     /// bytes stand in for the comparison, so the rest of the file is still held bit for bit. Any other difference stays a failure.
     /// Returns Blender's file when an image was borrowed (the caller restores `saved`).</summary>
-    static byte[] BorrowPixelEqualImages(string key, VehicleRigDump d, BlenderDeployExport.Result exported, List<string> problems, out List<(int index, byte[] mine)> saved)
+    internal static byte[] BorrowPixelEqualImages(string key, VehicleRigDump d, BlenderDeployExport.Result exported, List<string> problems, out List<(int index, byte[] mine)> saved, ISet<byte[]> composedImages)
     {
         saved = new List<(int, byte[])>();
         var images = exported.MaterialRows?.Images;
-        if (images == null || d.Argv.Length < 2 || !d.Argv[1].EndsWith(".fbx", StringComparison.OrdinalIgnoreCase)) return null;
+        if (images == null || composedImages == null || composedImages.Count == 0) return null;
         var rows = d.ExportRows.Where(r => r[0] == "IMG").ToList();
         if (rows.Count != images.Count) return null;
-        var differ = Enumerable.Range(0, images.Count).Where(i => images[i].bytes != null && rows[i].Length == 5 && images[i].mime == "image/png" && rows[i][3] == "image/png" && Sha256Of(images[i].bytes) != rows[i][4]).ToList();
+        var differ = Enumerable.Range(0, images.Count).Where(i => images[i].bytes != null && composedImages.Contains(images[i].bytes) && rows[i].Length == 5 && images[i].mime == "image/png" && rows[i][3] == "image/png" && Sha256Of(images[i].bytes) != rows[i][4]).ToList();
         if (differ.Count == 0 || !BlenderFile.TryGetValue(key, out string file) || !File.Exists(file)) return null;
         byte[] theirGlb = File.ReadAllBytes(file); HafModel theirs;
         try { theirs = GlbReader.Read(theirGlb); } catch (Exception e) { problems.Add("stage 5 export: Blender's file does not read back for its image bytes: " + e.GetType().Name); return null; }
@@ -648,12 +648,21 @@ static class StageDrill
     static long ExportRows5;
 
     sealed class SecondLeave : Exception { public SecondLeave(string message) : base(message) { } }   // the second model (merge2) left by name
-    static HafModel ReadSecond(string path) { var m = HafModelLoader.ReadForVehicle(path, out string leave); if (m == null) throw new SecondLeave(leave); return m; }
 
     public static bool Compare(VehicleRigDump d, string key, int stages)
     {
         Compared++;
         var problems = new List<string>();
+        // Image byte arrays are retained by the stage model and material export, including merged scopes.
+        // Use their identity rather than export indices: material gathering can reorder and deduplicate images.
+        var composedImages = new HashSet<byte[]>();
+        HafModel ReadSource(string path, out string leave)
+        {
+            var m = HafModelLoader.ReadForVehicle(path, out leave, out var composed);
+            if (m != null && composed != null) foreach (int image in composed) composedImages.Add(m.Images[image].Bytes);
+            return m;
+        }
+        HafModel ReadSecond(string path) { var m = ReadSource(path, out string leave); if (m == null) throw new SecondLeave(leave); return m; }
         BlenderRigAnim.Stage1 model; BlenderVehicleRig.Args args;
         try
         {
@@ -663,7 +672,7 @@ static class StageDrill
             HafModel m = null; string leave = null;
             // Match BlenderVehicleRigInProcess.Run: argument failures and rigfast never import the source.
             if (args.Problem == null && args.Mode == "rig" && args.PreDie == null && BlenderVehicleRig.SourceFallback(args) == null)
-                m = HafModelLoader.ReadForVehicle(args.Input, out leave);
+                m = ReadSource(args.Input, out leave);
             try { model = m == null && leave != null ? new BlenderRigAnim.Stage1 { Fallback = leave } : BlenderVehicleRig.RunStage1(m, args, ReadSecond); }
             catch (SecondLeave e) { model = new BlenderRigAnim.Stage1 { Fallback = e.Message }; }
         }
@@ -844,7 +853,7 @@ static class StageDrill
                 {
                     RowsEqual += RowCount(s5); Console.WriteLine("STAGE5 " + key + ": equal - " + Describe(s5));
                     var xp = new List<string>();
-                    var theirFile = BorrowPixelEqualImages(key, d, exported, problems, out var borrowedImages);
+                    var theirFile = BorrowPixelEqualImages(key, d, exported, problems, out var borrowedImages, composedImages);
                     GlbRowsCompare.Stats stats;
                     try { stats = GlbRowsCompare.Compare(exported, d.ExportRows, xp, new Dictionary<string, long>(), name => exported.ChannelRows.Animations.First(an => an.Name == name).Channels.Count, true, true, theirFile); }
                     finally { foreach (var (bi, mineBytes) in borrowedImages) { var im = exported.MaterialRows.Images[bi]; exported.MaterialRows.Images[bi] = (im.name, im.mime, mineBytes, im.source); } }
@@ -892,8 +901,8 @@ static class StageDrill
     {
         if (fallback == null) return false;
         if (fallback == "stage 5: the export of brightness-edited image bytes is not modelled yet" || fallback == "stage 5: the FBX preview export is not modelled yet") return true;
-        // a subdivided tread holds polygons (d6): the three passes that read triangles, each named whole
-        foreach (string pass in new[] { "the inside-out fix", "the Two-sided pass beside", "the double-sided shell" })
+        // a subdivided tread holds polygons (d6): the passes that read triangles, each named whole
+        foreach (string pass in new[] { "the inside-out fix", "the winding flip", "the Two-sided pass beside", "the double-sided shell" })
             if (fallback == "stage 5: " + pass + " of a tread mesh of polygons (d6) is not modelled yet") return true;
         const string head = "stage 5: the GLB export (", tail = ") is not modelled yet";
         if (!fallback.StartsWith(head, StringComparison.Ordinal) || !fallback.EndsWith(tail, StringComparison.Ordinal) || fallback.Length <= head.Length + tail.Length) return false;
