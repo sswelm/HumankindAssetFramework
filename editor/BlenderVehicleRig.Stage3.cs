@@ -53,7 +53,10 @@ public static partial class BlenderVehicleRig
 
     /// <summary>Stage 3 on the scene stage 2 left: the rig. Lines go to s.Logs3; a branch not modelled sets s.Fallback; the script's exit
     /// sets s.Exits.</summary>
-    public static void RunStage3(BlenderRigAnim.Stage1 s, Args a)
+    public static void RunStage3(BlenderRigAnim.Stage1 s, Args a) => RunStage3(s, a, null);
+
+    // Generate's cancellation/deadline callback must also reach tread path fitting and link instancing.
+    public static void RunStage3(BlenderRigAnim.Stage1 s, Args a, Action checkpoint)
     {
         if (s.Fallback != null || s.Exits || s.Dies != null) return;
         foreach (var (role, branch) in Stage3Later)
@@ -779,7 +782,7 @@ public static partial class BlenderVehicleRig
         {
             if (oarParts.Contains(o.Name) || !trackByName.TryGetValue(o.Name, out var track)) continue;
             var tlog = new List<string>(); treadLogs[o.Name] = tlog;
-            var why = TreadSkin(s, o, track, clusters.Select(cl => (cl.m, cl.c)).ToList(), a, tlog, clusterBoneIds.Count, turretsAny, gunsAny, liveTracks.Count, rigidBudget);
+            var why = TreadSkin(s, o, track, clusters.Select(cl => (cl.m, cl.c)).ToList(), a, tlog, clusterBoneIds.Count, turretsAny, gunsAny, liveTracks.Count, rigidBudget, checkpoint);
             if (why != null) { s.Fallback = "stage 3: " + why; return; }
             if (track.Death != null) { treadDeathPart = o.Name; break; }   // the script dies at this part's turn in the skinning loop
             if (track.Job != null) linkJobs.Add(track.Job);
