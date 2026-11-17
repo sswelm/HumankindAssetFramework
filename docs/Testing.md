@@ -2790,12 +2790,17 @@ fcurves, 3,348 keys) is equal at all five stages, the GLB byte for byte, and the
 keys) is equal at all five stages. Its file first differed in two images: the metallic-roughness textures the FBX reader
 composes from two files' pixels, where Blender's side of this drill carries the PNG its own image writer made (sRGB, gAMA, cHRM,
 eXIf, oFFs chunks, another deflate stream). Measured before deciding anything: 0 of 50,331,648 pixel bytes differ in each. So the
-vehicle_rig drill now does, for an .fbx job only, what the FBX model drill does for a composed image: a PNG whose bytes differ
-from its IMG row is decoded on both sides (Blender's out of its own exported file, whose bytes must hash to the row); with every
+vehicle_rig drill now does what the FBX model drill does for a composed image: only a PNG identified as composed by the FBX reader
+whose bytes differ from its IMG row is decoded on both sides (Blender's out of its own exported file, whose bytes must hash to the row); with every
 pixel equal Blender's bytes stand in, and the rest of the file - the JSON, every other view - is still compared byte for byte.
 The `EXPORTS` line counts them (`pixelImages`), a `PIXELS <job>` line names the job. Planted: one bit of one pixel flipped fails
 both images by pixel and channel. NOT modelled, left by name: Rigid links (`treadmode=links`), and the stage 5 passes on a
 polygon tread. NOT checked: nothing ran in Unity or in the game - the Bradley's C# rig has not been looked at there.
+
+Review of PR #291 (2026-11-17): composition provenance follows both source imports through material gathering, including an FBX
+merged into a GLB job. Ordinary source PNGs still require identical bytes; the job's filename does not grant a pixel-only exception.
+Five regression cases cover source-byte preservation, alternate composition encodings, a merged FBX, one changed pixel channel,
+and an oracle image that does not hash to its evidence row. The source-byte and merged-FBX cases fail the original comparison.
 
 The gun's recoil defects (2026-11-07): the recoil-side entries open since October, fixed in `vehicle_rig.py` and in the C#
 port in the same PR so the parity drill holds each fix (the fixtures are TAKEN by the port, unlike the tread's). (1) The arc's
