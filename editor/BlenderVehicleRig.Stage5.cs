@@ -295,6 +295,12 @@ public static partial class BlenderVehicleRig
         {
             // a part that is a live tread AND Two-sided keeps its Two-sided mesh name: the pass's own faces would be polygons
             if (meshes.Any(o => Poly(o) && o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal))) { s.Fallback = "stage 5: the Two-sided pass on a tread mesh of polygons (d6) is not modelled yet"; return null; }
+            // NOT PROVEN ON POLYGONS, kept from the review of PR 290: a tread part that is also marked Flip or a rudder/canvas (its own
+            // shell outside Double-sided) - no fixture holds either against Blender, so each is left by name
+            bool windingFlip = meshes.Any(o => Poly(o) && o.Name.StartsWith("Mesh___flip__", StringComparison.Ordinal));
+            bool partShell = !a.DoubleSided && meshes.Any(o => Poly(o) && (CanvasMesh(o) || o.Name.StartsWith("Mesh___rud__", StringComparison.Ordinal)) && !o.Name.StartsWith("Mesh___rigsail__", StringComparison.Ordinal));
+            string pass = windingFlip ? "the winding flip" : partShell ? "the double-sided shell" : null;
+            if (pass != null) { s.Fallback = "stage 5: " + pass + " of a tread mesh of polygons (d6) is not modelled yet"; return null; }
         }
         int reversed = 0, kept = 0;
         if (a.FixInsideOut)
