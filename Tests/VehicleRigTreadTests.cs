@@ -136,9 +136,10 @@ public class VehicleRigTreadTests
         Assert.Contains(s.Logs5, l => l.StartsWith(role == "flip" ? "VEHICLE FLIP applied:" : "VEHICLE double-sided 'Mesh___rud__Hull':", StringComparison.Ordinal));
     }
 
-    /// <summary>A belt whose bottom run repeats every 0.1 along x has a link pitch: its link cells are not ported yet.</summary>
+    /// <summary>A belt whose bottom run repeats every 0.1 along x has a link pitch: the tread is cut into cells along its path, the
+    /// cells on the wraps get a bone each and the straight runs a shuttle bone; the nine carriers are gone.</summary>
     [Fact]
-    public void A_tread_with_a_link_pitch_is_left_by_name()
+    public void A_tread_with_a_link_pitch_gets_link_and_shuttle_bones_keyed_every_frame()
     {
         var m = Tracked();
         // replace the belt: a ladder of 41 rungs along x (pitch 0.1) at the bottom, and a top rail far above so the rungs are "the bottom run"
@@ -147,15 +148,38 @@ public class VehicleRigTreadTests
         for (int i = 0; i < 40; i++) { int q = 2 * i; idx.AddRange(new[] { q, q + 2, q + 1, q + 1, q + 2, q + 3 }); }
         int top = pts.Count / 3; pts.AddRange(new[] { -2f, .45f, 1.15f, 2f, .45f, 1.15f, 0f, .45f, 1.35f }); idx.AddRange(new[] { top, top + 1, top + 2 });
         var belt = m.Meshes.Single(me => me.Name == "Belt").Primitives[0]; belt.Positions = pts.ToArray(); belt.Indices = idx.ToArray();
-        var s = Stages(m, TrackedArgs(), 3);
-        Assert.Equal("stage 3: the tread's link-cell rig (d6: a link pitch was found) is not modelled yet", s.Fallback);
+        var a = TrackedArgs(); var s = Stages(m, a, 4);
+        Assert.Null(s.Fallback);
         // the measurement itself: 0.1 is the largest strong period, so the physical link; the pitch is the smallest strong one
         string line = Assert.Single(s.Logs3.Where(l => l.StartsWith("VEHICLE tread 'Belt' link pitch: ", StringComparison.Ordinal)));
         Assert.Contains("physical link 0.100 (from", line);
-        // The unsupported shape is already known after measuring pitch. Do not subdivide it or
-        // compute carrier weights before falling back to Blender, which repeats that work.
-        Assert.DoesNotContain(s.Logs3, l => l.StartsWith("VEHICLE tread 'Belt' subdivided:", StringComparison.Ordinal));
-        Assert.DoesNotContain("a tread subdivided for its wrap arcs", s.Notes);
+        var bones = s.Armature.BoneNodes.Select(b => s.Names.BoneOfJoint[b]).ToList();
+        Assert.DoesNotContain(bones, n => Carriers.Any(c => n == "Track_00_R_" + c));
+        var links = bones.Where(n => n.StartsWith("Track_00_R_L", StringComparison.Ordinal)).ToList(); var shuttles = bones.Where(n => n.StartsWith("Track_00_R_S", StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(links);
+        Assert.Equal(new[] { "Root", "Wheel_00", "Wheel_01", "Wheel_02", "Wheel_03" }.Concat(links).Concat(shuttles), bones);   // the new bones after every other, links before shuttles
+        Assert.Contains(s.Logs3, l => l == "VEHICLE armature: " + bones.Count + " bones total (budget 126: bone indices break past 127)");
+        // every vertex whole on one bone of the rig; no bone without a vertex (a bone without weights is dropped in the game's bake)
+        var mesh = Mesh(s, "Mesh___track__Belt");
+        Assert.All(Enumerable.Range(0, mesh.Vertices), v => Assert.Equal(new[] { 1f }, mesh.DefWeight[v]));
+        Assert.Equal(links.Concat(shuttles).OrderBy(n => n, StringComparer.Ordinal), mesh.Groups.OrderBy(n => n, StringComparer.Ordinal));
+        Assert.All(Enumerable.Range(0, mesh.Groups.Count), g => Assert.Contains(Enumerable.Range(0, mesh.Vertices), v => mesh.DefNr[v][0] == g));
+        // a link bone is keyed on every frame of the clip (0..15), location and rotation; a shuttle bone at both ends, location only
+        var curves = s.Actions.Single(x => x.Name == "Spin").Slots.SelectMany(sl => sl.FCurves).ToList();
+        foreach (string n in links)
+        {
+            var mine = curves.Where(fc => fc.Bone == n).ToList();
+            Assert.Equal(new[] { "location", "location", "location", "rotation_euler", "rotation_euler", "rotation_euler" }, mine.Select(fc => fc.Prop));
+            Assert.All(mine, fc => Assert.Equal(Enumerable.Range(0, 16).Select(f => (float)f), fc.Keys.Select(k => k.Frame)));
+        }
+        foreach (string n in shuttles)
+        {
+            var mine = curves.Where(fc => fc.Bone == n).ToList();
+            Assert.Equal(new[] { "location", "location", "location" }, mine.Select(fc => fc.Prop));
+            Assert.All(mine, fc => Assert.Equal(new[] { 0f, 15f }, fc.Keys.Select(k => k.Frame)));
+        }
+        var x = BlenderVehicleRig.RunStage5(s, a);
+        Assert.Null(s.Fallback); Assert.NotNull(x); Assert.Null(x.Fallback);
     }
 
     [Fact]

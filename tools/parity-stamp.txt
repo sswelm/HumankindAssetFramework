@@ -1,8 +1,8 @@
 # tools/parity-stamp.txt - written by tools/check.sh after a PASS of the parity mode (HAF_GATE=parity:
 # tools/blender_parity.sh or the Bake Tests row), not by hand. The digest is over the blob ids of every file
 # the parity drills compile, run or read (tools/check-parity-stamp.sh --list); the push compares it.
-digest f327576fed3a594f258192a0ad62c9427506feb6a1b5cef32209b0232290d2dd
+digest 3ef7c23ca316387c3958b89851274b2589e9f28010b9c578d256244b0e1a3d08
 files 201
-commit 63e0c10649c445810261d6a1f6fba01fa86ee103+dirty
-date 2026-11-17T00:58:10Z
+commit 19ae334c334a1495e3be5556ba0d665fd208783c+dirty
+date 2026-11-17T18:32:31Z
 oracle live

@@ -6,6 +6,7 @@
 // as it does for any other named limit; a file either reader refuses throws as GlbReader does (InvalidDataException,
 // NotSupportedException). .obj and .blend stay Blender's (Unity's importer for a static .obj/.fbx the reader leaves).
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 public static class HafModelLoader
@@ -23,12 +24,14 @@ public static class HafModelLoader
 
     /// <summary>The model, or null with `leave` - the FBX reader's named limit (FbxLeavePrefix + the reason) - for an .fbx the port
     /// leaves to Blender. A .glb/.gltf never leaves: it is read or it throws. Another extension throws NotSupportedException.</summary>
-    public static HafModel Read(string path, out string leave)
+    public static HafModel Read(string path, out string leave) => Read(path, out leave, out _);
+
+    static HafModel Read(string path, out string leave, out HashSet<int> composedImages)
     {
-        leave = null;
+        leave = null; composedImages = null;
         if (IsGltf(path)) return GlbReader.Read(path);
         if (!IsFbx(path)) throw new NotSupportedException(NotReadable);
-        var m = FbxModel.Build(FbxImport.Read(path), out string why);
+        var m = FbxModel.Build(FbxImport.Read(path), out string why, out composedImages);
         if (m == null) { leave = FbxLeavePrefix + why; return null; }
         return m;
     }
@@ -40,9 +43,12 @@ public static class HafModelLoader
         => IsFbx(path) && (model.Skins.Count > 0 || model.Animations.Count > 0)
             ? FbxVehicleLeavePrefix + "a skinned or animated FBX (the direct FBX and glTF round-trip vehicle poses are not equivalent)" : null;
 
-    public static HafModel ReadForVehicle(string path, out string leave)
+    public static HafModel ReadForVehicle(string path, out string leave) => ReadForVehicle(path, out leave, out _);
+
+    // The parity drill needs the FBX reader's composition provenance, including a merged second source.
+    internal static HafModel ReadForVehicle(string path, out string leave, out HashSet<int> composedImages)
     {
-        var model = Read(path, out leave);
+        var model = Read(path, out leave, out composedImages);
         if (model != null) leave = VehicleImportFallback(path, model);
         return leave == null ? model : null;
     }

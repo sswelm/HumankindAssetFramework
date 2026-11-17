@@ -223,9 +223,10 @@ n_export=$(echo "$X5" | awk '{print $3}'); n_bytes=$(echo "$X5" | awk '{print $7
 [ -n "$n_export" ] && [ "$n_export" -gt 0 ] && [ "$n_export" = "$n_inprocess" ] || { echo "FAIL — not every supported export was written by the Generate wrapper ($X5)"; exit 1; }
 # every compared export is the COMPLETE file, byte for byte (review of #187: the row comparison passed a GLB whose bytes were never equal)
 [ "$n_bytes" = "$n_export" ] || { echo "FAIL — vehicle_rig drill: $n_bytes of $n_export exported GLBs are byte-identical to Blender's ($X5)"; exit 1; }
-# THE TREAD FIXTURES ARE COMPARED, NOT LEFT (d6, 2026-11-16): the carrier-skinned conveyor is modelled (BlenderVehicleRig.Tread.cs), so
-# each of its three fixtures must come out equal through the export - a leave here, however well named, is coverage lost.
-for key in fx_r_tracks_fallback fx_r_tracks_recoil fx_r_tracks_roads; do
+# THE TREAD FIXTURES ARE COMPARED, NOT LEFT (d6, 2026-11-16): the conveyor is modelled (BlenderVehicleRig.Tread.cs) - the carrier
+# skinning and the link bones -, so each of its four fixtures must come out equal through the export - a leave here, however well
+# named, is coverage lost.
+for key in fx_r_tracks_fallback fx_r_tracks_recoil fx_r_tracks_roads fx_r_tracks_hybrid; do
   grep -qE "^EXPORT $key: equal - .* byte-identical GLB" "$TMPD/s1.txt" || { grep -E "^(FAIL|STAGE[0-9]) $key" "$TMPD/s1.txt" | head -3 | cut -c1-300; echo "FAIL — vehicle_rig drill: the tread fixture $key is not equal to Blender through the export (d6)"; exit 1; }
 done
 # Negative guards on the REAL dump: a missing or inconsistent record must never pass as evidence.

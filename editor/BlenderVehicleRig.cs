@@ -35,6 +35,8 @@ public static partial class BlenderVehicleRig
         public List<string> PartTx;                 // the parttx= lines, or null
         public bool TracksStatic;                   // argv[16] "1": the tread loops rigid, no link bones (the line at argument time)
         public bool TreadLinks;                     // a `treadmode=links` argument on live tracks: one bone per molded link
+        public int TreadAdvCells = 3;               // max(1, min(8, int(float(argv[12])))) or 3: the conveyor's advance per loop, in cells
+        public double TreadCellsPerLink = 4.0;      // max(0.25, min(4.0, float(argv[15]))) or 4: cells per molded link (the Lab's Tread detail)
         public bool DoubleSided, FixInsideOut;
         internal readonly List<(HafModel model, BlenderNames.Result names, double bright)> MaterialInputs = new List<(HafModel, BlenderNames.Result, double)>();
         public readonly List<string> Logs = new List<string>();   // the VEHICLE lines the rig path prints at argument time (a bad orientation, static tracks), after the merge
@@ -322,6 +324,8 @@ public static partial class BlenderVehicleRig
             a.Degrees = VehicleProbe.Input.PyFloat(At(8));
             double Clamp(int i, double lo, double hi, double dflt) => argv.Count > i && PyNonBlank(At(i)) && TryPyFloat(At(i), out double v) ? PyMax(lo, PyMin(hi, v)) : dflt;
             a.RoadSpeedMul = Clamp(13, 0.1, 4.0, 1.0); a.IdlerSpeedMul = Clamp(14, 0.1, 4.0, 1.0);
+            a.TreadCellsPerLink = Clamp(15, 0.25, 4.0, 4.0);
+            if (argv.Count > 12 && PyNonBlank(At(12)) && TryPyFloat(At(12), out double advCells)) a.TreadAdvCells = (int)Math.Max(1.0, Math.Min(8.0, Math.Truncate(advCells)));
             a.RockDeg = rockDeg; a.RockPitchDeg = pitch;
             System.Numerics.BigInteger IntOf(int i, System.Numerics.BigInteger dflt) => argv.Count > i && PyNonBlank(At(i)) && TryPyFloat(At(i), out double v) ? new System.Numerics.BigInteger(Math.Truncate(v)) : dflt;
             a.RockFrames = System.Numerics.BigInteger.Max(0, IntOf(18, 0));
