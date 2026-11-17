@@ -19,6 +19,7 @@
     <None Update="Fixtures\fbx_loader\*.fbx" CopyToOutputDirectory="PreserveNewest" />
     <None Include="eigen_inverses.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="blender_bvh_rays.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="blender_subdivide.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="blender_handle_releases.txt" CopyToOutputDirectory="PreserveNewest" />
     <!-- the native kernels beside the test host: NativeKernelsTests holds hafkernels.dll to the managed twins (and FAILS when it cannot load) -->
     <None Include="..\editor\Plugins\x86_64\hafkernels.dll" Link="hafkernels.dll" CopyToOutputDirectory="PreserveNewest" />
@@ -44,7 +45,9 @@
     <Compile Include="..\editor\BlenderVehicleRig.Stage4.cs" Link="BlenderVehicleRig.Stage4.cs" />
     <Compile Include="..\editor\BlenderVehicleRig.Stage5.cs" Link="BlenderVehicleRig.Stage5.cs" />
     <Compile Include="..\editor\BlenderVehicleRig.TwoSided.cs" Link="BlenderVehicleRig.TwoSided.cs" />
+    <Compile Include="..\editor\BlenderVehicleRig.Tread.cs" Link="BlenderVehicleRig.Tread.cs" />
     <Compile Include="..\editor\BlenderBvh.cs" Link="BlenderBvh.cs" />
+    <Compile Include="..\editor\BlenderSubdivide.cs" Link="BlenderSubdivide.cs" />
     <Compile Include="..\editor\BlenderVehicleRigInProcess.cs" Link="BlenderVehicleRigInProcess.cs" />
     <Compile Include="..\editor\BlenderNumpy.cs" Link="BlenderNumpy.cs" />
     <Compile Include="..\editor\BlenderWeld.cs" Link="BlenderWeld.cs" />

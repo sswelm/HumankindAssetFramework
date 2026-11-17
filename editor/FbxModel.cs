@@ -232,19 +232,21 @@ public static class FbxModel
     public struct Tri { public int C0, C1, C2, Face; }
 
     /// <summary>Mesh.loop_triangles of a polygon mesh (mesh_tessellate.cc), in face order.</summary>
-    public static List<Tri> Tessellate(FbxImport.Mesh m)
+    public static List<Tri> Tessellate(FbxImport.Mesh m) => Tessellate(m.Positions, m.CornerVerts, m.FaceOffsets);
+
+    /// <summary>... of any polygon mesh: its positions, its corners' vertices and each face's first corner (one more entry: the corner count).</summary>
+    public static List<Tri> Tessellate(float[] P, int[] cornerVerts, int[] faceOffsets)
     {
         var tris = new List<Tri>();
-        var P = m.Positions;
-        int nf = m.FaceCount;
+        int nf = faceOffsets.Length - 1;
         var n1 = new float[3]; var n2 = new float[3];
         for (int f = 0; f < nf; f++)
         {
-            int begin = m.FaceOffsets[f], size = m.FaceOffsets[f + 1] - begin;
+            int begin = faceOffsets[f], size = faceOffsets[f + 1] - begin;
             if (size == 3) { tris.Add(new Tri { C0 = begin, C1 = begin + 1, C2 = begin + 2, Face = f }); continue; }
             if (size == 4)
             {
-                int v0 = m.CornerVerts[begin], v1 = m.CornerVerts[begin + 1], v2 = m.CornerVerts[begin + 2], v3 = m.CornerVerts[begin + 3];
+                int v0 = cornerVerts[begin], v1 = cornerVerts[begin + 1], v2 = cornerVerts[begin + 2], v3 = cornerVerts[begin + 3];
                 if (IsQuadFlipFirstThirdFast(P, v0, v1, v2, v3)) { tris.Add(new Tri { C0 = begin, C1 = begin + 1, C2 = begin + 3, Face = f }); tris.Add(new Tri { C0 = begin + 1, C1 = begin + 2, C2 = begin + 3, Face = f }); }
                 else { tris.Add(new Tri { C0 = begin, C1 = begin + 1, C2 = begin + 2, Face = f }); tris.Add(new Tri { C0 = begin, C1 = begin + 2, C2 = begin + 3, Face = f }); }
                 continue;
@@ -252,10 +254,10 @@ public static class FbxModel
             if (size < 3) continue;
             // the normal, flipped (a positive 2D cross product): Newell from the last corner, normalize_v3, (0, 0, 1) when zero
             float nx = 0f, ny = 0f, nz = 0f;
-            int prev = m.CornerVerts[begin + size - 1] * 3;
+            int prev = cornerVerts[begin + size - 1] * 3;
             for (int j = 0; j < size; j++)
             {
-                int curr = m.CornerVerts[begin + j] * 3;
+                int curr = cornerVerts[begin + j] * 3;
                 nx = (float)(nx + (float)((float)(P[prev + 1] - P[curr + 1]) * (float)(P[prev + 2] + P[curr + 2])));
                 ny = (float)(ny + (float)((float)(P[prev + 2] - P[curr + 2]) * (float)(P[prev] + P[curr])));
                 nz = (float)(nz + (float)((float)(P[prev] - P[curr]) * (float)(P[prev + 1] + P[curr + 1])));
@@ -267,7 +269,7 @@ public static class FbxModel
             var proj = new float[2 * size];
             for (int j = 0; j < size; j++)
             {
-                int v = m.CornerVerts[begin + j];
+                int v = cornerVerts[begin + j];
                 BlenderPolyfill.ProjectV2(n1, n2, P[3 * v], P[3 * v + 1], P[3 * v + 2], out proj[2 * j], out proj[2 * j + 1]);
             }
             foreach (var t in BlenderPolyfill.Calc(proj, size, 1)) tris.Add(new Tri { C0 = begin + t[0], C1 = begin + t[1], C2 = begin + t[2], Face = f });

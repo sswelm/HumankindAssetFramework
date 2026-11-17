@@ -10,6 +10,19 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Vehicle Lab: a moving tread's first rig runs in C# - the carrier-skinned conveyor (2026-11-16; d6, first part).** A
+  recipe with live tracks always went to Blender. The tread code starts by cutting every long edge in half, up to three
+  times (`bmesh.ops.subdivide_edges`), which leaves four-sided and larger faces - and the C# mesh model held triangles
+  only. So this part is mostly groundwork: `BlenderSubdivide.cs` is Blender's operator for one cut with grid fill (held to
+  Blender on six meshes over up to three passes: every vertex, edge, face corner, UV and point colour), `MeshData` carries
+  polygons (`PolyStart`), and a polygon mesh exports as Blender exports it (corner normals decided on the polygons, then
+  the exporter's own triangulation - both already written for the FBX reader). On top of that: the nine track bones, the
+  link-pitch measurement, the wrap bands, the per-vertex weights with their smoothing pass, the wrap carriers' wheel
+  speeds and the conveyor's keys. Three fixtures - the 8-vertex belt, the same under recoil, and a new one
+  (`fx_r_tracks_roads`: a belt round a sprocket, two road wheels, an idler and a return roller, which reaches the measured
+  bands and the three ramp regions the 8-vertex belt never meets) - are equal to Blender at all five stages, the GLBs byte
+  for byte. **Still Blender, by name:** a tread whose link pitch is found (every real tank so far: the link bones), Rigid
+  links, and Double-sided / Fix inside-out / a Two-sided part beside a moving tread. The Bradley is one of them.
 - **Vehicle Lab: the Two-sided role runs in C# (2026-11-16; "everything need to be converted to C#").** The 11-15 Bake
   Tests run failed six rows as "C# coverage lost": features added to `vehicle_rig.py` alone since 10-31. Two-sided is the
   first one ported. Its pass asks, per face, which triangle a ray meets FIRST and how far away - and where two triangles

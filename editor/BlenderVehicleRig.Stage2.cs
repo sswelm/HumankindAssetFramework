@@ -282,11 +282,12 @@ public static partial class BlenderVehicleRig
     /// them when asked.</summary>
     static BMesh FromMeshData(BlenderRigAnim.MeshData d, BlenderWeld.Layers layers, bool faceNormals, bool vertexNormals)
     {
-        int nv = d.Vertices, nf = d.Faces.Length / 3;
+        int nv = d.Vertices, nf = d.FaceCount;
         if (d.Edges == null) throw new InvalidOperationException("a stage mesh without its edge list");
+        if (d.PolyStart != null && (faceNormals || vertexNormals)) throw new NotSupportedException("the normals of a mesh of polygons");
         BMesh bm;
         var swf = System.Diagnostics.Stopwatch.StartNew(); bool timing = Environment.GetEnvironmentVariable("VEHICLERIG_DEBUG_TIME") == "1";
-        if (HafNativeKernels.Available)
+        if (HafNativeKernels.Available && d.PolyStart == null)
         {
             // native/hafbmesh.cpp: the same vertices, edges (a pair listed twice: the last one), faces and normal_tri_v3 (HafNativeKernels.BMesh.cs)
             bm = HafNativeKernels.BuildFromMesh(d.Positions, nv, d.Edges, d.EdgeSharp, d.Faces, d.FaceSharp, d.FaceMaterial, faceNormals);
@@ -307,13 +308,13 @@ public static partial class BlenderVehicleRig
                 edgeOf[EdgeKey(a, b)] = i;
             }
             if (timing) Console.Error.WriteLine($"TIME     edges {swf.ElapsedMilliseconds} ms ({ne})");
-            var verts = new int[3]; var edges = new int[3];
             for (int f = 0; f < nf; f++)
             {
-                for (int k = 0; k < 3; k++) verts[k] = d.Faces[3 * f + k];
-                for (int k = 0; k < 3; k++)
-                    if (!edgeOf.TryGetValue(EdgeKey(verts[k], verts[(k + 1) % 3]), out edges[k])) throw new InvalidOperationException($"face {f}: no edge joins corners {verts[k]} and {verts[(k + 1) % 3]}");
-                int i = bm.FaceCreate(verts, edges, 3);
+                int c0 = d.CornerStart(f), n = d.CornerCount(f); var verts = new int[n]; var edges = new int[n];
+                for (int k = 0; k < n; k++) verts[k] = d.Faces[c0 + k];
+                for (int k = 0; k < n; k++)
+                    if (!edgeOf.TryGetValue(EdgeKey(verts[k], verts[(k + 1) % n]), out edges[k])) throw new InvalidOperationException($"face {f}: no edge joins corners {verts[k]} and {verts[(k + 1) % n]}");
+                int i = bm.FaceCreate(verts, edges, n);
                 bm.FFlag[i] = d.FaceSharp != null && d.FaceSharp[f] ? (byte)0 : BMesh.FlagSmooth;
                 bm.FMat[i] = d.FaceMaterial[f];
             }
@@ -350,7 +351,12 @@ public static partial class BlenderVehicleRig
 
     /// <summary>BM_mesh_bm_to_me: the live elements in slot order - vertices, edges (with sharp_edge), faces (with sharp_face
     /// and the material) and their corners; the layers gathered per corner and per vertex; the names of the old mesh kept.</summary>
-    static BlenderRigAnim.MeshData ToMeshData(BMesh bm, BlenderWeld.Layers layers, BlenderRigAnim.MeshData old)
+    static BlenderRigAnim.MeshData ToMeshData(BMesh bm, BlenderWeld.Layers layers, BlenderRigAnim.MeshData old) => ToMeshDataOf(bm, layers, old, false);
+
+    /// <summary>... keeping faces of any size: the mesh carries PolyStart when a face is not a triangle (a subdivided tread).</summary>
+    static BlenderRigAnim.MeshData ToMeshDataPolygons(BMesh bm, BlenderWeld.Layers layers, BlenderRigAnim.MeshData old) => ToMeshDataOf(bm, layers, old, true);
+
+    static BlenderRigAnim.MeshData ToMeshDataOf(BMesh bm, BlenderWeld.Layers layers, BlenderRigAnim.MeshData old, bool polygons)
     {
         var newIndex = new int[bm.VertCount]; int count = 0;
         for (int v = 0; v < bm.VertCount; v++) newIndex[v] = bm.VAlive[v] ? count++ : -1;
@@ -369,20 +375,23 @@ public static partial class BlenderVehicleRig
             bool sharp = (bm.EFlag[e] & BMesh.FlagSmooth) == 0; edgeSharp.Add(sharp); anySharp |= sharp;
         }
         r.Edges = edges.ToArray(); r.EdgeSharp = anySharp ? edgeSharp.ToArray() : null;   // BM_mesh_bm_to_me: the attribute only when an edge is marked
-        int nf = bm.TotFace;
-        r.Faces = new int[3 * nf]; r.FaceMaterial = new int[nf]; r.FaceSharp = new bool[nf];
-        var uvOut = new List<float[]>(); foreach (var _ in layers.Uv) uvOut.Add(new float[2 * 3 * nf]);
-        var ccOut = new List<byte[]>(); foreach (var _ in layers.CornerColor) ccOut.Add(new byte[4 * 3 * nf]);
-        var cnOut = layers.CustomNormal != null ? new short[2 * 3 * nf] : null;
-        int fo = 0;
+        int nf = bm.TotFace, nc = 0; bool anyPoly = false;
+        for (int f = 0; f < bm.FaceCount; f++) if (bm.FAlive[f]) { nc += bm.FLen[f]; anyPoly |= bm.FLen[f] != 3; }
+        r.Faces = new int[nc]; r.FaceMaterial = new int[nf]; r.FaceSharp = new bool[nf];
+        if (anyPoly && polygons) r.PolyStart = new int[nf + 1];
+        var uvOut = new List<float[]>(); foreach (var _ in layers.Uv) uvOut.Add(new float[2 * nc]);
+        var ccOut = new List<byte[]>(); foreach (var _ in layers.CornerColor) ccOut.Add(new byte[4 * nc]);
+        var cnOut = layers.CustomNormal != null ? new short[2 * nc] : null;
+        int fo = 0, co = 0;
         for (int f = 0; f < bm.FaceCount; f++)
         {
             if (!bm.FAlive[f]) continue;
-            if (bm.FLen[f] != 3) throw new NotSupportedException("a face of " + bm.FLen[f] + " corners: the stage rows hold triangles only");
+            if (bm.FLen[f] != 3 && !polygons) throw new NotSupportedException("a face of " + bm.FLen[f] + " corners: the stage rows hold triangles only");
             int l = bm.FLFirst[f];
-            for (int k = 0; k < 3; k++)
+            if (r.PolyStart != null) r.PolyStart[fo] = co;
+            for (int k = 0; k < bm.FLen[f]; k++)
             {
-                int c = 3 * fo + k;
+                int c = co++;
                 r.Faces[c] = newIndex[bm.LV[l]];
                 for (int i = 0; i < layers.Uv.Count; i++) { uvOut[i][2 * c] = layers.Uv[i][2 * l]; uvOut[i][2 * c + 1] = layers.Uv[i][2 * l + 1]; }
                 for (int i = 0; i < layers.CornerColor.Count; i++) Array.Copy(layers.CornerColor[i], 4 * l, ccOut[i], 4 * c, 4);
@@ -393,6 +402,7 @@ public static partial class BlenderVehicleRig
             r.FaceSharp[fo] = (bm.FFlag[f] & BMesh.FlagSmooth) == 0;
             fo++;
         }
+        if (r.PolyStart != null) r.PolyStart[nf] = co;
         r.UvAll = uvOut; r.Uv = uvOut.Count > 0 ? uvOut[0] : null; r.CustomNormal = cnOut;
         int pi = 0, ci = 0;
         foreach (var c in old.Colors)

@@ -249,6 +249,19 @@ public static partial class BlenderVehicleRig
         if (VehicleProbe.Input.PyStrip(a.PreviewFbx).Length > 0) { s.Fallback = "stage 5: the FBX preview export is not modelled yet"; return null; }
         var st = (RigState)s.VehicleState;
         var meshes = s.Objects.Where(o => o.Type == "MESH" && o.Mesh.Faces.Length > 0).ToList();
+        // a subdivided tread holds polygons: the passes below read triangles, so a recipe that would run one on such a mesh is named
+        bool Poly(BlenderRigAnim.SceneObject o) => o.Mesh.PolyStart != null;
+        if (meshes.Any(Poly))
+        {
+            bool insideOut = a.FixInsideOut && meshes.Any(o => Poly(o) && !(OarMesh(o) || CanvasMesh(o) || o.Name.StartsWith("Mesh___rud__", StringComparison.Ordinal) || o.Name.StartsWith("Mesh___keep__", StringComparison.Ordinal) || o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal)));
+            bool windingFlip = meshes.Any(o => Poly(o) && o.Name.StartsWith("Mesh___flip__", StringComparison.Ordinal));
+            bool twoSidedScene = meshes.Any(o => o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal));
+            bool doubled = meshes.Any(o => Poly(o) && (a.DoubleSided
+                ? !OarMesh(o) && !o.Name.StartsWith("Mesh___keep__", StringComparison.Ordinal) && !o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal)
+                : (CanvasMesh(o) || o.Name.StartsWith("Mesh___rud__", StringComparison.Ordinal)) && !o.Name.StartsWith("Mesh___rigsail__", StringComparison.Ordinal)));
+            string pass = insideOut ? "the inside-out fix" : windingFlip ? "the winding flip" : twoSidedScene ? "the Two-sided pass beside" : doubled ? "the double-sided shell" : null;
+            if (pass != null) { s.Fallback = "stage 5: " + pass + " of a tread mesh of polygons (d6) is not modelled yet"; return null; }
+        }
         int reversed = 0, kept = 0;
         if (a.FixInsideOut)
         {
@@ -283,7 +296,7 @@ public static partial class BlenderVehicleRig
             }
             s.Logs5.Add("VEHICLE double-sided: " + targets.Count + " mesh(es) made two-sided at the source (whole-model inset " + BlenderRigAnim.PyFixed(offset, 4) + " world)");
         }
-        var all = s.Objects.Where(o => o.Type == "MESH" && o.Mesh.Vertices > 0).ToList(); int verts = all.Sum(o => o.Mesh.Vertices), tris = all.Sum(o => o.Mesh.Faces.Length / 3);
+        var all = s.Objects.Where(o => o.Type == "MESH" && o.Mesh.Vertices > 0).ToList(); int verts = all.Sum(o => o.Mesh.Vertices), tris = all.Sum(o => o.Mesh.Faces.Length - 2 * o.Mesh.FaceCount);   // len(loop_triangles): corners - 2 per face
         s.Logs5.Add("VEHICLE export totals: " + verts + " verts, " + tris + " tris across " + all.Count + " mesh(es)");
         // the script's _bone_wall_check(arm): every rig, past the 126-bone budget, says so (the Lab shows *** WARNING lines)
         if (s.Armature.BoneNodes.Count > 126)
@@ -295,6 +308,7 @@ public static partial class BlenderVehicleRig
         foreach (var o in all)
         {
             var me = o.Mesh;
+            if (me.PolyStart != null) continue;   // the export refused a polygon mesh its validate() would change
             var r = new BlenderReduce.Result { VertexCount = me.Vertices, FaceCount = me.Faces.Length / 3, Positions = me.Positions, Faces = me.Faces, Edges = me.Edges, FaceMaterial = me.FaceMaterial, FaceSharp = me.FaceSharp, CustomNormal = me.CustomNormal };
             r.Uv.AddRange(me.UvAll); r.Colors.AddRange(me.Colors);
             var v = BlenderExport.Validated(r);
@@ -317,7 +331,10 @@ public static partial class BlenderVehicleRig
             + (a.RockOn ? ", wave rock " + BlenderRigAnim.PyFixed(a.RockDeg, 1) + " deg x" + repeats + " fitted cycle(s)" : "") + ", exported " + verts + " verts / " + tris + " tris -> " + a.OutGlb);
         var visited = s.Actions.Where(act => act.Slots.Any(sl => sl.FCurves.Any(fc => fc.Bone != null))).OrderBy(act => BlenderRigAnim.PyLower(act.Name), BlenderRigAnim.PyStringOrder).ToList();
         if (visited.Count > 1 || (visited.Count > 0 && visited[0].Name != st.Arm.Action))
-            foreach (int b in s.Armature.BoneNodes) { s.Armature.PoseProps[b] = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } }; s.Armature.PoseEuler[b] = new float[3]; }
+            foreach (int b in s.Armature.BoneNodes) { s.Armature.PoseProps[b] = new[] { new float[3], new[] { 1f, 0f, 0f, 0f }, new[] { 1f, 1f, 1f } }; 
+                // matrix_basis.identity() on an XYZ bone reads the identity back as the Euler (0, -0, 0) (atan2f(-m[0][2], cy)); a keyed channel
+                // is written over at the next evaluation, an unkeyed one (a tread carrier's rotation) keeps it
+                s.Armature.PoseEuler[b] = s.Armature.RotMode.TryGetValue(b, out var rmode) && rmode == "XYZ" ? new[] { 0f, -0f, 0f } : new float[3]; }
         if (visited.Count > 0 && visited.Last().Name == st.Arm.Action)
         {
             var range = BlenderRigExport.ActionRange(visited.Last());

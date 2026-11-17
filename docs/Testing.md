@@ -2754,6 +2754,27 @@ controls must produce measurable exports that fail this numerical assertion; cra
 Removing or duplicating either fixture also fails rather than silently skipping the repeat. The port itself stays deferred: re-measured the same day, the Bradley is left at stage 1 by name as a skinned .fbx even
 with the native FBX reader (the vehicle import's direct-versus-round-trip leave), so d6 would still turn no recipe equal.
 
+The tread rig, first part (2026-11-16, d6): the carrier-skinned conveyor is modelled, so the tracked fixtures are COMPARED,
+not left. What had to exist first: `BlenderSubdivide.cs` (bmesh.ops.subdivide_edges, one cut, grid fill - `BlenderSubdivideTests`
+against `blender_subdivide.txt`, what `tools/vehiclerig-drill/blender_subdivide_oracle.py` printed: six meshes, up to three
+passes on one BMesh, the whole state after each pass; a census test fails if a branch of the operator is not taken), and
+polygons in the stage model (`MeshData.PolyStart`: the MESH row hashes Blender's loop_start / loop_total, so a wrong face
+layout fails the row). The vehicle_rig drill holds three fixtures equal at every stage and the GLB byte for byte, and FAILS if
+one of them comes back left: `fx_r_tracks_fallback` and `fx_r_tracks_recoil` (the 8-vertex belt: 8 -> 94 vertices, 104 faces of
+392 corners) and `fx_r_tracks_roads`, written because the 8-vertex belt reaches only the default wrap bands and two of the nine
+groups' regions - a ribbon belt round a sprocket, two road wheels, an idler and a return roller (176 -> 428 vertices; all four
+bands measured on eight or more vertices; every one of the nine groups holds vertices). Planted once each: the under-band's
+fade factor 0.7 -> 0.6 fails the roads fixture alone at stage 3; a polygon's corner normals replaced by its first corner's
+fail the export rows and the bytes of both 8-vertex fixtures. Two readings that cost a run each: `rotation_mode = 'XYZ'` on a
+bone still in QUATERNION turns the identity into the Euler (0, -0, 0), and the exporter's pose reset does the same - a
+carrier's rotation is never keyed, so the -0 stays in its PB row; and the weights of a vertex need not sum to 1 (the smoothing
+normalizes, then drops every share of 0.005 or less). `VehicleRigTreadTests` (7) hold the shape and the named leaves. NOT
+modelled, left by name: a tread whose link pitch is found (`stage 3: the tread's link-cell rig (d6: a link pitch was found)`,
+the Bradley), rigid links, a tread with no sprocket or idler cluster (the script's own ValueError), and at stage 5 the
+inside-out fix, winding flip, the double-sided shell (including role-driven doubling) and the Two-sided pass on or beside
+a polygon tread. NOT checked: nothing ran in
+Unity or in the game; no saved recipe takes the new path (the Bradley has a link pitch), so the evidence is the fixtures.
+
 The gun's recoil defects (2026-11-07): the recoil-side entries open since October, fixed in `vehicle_rig.py` and in the C#
 port in the same PR so the parity drill holds each fix (the fixtures are TAKEN by the port, unlike the tread's). (1) The arc's
 bore came from `gun_axis` (trunnion -> muzzle): at a pivot of 1.0 the trunnion is the muzzle and the difference is a float32

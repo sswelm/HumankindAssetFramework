@@ -26,7 +26,11 @@
 //     power-iteration PC1s, the islands projected across it and clustered single-linkage (a grid of merge-eps cells, CPython's
 //     math.hypot), one Oar_%03d bone per cluster at its oarlock; the blade roll and the length rewrite the rest geometry; each oar
 //     part skins per vertex and keeps its own mesh (__oar__<part>) through the join. Python's float sum() is compensated: PySum.
-// The tread rig (d6) is left to Blender by name, as is a scene this part does not expect (an armature still
+// Part d6, the TREAD rig (2026-11-16): per live tread nine bones after the trails - five shuttle carriers at the part's centre, four
+// wrap bones laid on the sprocket's, the idler's and the first and last road wheel's cluster bones; the part skins per vertex
+// (BlenderVehicleRig.Tread.cs) and keeps its own mesh (__track__<part>), which holds POLYGONS after the subdivision. Left to
+// Blender by name: a tread whose link pitch is found (the link cells), the rigid links, a tread without a sprocket or idler
+// cluster; as is a scene this part does not expect (an armature still
 // there, a parented part, a mesh still carrying an Armature modifier, a main rotor hub whose covariance is non-finite with two or
 // more vertices, or whose eigh takes a LAPACK branch not ported: rescaling a tiny or huge entry, DSTEQR not converging; an oar
 // part without its edge list, a non-finite projected centre, a world with no inverse, an infinite blade roll).
@@ -44,7 +48,7 @@ public static partial class BlenderVehicleRig
     /// <summary>The branches of stage 3 the C# does not model yet: the role list that takes each, and the part that will.</summary>
     static readonly (string role, string branch)[] Stage3Later =
     {
-        ("tracks", "the tread rig (d6)"),
+        ("tracks", "the tread rig's rigid links (d6)"),
     };
 
     /// <summary>Stage 3 on the scene stage 2 left: the rig. Lines go to s.Logs3; a branch not modelled sets s.Fallback; the script's exit
@@ -54,7 +58,7 @@ public static partial class BlenderVehicleRig
         if (s.Fallback != null || s.Exits || s.Dies != null) return;
         foreach (var (role, branch) in Stage3Later)
         {
-            if (role == "tracks" && a.TracksStatic) continue;   // tracks_static empties track_names: the treads rig as plain body parts
+            if (role == "tracks" && (a.TracksStatic || !a.TreadLinks)) continue;   // tracks_static empties track_names; the conveyor's carrier skinning is modelled (BlenderVehicleRig.Tread.cs)
             if (a.Names.TryGetValue(role, out var l) && l.Count > 0) { s.Fallback = "stage 3: " + branch + " is not modelled yet"; return; }
         }
         if (a.TracksStatic && a.Names.TryGetValue("tracks", out var st) && st.Count > 0) Note(s, "static tracks rigged as body parts");
@@ -258,6 +262,7 @@ public static partial class BlenderVehicleRig
             roll[id] = tailRoll; clusterBoneIds.Add(id);
             foreach (var wn in cl.names) boneOf[wn] = boneNames[id - RigBoneBase];
         }
+
         // ---- the TURRET bone: the turret parts' combined box (_combined_bbox: each part's world_bbox, min(c - s/2) and max(c + s/2) in
         // Python floats, the Vectors' (mn + mx) / 2 and mx - mn in float32), the tail up by max(0.05, its largest extent * 0.25)
         bool CombinedBox(List<string> partNames, out float[] cc, out float[] cs)
@@ -416,6 +421,54 @@ public static partial class BlenderVehicleRig
             s.Logs3.Add("VEHICLE trail '" + trailNames[ti] + "' -> " + boneNames[tb - RigBoneBase] + " hinge=(" + P2(hinge[0]) + ", " + P2(hinge[1]) + ", " + P2(hinge[2]) + ") spade=(" + P2(spade[0]) + ", " + P2(spade[1]) + ", " + P2(spade[2]) + ")");
             Note(s, "a trail bone");
         }
+
+        // ---- the TRACK bones (d6, vehicle_rig.py 1918-1960): per live tread five shuttle carriers at the part's centre and four
+        // wrap bones laid on the sprocket's, the idler's and the first and last road wheel's cluster bones (head, tail and roll copied)
+        var trackInfos = new List<TrackInfo>();
+        var liveTracks = !a.TracksStatic && a.Names.TryGetValue("tracks", out var trackList) ? trackList : new List<string>();
+        for (int i = 0; i < liveTracks.Count; i++)
+        {
+            var o = Find(liveTracks[i]); if (o == null) return;
+            WorldBbox(o, out var c, out var sz);
+            bool pos = c[1] >= 0; string side = pos ? "L" : "R";
+            var sideCls = Enumerable.Range(0, clusters.Count).Where(k => (clusters[k].c[1] >= 0) == pos).ToList();
+            if (sideCls.Count == 0) sideCls = Enumerable.Range(0, clusters.Count).ToList();
+            var ti = new TrackInfo { Part = liveTracks[i], Centre = (float[])c.Clone(), Bones = new string[9] };
+            foreach (int k in sideCls)   // max / min by the centre's x: the first on a tie
+            {
+                if (ti.Front < 0 || clusters[k].c[0] > clusters[ti.Front].c[0]) ti.Front = k;
+                if (ti.Rear < 0 || clusters[k].c[0] < clusters[ti.Rear].c[0]) ti.Rear = k;
+            }
+            double tq = MaxOf(sz) * 0.25; float tlen = (float)(tq > 0.05 ? tq : 0.05);
+            float[] TrackTail() => new[] { (float)(c[0] + 0f), (float)(c[1] + 0f), (float)(c[2] + tlen) };
+            var suffixes = new[] { "Bot", "Top", "RampF", "RampR", "RampRT", "WrapF", "WrapR", "WrapGF", "WrapGR" };
+            int trackNo = i;
+            string TrackName(int k) => "Track_" + trackNo.ToString("00", CultureInfo.InvariantCulture) + "_" + side + "_" + suffixes[k];
+            for (int k = 0; k < 5; k++) { int id = AddBone(TrackName(k), (float[])c.Clone(), TrackTail(), body); ti.Bones[k] = boneNames[id - RigBoneBase]; }
+            int lowF = -1, lowR = -1;
+            foreach (int k in sideCls)
+            {
+                if (!(clusters[k].c[2] <= c[2]) || k == ti.Front || k == ti.Rear) continue;
+                if (lowF < 0 || clusters[k].c[0] > clusters[lowF].c[0]) lowF = k;
+                if (lowR < 0 || clusters[k].c[0] < clusters[lowR].c[0]) lowR = k;
+            }
+            ti.RoadF = lowF >= 0 ? lowF : ti.Front; ti.RoadR = lowR >= 0 ? lowR : ti.Rear;
+            var wrapOf = new[] { ti.Front, ti.Rear, ti.RoadF, ti.RoadR };
+            for (int k = 0; k < 4; k++)
+            {
+                int id;
+                if (wrapOf[k] >= 0)
+                {
+                    int wbId = clusterBoneIds[wrapOf[k]];
+                    id = AddBone(TrackName(5 + k), (float[])head[wbId].Clone(), (float[])tail[wbId].Clone(), body); roll[id] = roll[wbId];
+                }
+                else id = AddBone(TrackName(5 + k), (float[])c.Clone(), TrackTail(), body);
+                ti.Bones[5 + k] = boneNames[id - RigBoneBase];
+            }
+            trackInfos.Add(ti); Note(s, "the tread's carrier and wrap bones");
+        }
+        var trackByName = new Dictionary<string, TrackInfo>(StringComparer.Ordinal);
+        foreach (var ti in trackInfos) trackByName[ti.Part] = ti;   // {t[0]: t for t in track_infos}: the last of a repeated name
 
         // ---- the SAIL bone: every found sail part on it; the head at the keel line (the lowest world bound_box corner of every mesh
         // with vertices) less 0.05 under the sails' box centre, the tail up by max(0.3, a quarter of the sails' height); with the fold,
@@ -746,6 +799,13 @@ public static partial class BlenderVehicleRig
         foreach (var o in objs)
         {
             string bname = boneOf.TryGetValue(o.Name, out var wb) ? wb : bodyBone;
+            if (!oarParts.Contains(o.Name) && trackByName.TryGetValue(o.Name, out var track))
+            {
+                var why = TreadSkin(s, o, track, clusters.Select(cl => (cl.m, cl.c)).ToList(), a);
+                if (why != null) { s.Fallback = "stage 3: " + why; return; }
+                o.Mesh.ArmatureModifier = armObjName; o.Parent = armObj;
+                continue;
+            }
             var d = o.Mesh;
             d.DefNr = new List<int>[d.Vertices]; d.DefWeight = new List<float>[d.Vertices];
             if (oarParts.Contains(o.Name))
@@ -800,6 +860,7 @@ public static partial class BlenderVehicleRig
                        : preserve.Contains(o.Name) ? "__keep__" + o.Name
                        : flip.Contains(o.Name) ? "__flip__" + o.Name
                        : rigOnSail.Contains(o.Name) ? "__rigsail__"
+                       : trackByName.ContainsKey(o.Name) ? "__track__" + o.Name
                        : boneOf.TryGetValue(o.Name, out var wb) ? wb : bodyBone;
             if (!groupAt.TryGetValue(key, out int gi)) { groupAt[key] = groups.Count; groups.Add((key, new List<BlenderRigAnim.SceneObject> { o })); }
             else groups[gi].members.Add(o);
@@ -832,6 +893,7 @@ public static partial class BlenderVehicleRig
             RecoilSlide = recoilSlide, RecoilRadius = recoilRadius,
         };
         foreach (int id in clusterBoneIds) rs.ClusterBones.Add(boneNames[id - RigBoneBase]);
+        rs.Tracks = trackInfos;
         for (int i = 0; i < boneNames.Count; i++) rs.BoneId[boneNames[i]] = RigBoneBase + i;
         s.VehicleState = rs;
     }
