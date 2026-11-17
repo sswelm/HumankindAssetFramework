@@ -2771,7 +2771,8 @@ carrier's rotation is never keyed, so the -0 stays in its PB row; and the weight
 normalizes, then drops every share of 0.005 or less). `VehicleRigTreadTests` (7) hold the shape and the named leaves. NOT
 modelled, left by name: a tread whose link pitch is found (`stage 3: the tread's link-cell rig (d6: a link pitch was found)`,
 the Bradley), rigid links, a tread with no sprocket or idler cluster (the script's own ValueError), and at stage 5 the
-inside-out fix, the double-sided shell and the Two-sided pass on or beside a polygon tread. NOT checked: nothing ran in
+inside-out fix, winding flip, the double-sided shell (including role-driven doubling) and the Two-sided pass on or beside
+a polygon tread. NOT checked: nothing ran in
 Unity or in the game; no saved recipe takes the new path (the Bradley has a link pitch), so the evidence is the fixtures.
 
 The gun's recoil defects (2026-11-07): the recoil-side entries open since October, fixed in `vehicle_rig.py` and in the C#

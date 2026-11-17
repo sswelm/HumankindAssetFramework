@@ -87,9 +87,14 @@ public class VehicleRigTreadTests
     [Theory]
     [InlineData("double", "stage 5: the double-sided shell of a tread mesh of polygons (d6) is not modelled yet")]
     [InlineData("insideout", "stage 5: the inside-out fix of a tread mesh of polygons (d6) is not modelled yet")]
+    [InlineData("flip", "stage 5: the winding flip of a tread mesh of polygons (d6) is not modelled yet")]
+    [InlineData("rudder", "stage 5: the double-sided shell of a tread mesh of polygons (d6) is not modelled yet")]
     public void A_pass_that_reads_triangles_leaves_a_polygon_tread_by_name(string pass, string reason)
     {
-        var a = TrackedArgs(); if (pass == "double") a.DoubleSided = true; else a.FixInsideOut = true;
+        var a = TrackedArgs();
+        if (pass == "double") a.DoubleSided = true;
+        else if (pass == "insideout") a.FixInsideOut = true;
+        else Mark(a, pass == "rudder" ? "rudders" : "flip", "Belt");
         var s = Stages(Tracked(), a, 4); Assert.Null(s.Fallback);
         Assert.Null(BlenderVehicleRig.RunStage5(s, a));
         Assert.Equal(reason, s.Fallback);
@@ -109,6 +114,28 @@ public class VehicleRigTreadTests
         Assert.DoesNotContain(s.Objects, o => o.Mesh?.PolyStart != null);
     }
 
+    [Fact]
+    public void A_tread_without_wheels_declines_before_subdivision()
+    {
+        var a = Args(); Mark(a, "tracks", "Belt");
+        var s = Stages(Tracked(), a, 3);
+        Assert.Equal("stage 3: the tread without a sprocket or an idler cluster (d6: the script's own ValueError) is not modelled yet", s.Fallback);
+        Assert.DoesNotContain(s.Logs3, l => l.StartsWith("VEHICLE tread 'Belt' subdivided:", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("flip")]
+    [InlineData("rudders")]
+    public void Triangle_finishing_beside_a_polygon_tread_stays_supported(string role)
+    {
+        var a = TrackedArgs(); Mark(a, role, "Hull");
+        var s = Stages(Tracked(), a, 4);
+        Assert.Contains(s.Objects, o => o.Mesh?.PolyStart != null);
+        var x = BlenderVehicleRig.RunStage5(s, a);
+        Assert.Null(s.Fallback); Assert.NotNull(x); Assert.Null(x.Fallback);
+        Assert.Contains(s.Logs5, l => l.StartsWith(role == "flip" ? "VEHICLE FLIP applied:" : "VEHICLE double-sided 'Mesh___rud__Hull':", StringComparison.Ordinal));
+    }
+
     /// <summary>A belt whose bottom run repeats every 0.1 along x has a link pitch: its link cells are not ported yet.</summary>
     [Fact]
     public void A_tread_with_a_link_pitch_is_left_by_name()
@@ -125,6 +152,10 @@ public class VehicleRigTreadTests
         // the measurement itself: 0.1 is the largest strong period, so the physical link; the pitch is the smallest strong one
         string line = Assert.Single(s.Logs3.Where(l => l.StartsWith("VEHICLE tread 'Belt' link pitch: ", StringComparison.Ordinal)));
         Assert.Contains("physical link 0.100 (from", line);
+        // The unsupported shape is already known after measuring pitch. Do not subdivide it or
+        // compute carrier weights before falling back to Blender, which repeats that work.
+        Assert.DoesNotContain(s.Logs3, l => l.StartsWith("VEHICLE tread 'Belt' subdivided:", StringComparison.Ordinal));
+        Assert.DoesNotContain("a tread subdivided for its wrap arcs", s.Notes);
     }
 
     [Fact]
