@@ -192,6 +192,76 @@ public class VehicleRigTreadTests
         Assert.Contains(s.Logs4, l => l.StartsWith("VEHICLE tread 'Belt' RIGID LINKS circuit: " + links.Count + " link bones, the whole loop ", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void Rigid_link_skinning_can_stop_after_subdivision_before_instancing_finishes(bool cancel)
+    {
+        var m = Tracked(); Ladder(m); var a = TrackedArgs("treadmode=links");
+        var s = Stages(m, a, 2);
+        Action run = () => BlenderVehicleRig.RunStage3(s, a, () => {
+            if (!s.Notes.Contains("a tread subdivided for its wrap arcs")) return;
+            if (cancel) throw new OperationCanceledException();
+            throw new TimeoutException("deadline");
+        });
+        if (cancel) Assert.Throws<OperationCanceledException>(run); else Assert.Throws<TimeoutException>(run);
+        Assert.DoesNotContain("rigid links: the band rebuilt from copies of one link", s.Notes);
+        Assert.Null(s.Dies); Assert.Null(s.Fallback);
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void Generate_interrupted_inside_tread_skinning_keeps_the_previous_output(bool cancel)
+    {
+        string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "rigid-cancel-" + Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(dir);
+        try
+        {
+            string source = System.IO.Path.Combine(dir, "source.glb"), output = System.IO.Path.Combine(dir, "out.glb");
+            var m = Tracked(); Ladder(m);
+            foreach (var primitive in m.Meshes.SelectMany(me => me.Primitives)) primitive.VertexCount = primitive.Positions.Length / 3;
+            GlbWriter.Write(m, source);
+            var argv = Enumerable.Repeat("", 76).ToList();
+            argv[0] = "rig"; argv[1] = source; argv[2] = output; argv[4] = "W0;W1;W2;W3";
+            argv[7] = "15"; argv[8] = "-360"; argv[10] = "Belt"; argv[17] = "0"; argv[21] = "0"; argv.Add("treadmode=links");
+            System.IO.File.WriteAllText(output, "previous rig"); int ticks = 0;
+            // Four wrapper polls precede skinning; the next must occur within that stage,
+            // before the stage completes and its timing/log lines are appended.
+            Action checkpoint = () => {
+                if (++ticks != 5) return;
+                if (cancel) throw new OperationCanceledException();
+                throw new TimeoutException("deadline");
+            };
+            if (cancel) Assert.Throws<OperationCanceledException>(() => BlenderVehicleRigInProcess.Run(argv, checkpoint));
+            else
+            {
+                var result = BlenderVehicleRigInProcess.Run(argv, checkpoint);
+                Assert.False(result.Written); Assert.Null(result.UseBlender); Assert.Contains("deadline", result.Error);
+                Assert.DoesNotContain(result.Log, l => l.StartsWith("VEHICLE timing: rig + skin + join", StringComparison.Ordinal));
+                Assert.DoesNotContain(result.Log, l => l.StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal));
+            }
+            Assert.Equal(5, ticks); Assert.Equal("previous rig", System.IO.File.ReadAllText(output));
+            Assert.Empty(System.IO.Directory.GetFiles(dir, "*.tmp"));
+        }
+        finally { System.IO.Directory.Delete(dir, true); }
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void Rigid_link_animation_can_stop_during_the_circuit(bool cancel)
+    {
+        var m = Tracked(); Ladder(m); var a = TrackedArgs("treadmode=links");
+        var s = Stages(m, a, 3);
+        Action run = () => BlenderVehicleRig.RunStage4(s, a, () => {
+            if (s.FrameCurrent != 2) return;
+            if (cancel) throw new OperationCanceledException();
+            throw new TimeoutException("deadline");
+        });
+        if (cancel) Assert.Throws<OperationCanceledException>(run); else Assert.Throws<TimeoutException>(run);
+        Assert.Equal(2, s.FrameCurrent); Assert.True(s.FrameCurrent < s.FrameEnd);
+        Assert.DoesNotContain(s.Logs4, l => l.Contains("RIGID LINKS circuit:"));
+        Assert.Null(s.Dies); Assert.Null(s.Fallback);
+    }
+
     /// <summary>The script's own error: with fewer than four bones left for a track's links it prints a VEHICLE ERROR and dies. 122
     /// wheels far apart leave (126 - (1 root + 122 wheels + 9 carriers) + 9) // 1 = 3.</summary>
     [Fact]

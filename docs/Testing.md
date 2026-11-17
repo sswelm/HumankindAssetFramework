@@ -2821,6 +2821,12 @@ every curve at every frame of a long circuit costs the square of the clip (2 min
 the evaluation limited to the links' parent chain - the fixtures stayed equal). `VehicleRigTreadTests` (9). NOT checked:
 nothing ran in Unity or in the game; the time a rigid-links Generate takes in the Lab is not measured.
 
+Review of PR #292 (2026-11-17): Generate's cancellation/deadline callback now reaches tread path fitting, rigid-link instancing
+and duplication, and each frame of the link animation circuit. Stage boundaries alone let those loops continue after a cancel
+or the five-minute limit. Six regression cases cover cancellation and deadlines after subdivision, during a circuit, and through
+the Generate wrapper, which preserves the previous output without temporary files or a Blender fallback. The four stage-level
+cases fail without the polls. Uninterrupted results remain held to Blender by the stage and export comparisons above.
+
 The tread rig, fourth part (2026-11-16, d6): the FINISHING PASSES on a tread mesh of polygons. `FaceNormalsAny` is
 BM_face_calc_normal's three cases (normal_tri_v3; normal_quad_v3, the cross of the diagonals; Newell's sum from the last corner for
 a larger face); the doubling's face copy keeps every corner (it built triangles: the first run gave 704 corners for Blender's

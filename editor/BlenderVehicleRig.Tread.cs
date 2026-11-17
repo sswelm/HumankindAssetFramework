@@ -64,8 +64,9 @@ public static partial class BlenderVehicleRig
     /// <summary>The skinning of one tread part. Returns null, or why the part is left to Blender. The part's mesh is replaced
     /// by the subdivided one, its groups and weights set; t receives the pitch, the flow directions and the band radii.</summary>
     static string TreadSkin(BlenderRigAnim.Stage1 s, BlenderRigAnim.SceneObject o, TrackInfo t, IList<(double m, float[] c)> clusters, Args a, List<string> log,
-                            int clusterBones, bool turrets, bool guns, int trackCount, int rigidBudget)
+                            int clusterBones, bool turrets, bool guns, int trackCount, int rigidBudget, Action checkpoint)
     {
+        checkpoint?.Invoke();
         var d0 = o.Mesh; int nv0 = d0.Vertices;
         string botb = t.Bones[0], topb = t.Bones[1], rampfb = t.Bones[2], ramprb = t.Bones[3], ramprtb = t.Bones[4];
         string wrapfb = t.Bones[5], wraprb = t.Bones[6], wrapgfb = t.Bones[7], wrapgrb = t.Bones[8];
@@ -86,6 +87,7 @@ public static partial class BlenderVehicleRig
             double pc = 0.04;
             while (pc <= 0.5)
             {
+                checkpoint?.Invoke();
                 double p = pc;
                 double sr = PySum(xs.Select(x => BlenderTrig.Cos(2 * Math.PI * x / p)));
                 double si = PySum(xs.Select(x => BlenderTrig.Sin(2 * Math.PI * x / p)));
@@ -116,6 +118,7 @@ public static partial class BlenderVehicleRig
         var bm = FromMeshData(d0, layers, faceNormals: false, vertexNormals: false);
         for (int pass = 0; pass < 3; pass++)
         {
+            checkpoint?.Invoke();
             var lng = new List<int>();
             for (int e = 0; e < bm.EdgeCount; e++)
             {
@@ -132,6 +135,7 @@ public static partial class BlenderVehicleRig
         log.Add("VEHICLE tread '" + o.Name + "' subdivided: " + nv0 + " -> " + nv + " verts (edge target " + Py(thr, 3) + ")");
         Note(s, "a tread subdivided for its wrap arcs");
         if (d.PolyStart != null) Note(s, "a tread mesh of polygons");
+        checkpoint?.Invoke();
 
         // ---- the regions
         bool sidePos = tc[1] >= 0;
@@ -285,7 +289,7 @@ public static partial class BlenderVehicleRig
         if (fund > 0.03)
         {
             var why = TreadLinkCells(o, t, clusters, a, log, d, fund, clusterBones, turrets, guns, trackCount, highCls,
-                                     hasF, hasR, sprC, sprR, idlC, idlR, rotF, rotR, rrC, rrR, rotGr, rfC, rfR, rotGf, rigidBudget, out var instanced);
+                                     hasF, hasR, sprC, sprR, idlC, idlR, rotF, rotR, rrC, rrR, rotGr, rfC, rfR, rotGf, rigidBudget, out var instanced, checkpoint);
             if (why != null) return why;
             if (t.Death != null) return null;   // the script died here: its lines are logged, nothing after them counts
             if (instanced != null) { d = instanced; nv = d.Vertices; Note(s, "rigid links: the band rebuilt from copies of one link"); }
@@ -358,7 +362,7 @@ public static partial class BlenderVehicleRig
     static string TreadLinkCells(BlenderRigAnim.SceneObject o, TrackInfo t, IList<(double m, float[] c)> clusters, Args a, List<string> log, BlenderRigAnim.MeshData d, double fund,
                                  int clusterBones, bool turrets, bool guns, int trackCount, List<int> highCls, bool hasF, bool hasR,
                                  float[] sprC, double sprR, float[] idlC, double idlR, double rotF, double rotR, float[] rrC, double rrR, double rotGr, float[] rfC, double rfR, double rotGf,
-                                 int rigidBudget, out BlenderRigAnim.MeshData instanced)
+                                 int rigidBudget, out BlenderRigAnim.MeshData instanced, Action checkpoint)
     {
         instanced = null;
         int nv = d.Vertices;
@@ -394,6 +398,7 @@ public static partial class BlenderVehicleRig
             double arcS0 = 0.0; bool started = false;
             for (int k = 0; k < steps; k++)
             {
+                if ((k & 255) == 0) checkpoint?.Invoke();
                 double ab = a0b + (a1b - a0b) * k / steps;
                 RawAdd(new[] { (float)(xc + rc2 * BlenderTrig.Cos(ab)), 0f, (float)(zc + rc2 * BlenderTrig.Sin(ab)) });
                 if (!started) { arcS0 = cum[cum.Count - 1]; started = true; }   // after the first sample: the jump before it stays outside the arc
@@ -419,6 +424,7 @@ public static partial class BlenderVehicleRig
             var res = new double[nv];
             for (int v = 0; v < nv; v++)
             {
+                if ((v & 255) == 0) checkpoint?.Invoke();
                 double vx = d.Positions[3 * v], vz = d.Positions[3 * v + 2], bd = 1e18; int bmi = 0;
                 for (int m = 0; m < M; m++)
                 {
@@ -507,7 +513,7 @@ public static partial class BlenderVehicleRig
         for (int v = 0; v < nv; v++) cellOf[v] = Math.Min(NC - 1, (int)(PyMod(sOf[v] + bestOff, L) / cellL));
         if (a.TreadLinks)
         {
-            instanced = TreadInstanceLinks(o, d, log, pts, S, L, NC, nl, kph, cellL, bestOff, out cellOf);
+            instanced = TreadInstanceLinks(o, d, log, pts, S, L, NC, nl, kph, cellL, bestOff, out cellOf, checkpoint);
             nv = instanced.Vertices;
         }
         var arcs = arcRaw.Select(r => (a: r.a * L / LP, b: r.b * L / LP)).Where(r => r.b - r.a >= cellL).ToList();
@@ -610,12 +616,13 @@ public static partial class BlenderVehicleRig
     /// <summary>bmesh.ops.duplicate(bm, geom=faces) for a list of faces (bmo_dupe.cc bmo_mesh_copy): the faces in the mesh's own order;
     /// per face its vertices in corner order copied where not yet copied, then its edges likewise (between the copies of the
     /// edge's own v1 and v2), then the face with every corner's data. Returns vert_map: the vertex -> its copy.</summary>
-    static Dictionary<int, int> DuplicateFaces(BMesh bm, BlenderWeld.Layers layers, List<int> faces)
+    static Dictionary<int, int> DuplicateFaces(BMesh bm, BlenderWeld.Layers layers, List<int> faces, Action checkpoint)
     {
         var flagged = new HashSet<int>(faces); var vmap = new Dictionary<int, int>(); var emap = new Dictionary<int, int>();
         int faceCount = bm.FaceCount; var loops = new List<int>(); var newLoops = new List<int>();
         for (int f = 0; f < faceCount; f++)
         {
+            if ((f & 255) == 0) checkpoint?.Invoke();
             if (!bm.FAlive[f] || !flagged.Contains(f)) continue;
             loops.Clear(); bm.LoopsOfFace(f, loops);
             foreach (int l in loops)
@@ -656,7 +663,7 @@ public static partial class BlenderVehicleRig
     /// cell's frame, are laid into every cell's frame on a duplicate of the faces; the original vertices are deleted. The result
     /// has no custom normals (the source's describe the bent band).</summary>
     static BlenderRigAnim.MeshData TreadInstanceLinks(BlenderRigAnim.SceneObject o, BlenderRigAnim.MeshData d, List<string> log, float[][] pts, double[] S, double L,
-                                                      int NC, int nl, int kph, double cellL, double bestOff, out int[] cellOf)
+                                                      int NC, int nl, int kph, double cellL, double bestOff, out int[] cellOf, Action checkpoint)
     {
         const int M = 512;
         var layers = new BlenderWeld.Layers(); var bm = FromMeshData(d, layers, faceNormals: false, vertexNormals: false);
@@ -677,6 +684,7 @@ public static partial class BlenderVehicleRig
         var fSc0 = new double[NC]; var fMid = new float[NC][]; var fDc = new float[NC][]; var fNc = new float[NC][]; var fNear = new List<int>[NC]; var fChord = new double[NC];
         for (int ci = 0; ci < NC; ci++)
         {
+            checkpoint?.Invoke();
             double sc0 = PyMod((ci + 0.5) * cellL - bestOff, L);
             var pa = Pe(sc0 - hl); var pb = Pe(sc0 + hl);
             var dc = Sub(pb, pa); fChord[ci] = VecLength(dc);
@@ -688,6 +696,7 @@ public static partial class BlenderVehicleRig
         var facesOf = new Dictionary<int, List<int>>(); var loops = new List<int>();
         for (int f = 0; f < bm.FaceCount; f++)
         {
+            if ((f & 255) == 0) checkpoint?.Invoke();
             if (!bm.FAlive[f]) continue;
             loops.Clear(); bm.LoopsOfFace(f, loops);
             float cx = 0f, cz = 0f;   // BM_face_calc_center_median: the corners summed in float32, times 1.0f / len
@@ -735,7 +744,8 @@ public static partial class BlenderVehicleRig
             for (int j = 0; j < nl; j++)
             {
                 int ci = j * kph + q;
-                var vm = DuplicateFaces(bm, layers, src);
+                checkpoint?.Invoke();
+                var vm = DuplicateFaces(bm, layers, src, checkpoint);
                 foreach (var (v, ds, hv) in local)
                 {
                     int nv = vm[v];
@@ -745,7 +755,11 @@ public static partial class BlenderVehicleRig
                 }
             }
         }
-        foreach (int v in orig) if (bm.VAlive[v]) bm.VertKill(v);   // bmesh.ops.delete(geom=the original vertices, context='VERTS')
+        foreach (int v in orig)
+        {
+            if ((v & 255) == 0) checkpoint?.Invoke();
+            if (bm.VAlive[v]) bm.VertKill(v);   // bmesh.ops.delete(geom=the original vertices, context='VERTS')
+        }
         var cells = new List<int>(); for (int v = 0; v < bm.VertCount; v++) if (bm.VAlive[v]) cells.Add(vcell[v]);
         cellOf = cells.ToArray();
         int nf1 = bm.TotFace, nv1 = bm.TotVert;

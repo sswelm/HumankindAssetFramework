@@ -110,7 +110,10 @@ public static partial class BlenderVehicleRig
         }
     }
 
-    public static void RunStage4(BlenderRigAnim.Stage1 s, Args a)
+    public static void RunStage4(BlenderRigAnim.Stage1 s, Args a) => RunStage4(s, a, null);
+
+    // A rigid circuit can key every link over thousands of frames; poll within that loop.
+    public static void RunStage4(BlenderRigAnim.Stage1 s, Args a, Action checkpoint)
     {
         if (s.Fallback != null || s.Exits || s.Dies != null) return;
         var st = s.VehicleState as RigState;
@@ -568,6 +571,7 @@ public static partial class BlenderVehicleRig
                     foreach (int ci in job.Cells) for (int pb = ad.Rest.Parent[st.BoneId[L2(ci)]]; pb >= 0; pb = ad.Rest.Parent[pb]) parentChain.Add(s.Names.BoneOfJoint[pb]);
                     for (int f = 0; f <= clip; f++)
                     {
+                        checkpoint?.Invoke();
                         TreadFrameSet(f);
                         EvaluatePose(f, parentChain); var poseNow = VehiclePoseMats(ad);
                         foreach (int ci in job.Cells)
