@@ -878,8 +878,8 @@ static class StageDrill
     {
         if (fallback == null) return false;
         if (fallback == "stage 5: the export of brightness-edited image bytes is not modelled yet" || fallback == "stage 5: the FBX preview export is not modelled yet") return true;
-        // a subdivided tread holds polygons (d6): the three passes that read triangles, each named whole
-        foreach (string pass in new[] { "the inside-out fix", "the Two-sided pass beside", "the double-sided shell" })
+        // a subdivided tread holds polygons (d6): the passes that read triangles, each named whole
+        foreach (string pass in new[] { "the inside-out fix", "the winding flip", "the Two-sided pass beside", "the double-sided shell" })
             if (fallback == "stage 5: " + pass + " of a tread mesh of polygons (d6) is not modelled yet") return true;
         const string head = "stage 5: the GLB export (", tail = ") is not modelled yet";
         if (!fallback.StartsWith(head, StringComparison.Ordinal) || !fallback.EndsWith(tail, StringComparison.Ordinal) || fallback.Length <= head.Length + tail.Length) return false;
