@@ -2821,6 +2821,12 @@ every curve at every frame of a long circuit costs the square of the clip (2 min
 the evaluation limited to the links' parent chain - the fixtures stayed equal). `VehicleRigTreadTests` (9). NOT checked:
 nothing ran in Unity or in the game; the time a rigid-links Generate takes in the Lab is not measured.
 
+Review of PR #292 (2026-11-17): Generate's cancellation/deadline callback now reaches tread path fitting, rigid-link instancing
+and duplication, and each frame of the link animation circuit. Stage boundaries alone let those loops continue after a cancel
+or the five-minute limit. Six regression cases cover cancellation and deadlines after subdivision, during a circuit, and through
+the Generate wrapper, which preserves the previous output without temporary files or a Blender fallback. The four stage-level
+cases fail without the polls. Uninterrupted results remain held to Blender by the stage and export comparisons above.
+
 The gun's recoil defects (2026-11-07): the recoil-side entries open since October, fixed in `vehicle_rig.py` and in the C#
 port in the same PR so the parity drill holds each fix (the fixtures are TAKEN by the port, unlike the tread's). (1) The arc's
 bore came from `gun_axis` (trunnion -> muzzle): at a pivot of 1.0 the trunnion is the muzzle and the difference is a float32
