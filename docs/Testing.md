@@ -2771,7 +2771,8 @@ carrier's rotation is never keyed, so the -0 stays in its PB row; and the weight
 normalizes, then drops every share of 0.005 or less). `VehicleRigTreadTests` (7) hold the shape and the named leaves. NOT
 modelled, left by name: a tread whose link pitch is found (`stage 3: the tread's link-cell rig (d6: a link pitch was found)`,
 the Bradley), rigid links, a tread with no sprocket or idler cluster (the script's own ValueError), and at stage 5 the
-inside-out fix, the double-sided shell and the Two-sided pass on or beside a polygon tread. NOT checked: nothing ran in
+inside-out fix, winding flip, the double-sided shell (including role-driven doubling) and the Two-sided pass on or beside
+a polygon tread. NOT checked: nothing ran in
 Unity or in the game; no saved recipe takes the new path (the Bradley has a link pitch), so the evidence is the fixtures.
 
 The tread rig, second part (2026-11-16, d6): the LINK BONES. A tread whose link pitch is found is cut into cells along a path:
@@ -2789,12 +2790,17 @@ fcurves, 3,348 keys) is equal at all five stages, the GLB byte for byte, and the
 keys) is equal at all five stages. Its file first differed in two images: the metallic-roughness textures the FBX reader
 composes from two files' pixels, where Blender's side of this drill carries the PNG its own image writer made (sRGB, gAMA, cHRM,
 eXIf, oFFs chunks, another deflate stream). Measured before deciding anything: 0 of 50,331,648 pixel bytes differ in each. So the
-vehicle_rig drill now does, for an .fbx job only, what the FBX model drill does for a composed image: a PNG whose bytes differ
-from its IMG row is decoded on both sides (Blender's out of its own exported file, whose bytes must hash to the row); with every
+vehicle_rig drill now does what the FBX model drill does for a composed image: only a PNG identified as composed by the FBX reader
+whose bytes differ from its IMG row is decoded on both sides (Blender's out of its own exported file, whose bytes must hash to the row); with every
 pixel equal Blender's bytes stand in, and the rest of the file - the JSON, every other view - is still compared byte for byte.
 The `EXPORTS` line counts them (`pixelImages`), a `PIXELS <job>` line names the job. Planted: one bit of one pixel flipped fails
 both images by pixel and channel. NOT modelled, left by name: Rigid links (`treadmode=links`), and the stage 5 passes on a
 polygon tread. NOT checked: nothing ran in Unity or in the game - the Bradley's C# rig has not been looked at there.
+
+Review of PR #291 (2026-11-17): composition provenance follows both source imports through material gathering, including an FBX
+merged into a GLB job. Ordinary source PNGs still require identical bytes; the job's filename does not grant a pixel-only exception.
+Five regression cases cover source-byte preservation, alternate composition encodings, a merged FBX, one changed pixel channel,
+and an oracle image that does not hash to its evidence row. The source-byte and merged-FBX cases fail the original comparison.
 
 The tread rig, third part (2026-11-16, d6): RIGID LINKS. The five fixtures of `recipes_rigid` were a Blender-only check
 (`blender_rigid_tread_check.py`, which stays); they now also run through the stage comparison, the two that are the script's

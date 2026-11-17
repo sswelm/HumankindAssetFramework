@@ -103,6 +103,10 @@ public static partial class BlenderVehicleRig
         }
         t.Pitch = pitch; t.Fund = fund;
         log.Add("VEHICLE tread '" + o.Name + "' link pitch: " + Py(pitch, 3) + ", physical link " + Py(fund, 3) + " (from " + xs.Count + " bottom-run verts)");
+        // The script unpacks three values from _wrap_band's two when a wheel is missing.
+        // Decline before subdividing geometry Blender would have to build again.
+        if (!hasF || !hasR || clusters[t.Front].m <= 0.0 || clusters[t.Rear].m <= 0.0)
+            return "the tread without a sprocket or an idler cluster (d6: the script's own ValueError) is not modelled yet";
 
         // ---- the subdivision
         var wrapRs = new List<double>();
@@ -150,9 +154,6 @@ public static partial class BlenderVehicleRig
         var far = new[] { 1e9f, 1e9f, 1e9f };
         float[] sprC = hasF ? clusters[t.Front].c : far; double sprR = hasF ? clusters[t.Front].m * 0.5 : 0.0;
         float[] idlC = hasR ? clusters[t.Rear].c : far; double idlR = hasR ? clusters[t.Rear].m * 0.5 : 0.0;
-        // _wrap_band returns TWO values for a radius of zero and the script unpacks three: its own ValueError
-        if (sprR <= 0.0 || idlR <= 0.0) return "the tread without a sprocket or an idler cluster (d6: the script's own ValueError) is not modelled yet";
-
         float[] P(int v) => new[] { d.Positions[3 * v], d.Positions[3 * v + 1], d.Positions[3 * v + 2] };
         double Dist(float[] p, float[] c) => VecLength(Sub(p, c));
         (double full, double fade, double rot) WrapBand(float[] wc, double r0, double sgn)
