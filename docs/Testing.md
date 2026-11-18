@@ -2848,6 +2848,26 @@ four wrapper cases also check that an interruption preserves the previous output
 report completion or select Blender after a deadline. Capability and changelog limits now include the Flip and role-shell
 fallbacks retained in the code, rather than claiming that Two-sided on a tread is the only case left.
 
+The source-skeleton fast path (2026-11-16, rigfast): `BlenderVehicleRig.Fast.cs`. The script runs it inside what the drill calls
+stage 1 and exits 0 after its own export, so a FAST job has no stage rows: the drill holds its exit, every VEHICLE line (the
+DONE line's output path normalized) and the exported file through `GlbRowsCompare` - rows and bytes -, and the in-process
+wrapper's file and lines. Fixtures: `fx_fast_wall_126` and `fx_fast_wall_127` (one bone spun -Z; the second prints the bone-wall
+warning) - both were left by name until now -, `fx_fast_two_x` (two bones, the axis forced to X, +90 degrees), and three
+refusals under EXIT:1 keys on FAST lines (`fx_x_fast_bone`: a spin bone the skeleton has not, with the bone list;
+`fx_x_fast_flip`; `fx_x_fast_second`: a second model). The drill script counts a FAST line with an EXIT: key as a stop, not as
+a fast run, and requires all six by name. The source's own clip is exported beside the new one (the fixture's source has an
+action called Spin already, so the new one is Spin.001). Planted: the Euler written to the next axis fails the channel rows and
+the bytes of all three exports. `VehicleRigFastPathTests` (8) hold the refusals' lines and their order on a model without a
+skeleton. NOT covered: the Ehrhardt (the one saved fast-path recipe) is a skinned FBX and is left at the vehicle import by
+name, as before; nothing ran in Unity or in the game.
+
+Review of PR #294 (2026-11-18): `rigfast` only warns when a `parttx=` tag is present; it never calls the mesh path's placement
+reader. The C# argument parser now preserves that presence without opening the unused file. Four unit regressions cover
+missing files, directories, locked files and an empty path, all of which threw before the fast path could print its own
+warning/refusal. A control keeps placement-file loading on the mesh path. The required positive fixture
+`fx_fast_missing_placement` completes rigfast with `parttx=@<missing file>` and compares every line and the full exported GLB
+against Blender, including the Generate wrapper; this makes four required fast-path exports and three required refusals.
+
 The gun's recoil defects (2026-11-07): the recoil-side entries open since October, fixed in `vehicle_rig.py` and in the C#
 port in the same PR so the parity drill holds each fix (the fixtures are TAKEN by the port, unlike the tread's). (1) The arc's
 bore came from `gun_axis` (trunnion -> muzzle): at a pivot of 1.0 the trunnion is the muzzle and the difference is a float32

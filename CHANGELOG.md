@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Vehicle Lab: "Use source skeleton (fast path)" runs in C# (2026-11-16).** The fast path keeps the artist's own
+  skeleton and weights: it only keys a Spin clip on the bones you mark as wheels and exports. In C# now: the script's
+  refusals in its own order (oars, rotors, the wave rock, Flip, Two-sided, the sail fold, a second model, a source with no
+  armature, a bone the skeleton has not - each its own line and exit), the choice of each bone's spin axis (its own axis
+  closest to the axle direction, signed so every wheel turns the same world way), the two keys, the helper objects
+  stripped, the bone-wall warning, and the export of the scene with every clip the source carried. Six fixtures: three
+  exports equal to Blender's line for line and byte for byte (one bone, 127 bones past the wall, two bones on a forced
+  axis with a positive turn), three refusals equal as the script's exit. A wrong spin axis, planted, fails all three
+  exports. **Not covered:** the Ehrhardt, the one saved recipe on the fast path, is a skinned FBX, and the Lab's FBX
+  import for a skinned or animated file still goes to Blender for its own reason (below in this file, 2026-11-02).
 - **Vehicle Lab: Double-sided, Fix inside-out and Two-sided work with a moving tread in C# (2026-11-16; d6, fourth part).**
   The three finishing passes read triangles, and a tread's mesh holds four-sided and larger faces after its subdivision, so
   a recipe combining them still went to Blender. Now: face normals for a face of any size (a quad by its diagonals, a larger

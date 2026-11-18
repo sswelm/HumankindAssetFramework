@@ -82,8 +82,10 @@ public static class BlenderVehicleRigInProcess
             }
             string sourceLimit = BlenderVehicleRig.SourceFallback(a);
             if (a.Problem == null && sourceLimit != null) { o.UseBlender = sourceLimit; return o; }
-            if (a.Problem == null && a.Mode == "rig" && a.PreDie == null && !File.Exists(a.Input)) { o.UseBlender = "the model file is not there"; return o; }
-            HafModel m = a.Problem == null && a.Mode == "rig" && a.PreDie == null ? Read(a.Input) : null;
+            bool rigMode = a.Mode == "rig" || a.Mode == "rigfast";
+            if (a.Problem == null && rigMode && a.PreDie == null && !File.Exists(a.Input)) { o.UseBlender = "the model file is not there"; return o; }
+            HafModel m = a.Problem == null && rigMode && a.PreDie == null ? Read(a.Input) : null;
+            a.PreserveJpegAlpha = true;
             Lap("import");
             Tick();
             var s = BlenderVehicleRig.RunStage1(m, a, Read); o.Log.AddRange(s.Logs); Lap("prep");
@@ -93,15 +95,24 @@ public static class BlenderVehicleRigInProcess
                 if (s.Exits || s.Dies != null) { o.ScriptExit = true; o.ScriptError = s.Dies; return true; }
                 return false;
             }
-            if (Stop()) return o;
+            // the source-skeleton fast path: the run ended in stage 1 with its own export (the DONE line last, written after the file)
+            BlenderDeployExport.Result fastExport = s.Fallback == null && s.Deferred == null ? s.FastExport as BlenderDeployExport.Result : null;
+            if (fastExport != null) { int doneAt = o.Log.FindLastIndex(l => l.StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal)); if (doneAt >= 0) o.Log.RemoveAt(doneAt); }
+            if (fastExport == null && Stop()) return o;
+            BlenderDeployExport.Result x;
+            string completed;
+            if (fastExport != null) { x = fastExport; completed = s.Logs.LastOrDefault(l => l.StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal)); }
+            else
+            {
             string materialLimit = BlenderVehicleRig.ExportMaterialFallback(s, a, preserveJpegAlpha: true);
             if (materialLimit != null) { o.UseBlender = materialLimit; return o; }
             Tick(); BlenderVehicleRig.RunStage2(s, a, Tick); o.Log.AddRange(s.Logs2); Lap("reduce"); if (Stop()) return o;
             Tick(); BlenderVehicleRig.RunStage3(s, a, Tick); o.Log.AddRange(s.Logs3); Lap("rig + skin + join"); if (Stop()) return o;
             Tick(); BlenderVehicleRig.RunStage4(s, a, Tick); o.Log.AddRange(s.Logs4); Lap("clips"); if (Stop()) return o;
-            Tick(); var x = BlenderVehicleRig.RunStage5(s, a, preserveJpegAlpha: true, checkpoint: Tick);
-            string completed = s.Logs5.LastOrDefault(l => l.StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal));
+            Tick(); x = BlenderVehicleRig.RunStage5(s, a, preserveJpegAlpha: true, checkpoint: Tick);
+            completed = s.Logs5.LastOrDefault(l => l.StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal));
             o.Log.AddRange(s.Logs5.Where(l => !l.StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal))); Lap("mesh + export prep"); if (Stop()) return o;
+            }
             Tick(); var file = BlenderGlbWriter.Build(x);
             if (file.Fallback != null) { o.UseBlender = "the file: " + file.Fallback; return o; }
             // Do not touch a previous successful result on a decline, error, cancellation or failed write.

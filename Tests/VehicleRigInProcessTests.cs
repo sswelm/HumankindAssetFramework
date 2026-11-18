@@ -127,11 +127,19 @@ public class VehicleRigInProcessTests : IDisposable
         if(dies)Assert.Contains("ValueError",o.ScriptError);else Assert.Contains(o.Log,l=>l.StartsWith("VEHICLE ERROR"));
         Assert.Equal("old",File.ReadAllText(a[2]));
     }
-    [Theory] [InlineData("preview")] [InlineData("fast")] [InlineData("reader")]
+    [Theory] [InlineData("preview")] [InlineData("reader")]
     public void Named_limits_and_reader_failures_preserve_existing_output(string kind)
     {
         var a=Args(); File.WriteAllText(a[2],"old"); if(kind=="preview")a[3]="preview.fbx";else if(kind=="fast")a[0]="rigfast";else File.WriteAllText(a[1],"broken");
         var o=BlenderVehicleRigInProcess.Run(a); Assert.False(o.Written); Assert.False(o.ScriptExit); Assert.NotNull(o.UseBlender); Assert.Equal("old",File.ReadAllText(a[2]));
+    }
+    // the fast path runs in C# since 2026-11-16: on a source without an armature it is the script's own exit, and the old output stays
+    [Fact]
+    public void The_fast_path_on_a_source_without_an_armature_is_the_scripts_exit_and_keeps_the_output()
+    {
+        var a=Args(); File.WriteAllText(a[2],"old"); a[0]="rigfast";
+        var o=BlenderVehicleRigInProcess.Run(a); Assert.True(o.ScriptExit); Assert.False(o.Written); Assert.Null(o.UseBlender);
+        Assert.Contains(o.Log,l=>l=="VEHICLE ERROR: rigfast requested but the source has no armature"); Assert.Equal("old",File.ReadAllText(a[2]));
     }
     // review of #188: a locked output is a reported write failure, not a Blender run with a fresh five minutes to the same locked file
     [Fact]

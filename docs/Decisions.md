@@ -26,7 +26,7 @@ the previews use.
 
 **Order of what is left in the Lab (2026-11-16):** the Two-sided role (done with this entry), the tread rig with its
 rigid links (done the same day: carrier bones, link bones, rigid links, polygon meshes, the finishing passes on a polygon
-tread), the source-skeleton fast path (next).
+tread), the source-skeleton fast path (done the same day for glTF sources; a skinned or animated FBX in the Lab is what is left).
 
 **What this does not decide:** Blender stays installed on the build machine as the oracle; the parity drills need it.
 The code's default rig route (`rigRoute`) is a separate switch and is not flipped here.

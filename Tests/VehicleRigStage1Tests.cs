@@ -145,8 +145,7 @@ public class VehicleRigStage1Tests
         Assert.Null(BlenderVehicleRig.SourceFallback(BlenderVehicleRig.ParseArgs(Argv(new Dictionary<int, string> { [1] = "D:/m/a.fbx" }))));
         var s = BlenderVehicleRig.RunStage1(null, a);
         Assert.StartsWith("a .obj source", s.Fallback);
-        var fast = BlenderVehicleRig.RunStage1(null, BlenderVehicleRig.ParseArgs(Argv(new Dictionary<int, string> { [0] = "rigfast" })));
-        Assert.StartsWith("the source-skeleton fast path", fast.Fallback);
+        // the source-skeleton fast path is no longer left by name (2026-11-16): VehicleRigFastPathTests, and the drill's fast fixtures
     }
 
     static BlenderRigAnim.MeshData Mesh(int vertices, float[] extents)

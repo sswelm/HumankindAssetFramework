@@ -500,6 +500,16 @@ def main(out):
         source = s4_cap_boundary(os.path.join(out, "models"), count)
         recipe(out, "fx_fast_wall_%d" % count, source, [("Body", 0, {})], useSourceRig=True,
                boneParts=[{"name": "Leaf000", "role": 1, "verts": 1}])
+    # the fast path's other branches (2026-11-16, its C# port): two bones spun about a FORCED axis, a positive turn; and its
+    # refusals, each the script's exit 1 after its own line (recipes_exit: the argument edited after the Lab's builder) - a
+    # spin bone the skeleton has not, an option that needs mesh parts (Flip), a second model
+    fast_source = s4_cap_boundary(os.path.join(out, "models"), 126)
+    two = [{"name": "Leaf000", "role": 1, "verts": 1}, {"name": "Leaf001", "role": 1, "verts": 1}]
+    recipe(out, "fx_fast_two_x", fast_source, [("Body", 0, {})], useSourceRig=True, axisChoice=1, degrees=90.0, boneParts=two)
+    for k in ("fx_x_fast_bone", "fx_x_fast_flip", "fx_x_fast_second"):
+        recipe(out, k, fast_source, [("Body", 0, {})], sub="recipes_exit", useSourceRig=True, boneParts=two[:1])
+    # rigfast ignores per-part placement: the file is never opened, even when it is missing.
+    recipe(out, "fx_fast_missing_placement", fast_source, [("Body", 0, {})], sub="recipes_exit", useSourceRig=True, boneParts=two[:1])
     # two boxes under a turned root
     r = Rig(); m = r.material("Paint", (0.3, 0.5, 0.7)); root = r.node("Root", rotation=[0.0, 0.7071068, 0.0, 0.7071068])
     r.node("A", root, mesh=r.mesh("A", material=m)); r.node("B", root, mesh=r.mesh("B", at=(3.0, 0.0, 0.0), material=m), translation=[0.0, 2.0, 0.0])
@@ -1188,6 +1198,10 @@ def set_tag(argv, tag, value):
 
 
 EXITS = {
+    "fx_fast_missing_placement": (None, lambda a: set_tag(a, "parttx", "@" + a[1] + ".missing")),
+    "fx_x_fast_bone": ("EXIT", lambda a: a.__setitem__(4, "NoSuchBone")),
+    "fx_x_fast_flip": ("EXIT", lambda a: a.__setitem__(66, "Body")),
+    "fx_x_fast_second": ("EXIT", lambda a: a.append("merge2=" + a[1] + "|0,0,0|0,0,0|1")),
     "fx_e2_clamps": (None, lambda a: (a.__setitem__(72, ""), a.__setitem__(73, "nan"), a.__setitem__(75, "inf"))),
     "fx_x_default_names_dir": ("EXIT", lambda a: set_tag(a, "defaultreduce", "@" + os.path.dirname(a[1]).replace("\\", "/") + "|20")),
     "fx_x_shroud_names_dir": ("EXIT", lambda a: set_tag(a, "shroudreduce", "@" + os.path.dirname(a[1]).replace("\\", "/") + "|20")),
@@ -1254,14 +1268,14 @@ STAGE_OF = {"fx_r_oars_inf": 4, "fx_d_chunk_splice": 2, "fx_r_missing_wheel": 3,
 def exits(jobs_path):
     n = 0
     for line in open(jobs_path, encoding="utf-8").read().split("\n"):
-        if not line.startswith("JOB\t"):
+        if not (line.startswith("JOB\t") or line.startswith("FAST\t")):
             continue
         f = line.rstrip("\r").split("\t"); key = f[1]; argv = f[2:]
         if key not in EXITS:
             raise SystemExit("an exit recipe %s has no edit in EXITS" % key)
         kind, edit = EXITS[key]; edit(argv); n += 1
         stage = STAGE_OF.get(key, 1)
-        print("\t".join(["JOB", key if kind is None else "%s:%d:%s" % (kind, stage, key)] + argv))
+        print("\t".join([f[0], key if kind is None else "%s:%d:%s" % (kind, stage, key)] + argv))   # a FAST line stays one: the fast path's refusals
         if key == "fx_d_frames":
             # The same frames argument on a skinned, animated FBX (the anim_bones fixture). The reader leaves such a
             # vehicle .fbx by name (ReadForVehicle), and so does production: Blender imports it and dies at int(argv[7])
