@@ -262,7 +262,7 @@ public static partial class BlenderVehicleRig
             var both = new List<int>(); int twinned = 0;
             for (int f = 0; f < nf; f++) { if (verdict[f] == 1) both.Add(f); else if (verdict[f] == -1) twinned++; }
             int v0 = o.Mesh.Vertices;
-            if (both.Count > 0) o.Mesh = FinishMesh(o.Mesh, false, false, null, out _, out _, both);
+            if (both.Count > 0) o.Mesh = FinishMesh(o.Mesh, false, false, null, out _, out _, both, checkpoint);
             s.Logs5.Add("VEHICLE two-sided '" + o.Name + "': " + both.Count + " face(s) doubled (the back shows), " + (nf - both.Count) + " left; " + twinned + " authored twin(s) kept; " + v0 + " -> " + o.Mesh.Vertices + " verts");
         }
     }

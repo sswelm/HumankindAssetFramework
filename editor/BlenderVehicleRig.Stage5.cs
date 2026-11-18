@@ -15,11 +15,12 @@ public static partial class BlenderVehicleRig
     // normals fall back to the vertex coordinate. This differs from Mesh's vertex-normal accumulation.
     /// <summary>BM_face_normal_update on every face of any size (BM_face_calc_normal): a triangle normal_tri_v3, a quad normal_quad_v3
     /// (the cross of its diagonals), a larger face Newell's sum from its last corner (bm_face_calc_poly_normal); normalize_v3.</summary>
-    static void FaceNormalsAny(BMesh bm)
+    static void FaceNormalsAny(BMesh bm, Action checkpoint = null)
     {
         var P = bm.VCo;
         for (int f = 0; f < bm.FaceCount; f++)
         {
+            if ((f & 127) == 0) checkpoint?.Invoke();
             if (!bm.FAlive[f]) continue;
             int n = bm.FLen[f], l0 = bm.FLFirst[f]; var no = new float[3];
             if (n == 3)
@@ -52,11 +53,12 @@ public static partial class BlenderVehicleRig
         }
     }
 
-    static void BmNormals(BMesh bm)
+    static void BmNormals(BMesh bm, Action checkpoint = null)
     {
-        FaceNormalsAny(bm);
+        FaceNormalsAny(bm, checkpoint);
         for (int v = 0; v < bm.VertCount; v++)
         {
+            if ((v & 127) == 0) checkpoint?.Invoke();
             if (!bm.VAlive[v]) continue;
             var no = new float[3]; int first = bm.VE[v];
             if (first >= 0)
@@ -127,12 +129,13 @@ public static partial class BlenderVehicleRig
         return d;
     }
 
-    static BlenderRigAnim.MeshData FinishMesh(BlenderRigAnim.MeshData d, bool insideOut, bool flip, double? inset, out int reversed, out int kept, IList<int> twoSided = null)
+    static BlenderRigAnim.MeshData FinishMesh(BlenderRigAnim.MeshData d, bool insideOut, bool flip, double? inset, out int reversed, out int kept, IList<int> twoSided = null, Action checkpoint = null)
     {
+        checkpoint?.Invoke();
         reversed = kept = 0;
-        var layers = new BlenderWeld.Layers(); var bm = FromMeshData(d, layers, true, false);
+        var layers = new BlenderWeld.Layers(); var bm = FromMeshData(d, layers, true, false, checkpoint);
         var vs = Enumerable.Range(0, d.Vertices).ToList(); // Python bmesh.from_mesh keeps raw custom-normal shorts.
-        if (inset.HasValue) BmNormals(bm);
+        if (inset.HasValue) BmNormals(bm, checkpoint);
         if (insideOut)
         {
             var ys = Enumerable.Range(0, d.Vertices).Select(v => d.Positions[3 * v + 1]).ToArray();
@@ -141,10 +144,12 @@ public static partial class BlenderVehicleRig
             var seen = new HashSet<int>();
             for (int f = 0; f < bm.FaceCount; f++)
             {
+                if ((f & 127) == 0) checkpoint?.Invoke();
                 if (!seen.Add(f)) continue;
                 var stack = new Stack<int>(); stack.Push(f); var island = new List<int>(); double sum = 0; int n = 0;
                 while (stack.Count > 0)
                 {
+                    if ((island.Count & 127) == 0) checkpoint?.Invoke();
                     int face = stack.Pop(); island.Add(face); int first = bm.FLFirst[face], l = first; var center = new float[3];
                     do { for (int k = 0; k < 3; k++) center[k] = (float)(center[k] + bm.VCo[3 * bm.LV[l] + k]); l = bm.LNext[l]; } while (l != first);
                     center = Scale(center, (float)(1.0f / (float)bm.FLen[face])); /* calc_center_median: the corners' sum times 1.0f / len */ var rad = new[] { 0f, (float)(center[1] - cy), (float)(center[2] - cz) };
@@ -156,10 +161,15 @@ public static partial class BlenderVehicleRig
                         l = bm.LNext[l];
                     } while (l != first);
                 }
-                if (n > 0 && sum / n < -.25) { foreach (int face in island) ReverseBmFace(bm, face); reversed++; } else kept++;
+                if (n > 0 && sum / n < -.25)
+                {
+                    for (int i = 0; i < island.Count; i++) { if ((i & 127) == 0) checkpoint?.Invoke(); ReverseBmFace(bm, island[i]); }
+                    reversed++;
+                }
+                else kept++;
             }
         }
-        if (flip) { for (int f = 0; f < bm.FaceCount; f++) ReverseBmFace(bm, f); }
+        if (flip) { for (int f = 0; f < bm.FaceCount; f++) { if ((f & 127) == 0) checkpoint?.Invoke(); ReverseBmFace(bm, f); } }
         // bmesh.ops.duplicate on faces: every face of the mesh (the whole-part doubling, its copies then inset along the
         // vertex normals) or the Two-sided pass's chosen faces (twoSided: the copies stay on the originals' positions)
         if (inset.HasValue || twoSided != null)
@@ -173,8 +183,10 @@ public static partial class BlenderVehicleRig
                 for (int i = 0; i < layers.PointColor.Count; i++) { var a = layers.PointColor[i]; Array.Copy(a, 4 * v, a, 4 * dst, 4); }
                 return dst;
             }
+            int copied = 0;
             foreach (int f in twoSided ?? (IList<int>)Enumerable.Range(0, nf).ToList())
             {
+                if ((copied++ & 127) == 0) checkpoint?.Invoke();
                 int l0 = bm.FLFirst[f], l = l0; var loops = new List<int>();
                 do { loops.Add(l); CopyV(bm.LV[l]); l = bm.LNext[l]; } while (l != l0);
                 foreach (int src in loops)
@@ -186,13 +198,21 @@ public static partial class BlenderVehicleRig
             }
             if (inset.HasValue)
             {
-                BmNormals(bm); // duplicate's NORMALS_CALC finish precedes the displacement
+                BmNormals(bm, checkpoint); // duplicate's NORMALS_CALC finish precedes the displacement
                 float offset = (float)inset.Value;
-                foreach (int v in vm.Values) for (int k = 0; k < 3; k++) bm.VCo[3 * v + k] = (float)(bm.VCo[3 * v + k] - (float)(bm.VNo[3 * v + k] * offset));
+                int moved = 0;
+                foreach (int v in vm.Values)
+                {
+                    if ((moved++ & 127) == 0) checkpoint?.Invoke();
+                    for (int k = 0; k < 3; k++) bm.VCo[3 * v + k] = (float)(bm.VCo[3 * v + k] - (float)(bm.VNo[3 * v + k] * offset));
+                }
             }
-            foreach (int f in copies) ReverseBmFace(bm, f);
+            for (int i = 0; i < copies.Count; i++) { if ((i & 127) == 0) checkpoint?.Invoke(); ReverseBmFace(bm, copies[i]); }
         }
-        return FinishBm(bm, layers, d, vs);
+        checkpoint?.Invoke();
+        var result = FinishBm(bm, layers, d, vs);
+        checkpoint?.Invoke();
+        return result;
     }
 
     static bool PrepareExportMaterials(BlenderRigAnim.Stage1 s, Args a, out HafModel combined, out BlenderNames.Result names)
@@ -308,12 +328,12 @@ public static partial class BlenderVehicleRig
             foreach (var o in meshes)
             {
                 if (OarMesh(o) || CanvasMesh(o) || o.Name.StartsWith("Mesh___rud__", StringComparison.Ordinal) || o.Name.StartsWith("Mesh___keep__", StringComparison.Ordinal) || o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal)) continue;
-                o.Mesh = FinishMesh(o.Mesh, true, false, null, out int r, out int k); reversed += r; kept += k;
+                o.Mesh = FinishMesh(o.Mesh, true, false, null, out int r, out int k, checkpoint: checkpoint); reversed += r; kept += k;
             }
             s.Logs5.Add("VEHICLE inside-out fix: " + reversed + " island(s) reversed (interior-facing), " + kept + " kept as authored; Sail/Oar meshes untouched");
         }
         int flipped = 0;
-        foreach (var o in meshes.Where(o => o.Name.StartsWith("Mesh___flip__", StringComparison.Ordinal))) { o.Mesh = FinishMesh(o.Mesh, false, true, null, out _, out _); flipped++; }
+        foreach (var o in meshes.Where(o => o.Name.StartsWith("Mesh___flip__", StringComparison.Ordinal))) { o.Mesh = FinishMesh(o.Mesh, false, true, null, out _, out _, checkpoint: checkpoint); flipped++; }
         if (flipped > 0) s.Logs5.Add("VEHICLE FLIP applied: " + flipped + " part(s) winding reversed once" + (a.FixInsideOut ? " (on top of the inside-out fix — cancelling where it flipped)" : ""));
         // the Two-sided parts first: the model they are measured against holds no copies yet
         var twoTargets = meshes.Where(o => o.Name.StartsWith("Mesh___two__", StringComparison.Ordinal)).ToList();
@@ -331,7 +351,7 @@ public static partial class BlenderVehicleRig
                 VehicleProbe.Mat4ToLocRotSize(o.World, out _, out _, out var scale);
                 double avg = (Math.Abs((double)scale[0]) + Math.Abs((double)scale[1]) + Math.Abs((double)scale[2])) / 3.0;
                 double local = avg > 1e-9 ? offset / avg : offset; int old = o.Mesh.Vertices;
-                o.Mesh = FinishMesh(o.Mesh, false, false, local, out _, out _);
+                o.Mesh = FinishMesh(o.Mesh, false, false, local, out _, out _, checkpoint: checkpoint);
                 s.Logs5.Add("VEHICLE double-sided '" + o.Name + "': " + old + " -> " + o.Mesh.Vertices + " verts (back shell inset " + BlenderRigAnim.PyFixed(local, 4) + " local)");
             }
             s.Logs5.Add("VEHICLE double-sided: " + targets.Count + " mesh(es) made two-sided at the source (whole-model inset " + BlenderRigAnim.PyFixed(offset, 4) + " world)");
