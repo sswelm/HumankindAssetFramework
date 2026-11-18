@@ -452,23 +452,31 @@ static class VehicleRigDrill
             jobs.Add(t[1], (t[0] == "FAST", t.Skip(2).ToArray()));
         }
         if (jobs.Count == 0) { Console.WriteLine("FAIL jobs: no vehicle_rig jobs to read"); return 1; }
-        var blocks = new List<List<string>>();
+        var blocks = new List<List<string>>(); var blockDirs = new List<string>();
         int fails = 0;
         foreach (var dump in args.Skip(offset + 1))
             foreach (var raw in File.ReadLines(dump))
             {
                 var line = raw.TrimEnd('\r');
                 if (line.Length == 0) continue;
-                if (line.StartsWith("JOB\t", StringComparison.Ordinal)) blocks.Add(new List<string>());
+                if (line.StartsWith("JOB\t", StringComparison.Ordinal)) { blocks.Add(new List<string>()); blockDirs.Add(Path.GetDirectoryName(Path.GetFullPath(dump))); }
                 if (blocks.Count > 0) blocks[blocks.Count - 1].Add(line);
                 else { fails++; Console.WriteLine("FAIL dump: a row before the first JOB"); }
             }
         var cover = new SortedDictionary<string, long>(StringComparer.Ordinal); foreach (var c in Cover) cover[c.key] = 0;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         long stageRows = 0, logs = 0, objs = 0, meshes = 0, groups = 0, bones = 0, fcurves = 0, keys = 0, glbRows = 0; int stopped = 0, full = 0, fast = 0;
-        foreach (var block in blocks)
+        for (int blockAt = 0; blockAt < blocks.Count; blockAt++)
         {
+            var block = blocks[blockAt];
             string key = block[0].Split('\t').Length > 1 ? block[0].Split('\t')[1] : "?";
+            // Blender's own exported file: the job's folder under the WORK folder, which sits beside the dump (a replayed record
+            // names the folder of the run that made it: only its last part is taken)
+            if (block.Count > 1 && block[1].StartsWith("WORK\t", StringComparison.Ordinal))
+            {
+                string work = block[1].Substring(5).TrimEnd('/', '\\'); string leaf = work.Substring(work.LastIndexOfAny(new[] { '/', '\\' }) + 1), stem = key.Replace(':', '_');
+                StageDrill.BlenderFile[key] = Path.Combine(blockDirs[blockAt], leaf, stem, stem + "_Spin.glb");
+            }
             try
             {
                 if (!seen.Add(key)) throw new InvalidDataException("the dump repeats a job");
@@ -599,16 +607,62 @@ static class StageDrill
     static string Describe(VehicleRigDump.Stage s) => $"{s.Objs.Count} objects, {s.Meshes.Count} meshes, {s.Groups.Count} vertex groups, {s.Bones.Count} bones, {s.Actions.Count} actions, {s.FCurves.Count} fcurves" + (s.Keys.Count > 0 ? $", {s.Keys.Count} keys" : "");
 
     public static bool InProcess;
-    static int Exported5, BytesEqual5, InProcessEqual;
+    static int Exported5, BytesEqual5, InProcessEqual, PixelImages5;
+    /// <summary>Per job, where Blender's own exported GLB of this run (or of the replayed record) lies.</summary>
+    internal static readonly Dictionary<string, string> BlenderFile = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    static string Sha256Of(byte[] b) { using (var h = System.Security.Cryptography.SHA256.Create()) return string.Concat(h.ComputeHash(b).Select(x => x.ToString("x2"))); }
+
+    /// <summary>AN FBX SOURCE'S COMPOSED IMAGES (2026-11-16, the Bradley): the FBX reader builds a metallic-roughness image from two
+    /// files' pixels and encodes it; Blender's side of this drill carries the PNG its own image writer made (other chunks, another
+    /// deflate), so the bytes differ where the PIXELS are the same. Only a PNG identified as composed by the reader is
+    /// decoded on both sides - Blender's out of its own file, whose bytes must hash to the row -; with every pixel equal Blender's
+    /// bytes stand in for the comparison, so the rest of the file is still held bit for bit. Any other difference stays a failure.
+    /// Returns Blender's file when an image was borrowed (the caller restores `saved`).</summary>
+    internal static byte[] BorrowPixelEqualImages(string key, VehicleRigDump d, BlenderDeployExport.Result exported, List<string> problems, out List<(int index, byte[] mine)> saved, ISet<byte[]> composedImages)
+    {
+        saved = new List<(int, byte[])>();
+        var images = exported.MaterialRows?.Images;
+        if (images == null || composedImages == null || composedImages.Count == 0) return null;
+        var rows = d.ExportRows.Where(r => r[0] == "IMG").ToList();
+        if (rows.Count != images.Count) return null;
+        var differ = Enumerable.Range(0, images.Count).Where(i => images[i].bytes != null && composedImages.Contains(images[i].bytes) && rows[i].Length == 5 && images[i].mime == "image/png" && rows[i][3] == "image/png" && Sha256Of(images[i].bytes) != rows[i][4]).ToList();
+        if (differ.Count == 0 || !BlenderFile.TryGetValue(key, out string file) || !File.Exists(file)) return null;
+        byte[] theirGlb = File.ReadAllBytes(file); HafModel theirs;
+        try { theirs = GlbReader.Read(theirGlb); } catch (Exception e) { problems.Add("stage 5 export: Blender's file does not read back for its image bytes: " + e.GetType().Name); return null; }
+        if (theirs.Images.Count != images.Count) return null;
+        foreach (int i in differ)
+        {
+            var tb = theirs.Images[i].Bytes;
+            if (tb == null || Sha256Of(tb) != rows[i][4]) { problems.Add("stage 5 export: Blender's file image " + i + " does not hash to its IMG row"); continue; }
+            var mine = PngCodec.Decode(images[i].bytes, out var mi, out string mwhy); var their = PngCodec.Decode(tb, out var ti, out string twhy);
+            if (mine == null || their == null) { problems.Add("stage 5 export: image " + i + " does not decode for its pixels (" + (mwhy ?? twhy) + ")"); continue; }
+            if (mi.Width != ti.Width || mi.Height != ti.Height || mine.Length != their.Length) { problems.Add("stage 5 export: image " + i + " is " + mi.Width + "x" + mi.Height + " here, " + ti.Width + "x" + ti.Height + " in Blender"); continue; }
+            int at = -1; for (int k = 0; k < mine.Length; k++) if (mine[k] != their[k]) { at = k; break; }
+            if (at >= 0) { problems.Add("stage 5 export: image " + i + " ('" + images[i].name + "') differs in its PIXELS: pixel " + at / 4 + " channel " + at % 4 + ": " + mine[at] + " here, " + their[at] + " in Blender"); continue; }
+            saved.Add((i, images[i].bytes));
+            images[i] = (images[i].name, images[i].mime, tb, images[i].source);
+        }
+        return saved.Count > 0 ? theirGlb : null;
+    }
     static long ExportRows5;
 
     sealed class SecondLeave : Exception { public SecondLeave(string message) : base(message) { } }   // the second model (merge2) left by name
-    static HafModel ReadSecond(string path) { var m = HafModelLoader.ReadForVehicle(path, out string leave); if (m == null) throw new SecondLeave(leave); return m; }
 
     public static bool Compare(VehicleRigDump d, string key, int stages)
     {
         Compared++;
         var problems = new List<string>();
+        // Image byte arrays are retained by the stage model and material export, including merged scopes.
+        // Use their identity rather than export indices: material gathering can reorder and deduplicate images.
+        var composedImages = new HashSet<byte[]>();
+        HafModel ReadSource(string path, out string leave)
+        {
+            var m = HafModelLoader.ReadForVehicle(path, out leave, out var composed);
+            if (m != null && composed != null) foreach (int image in composed) composedImages.Add(m.Images[image].Bytes);
+            return m;
+        }
+        HafModel ReadSecond(string path) { var m = ReadSource(path, out string leave); if (m == null) throw new SecondLeave(leave); return m; }
         BlenderRigAnim.Stage1 model; BlenderVehicleRig.Args args;
         try
         {
@@ -618,7 +672,7 @@ static class StageDrill
             HafModel m = null; string leave = null;
             // Match BlenderVehicleRigInProcess.Run: argument failures and rigfast never import the source.
             if (args.Problem == null && args.Mode == "rig" && args.PreDie == null && BlenderVehicleRig.SourceFallback(args) == null)
-                m = HafModelLoader.ReadForVehicle(args.Input, out leave);
+                m = ReadSource(args.Input, out leave);
             try { model = m == null && leave != null ? new BlenderRigAnim.Stage1 { Fallback = leave } : BlenderVehicleRig.RunStage1(m, args, ReadSecond); }
             catch (SecondLeave e) { model = new BlenderRigAnim.Stage1 { Fallback = e.Message }; }
         }
@@ -714,6 +768,13 @@ static class StageDrill
                     else if (!d.LogsOfStop.SequenceEqual(model.Logs3)) problems.Add("stage 3 model: the stop's VEHICLE lines differ: here [" + string.Join(" | ", model.Logs3) + "], Blender [" + string.Join(" | ", d.LogsOfStop) + "]");
                     else { RowsEqual += model.Logs3.Count; Console.WriteLine($"STAGE3 {key}: equal - the script's exit in stage 3, {model.Logs3.Count} VEHICLE lines"); }
                 }
+                else if (model.Dies != null)
+                {
+                    // the script dies in stage 3 (rigid links without the bones for them): the exception and every line printed before it
+                    if (d.StoppedAt != 3 || d.Died != model.Dies) problems.Add("stage 3 model: the death differs: here '" + model.Dies + "', Blender '" + d.Died + "' in stage " + d.StoppedAt);
+                    else if (!d.LogsOfStop.SequenceEqual(model.Logs3)) problems.Add("stage 3 model: the death's VEHICLE lines differ: here [" + string.Join(" | ", model.Logs3) + "], Blender [" + string.Join(" | ", d.LogsOfStop) + "]");
+                    else { RowsEqual += model.Logs3.Count; Console.WriteLine($"STAGE3 {key}: equal - dies: {model.Dies}"); }
+                }
                 else if (!d.Stages.TryGetValue(3, out var s3)) problems.Add("stage 3 model: the scene runs on here, Blender stopped in stage 3: " + (d.Exit != null ? string.Join(" | ", d.LogsOfStop) : d.Died));
                 else
                 {
@@ -761,7 +822,14 @@ static class StageDrill
             BlenderDeployExport.Result exported = null;
             try { exported = BlenderVehicleRig.RunStage5(model, args); }
             catch (Exception e) { problems.Add("stage 5 model: " + e.GetType().Name + ": " + e.Message); }
-            if (model.Fallback != null)
+            if (model.Dies != null && model.Fallback == null && problems.Count == 0)
+            {
+                // the script dies in stage 5, before it writes anything (rigid links past the bone wall)
+                if (d.StoppedAt != 5 || d.Died != model.Dies) problems.Add("stage 5 model: the death differs: here '" + model.Dies + "', Blender '" + d.Died + "' in stage " + d.StoppedAt);
+                else if (!d.LogsOfStop.SequenceEqual(model.Logs5)) problems.Add("stage 5 model: the death's VEHICLE lines differ: here [" + string.Join(" | ", model.Logs5) + "], Blender [" + string.Join(" | ", d.LogsOfStop) + "]");
+                else { RowsEqual += model.Logs5.Count; Console.WriteLine($"STAGE5 {key}: equal - dies: {model.Dies}"); }
+            }
+            else if (model.Fallback != null)
             {
                 if (!NamedStage5Deferral(model.Fallback)) problems.Add("stage 5 model: " + model.Fallback);
                 else { Equal--; Left++; Console.WriteLine("STAGE5 " + key + ": left to Blender by name: " + model.Fallback); return true; }
@@ -785,7 +853,11 @@ static class StageDrill
                 {
                     RowsEqual += RowCount(s5); Console.WriteLine("STAGE5 " + key + ": equal - " + Describe(s5));
                     var xp = new List<string>();
-                    var stats = GlbRowsCompare.Compare(exported, d.ExportRows, xp, new Dictionary<string, long>(), name => exported.ChannelRows.Animations.First(an => an.Name == name).Channels.Count, true, true, null);
+                    var theirFile = BorrowPixelEqualImages(key, d, exported, problems, out var borrowedImages, composedImages);
+                    GlbRowsCompare.Stats stats;
+                    try { stats = GlbRowsCompare.Compare(exported, d.ExportRows, xp, new Dictionary<string, long>(), name => exported.ChannelRows.Animations.First(an => an.Name == name).Channels.Count, true, true, theirFile); }
+                    finally { foreach (var (bi, mineBytes) in borrowedImages) { var im = exported.MaterialRows.Images[bi]; exported.MaterialRows.Images[bi] = (im.name, im.mime, mineBytes, im.source); } }
+                    if (borrowedImages.Count > 0 && xp.Count == 0 && problems.Count == 0) { PixelImages5 += borrowedImages.Count; Console.WriteLine("PIXELS " + key + ": " + borrowedImages.Count + " image(s) the FBX reader composed are equal to Blender's by every pixel (another PNG encoder: Blender's bytes stood in for the file comparison)"); }
                     foreach (string issue in xp) problems.Add("stage 5 export: " + issue);
                     if (problems.Count == 0 && InProcess)
                     {
@@ -860,7 +932,7 @@ static class StageDrill
     public static void Summary(int stages)
     {
         foreach (var kv in Census) Console.WriteLine($"MODEL {kv.Value} {kv.Key}");
-        if (stages >= 5) Console.WriteLine($"EXPORTS jobs {Exported5} rows {ExportRows5} bytesEqual {BytesEqual5} inprocess {InProcessEqual}");
+        if (stages >= 5) Console.WriteLine($"EXPORTS jobs {Exported5} rows {ExportRows5} bytesEqual {BytesEqual5} inprocess {InProcessEqual} pixelImages {PixelImages5}");
         Console.WriteLine($"STAGES {stages} jobs {Compared} equal {Equal} left {Left} rows {RowsEqual} left3 {Left3} left4 {Left4}");
     }
 }

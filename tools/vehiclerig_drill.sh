@@ -92,6 +92,13 @@ fi
 grep '^TWOSIDED PASS' "$TMPD/twosided.txt"
 tr -d '\r' < "$TMPD/twosided_jobs.txt" > "$TMPD/twosided_jobs_lf.txt"; cat "$TMPD/twosided_jobs_lf.txt" >> "$TMPD/jobs.txt"
 [ "$(grep -cE "^JOB	" "$TMPD/twosided_jobs_lf.txt")" -eq 3 ] || { echo "FAIL — the Two-sided fixtures gave other than 3 jobs for the stage comparison"; exit 1; }
+# THE RIGID-LINKS FIXTURES JOIN THE STAGE COMPARISON (d6, 2026-11-16): the C# models them (BlenderVehicleRig.Tread.cs), so the
+# five jobs the Blender-only check above ran are also held stage by stage and file by file. Two of them are the script's own
+# errors and carry the stage it dies in in their key: no four bones left for a track's links (stage 3), and a finished rig past
+# the bone wall because one track kept its carriers (stage 5).
+tr -d '\r' < "$TMPD/rigid_jobs.txt" | grep -E "^JOB	" | sed -E 's/^JOB\tfx_links_full\t/JOB\tDIES:3:fx_links_full\t/; s/^JOB\tfx_links_fallback\t/JOB\tDIES:5:fx_links_fallback\t/' > "$TMPD/rigid_stage_jobs.txt"
+[ "$(grep -cE "^JOB	" "$TMPD/rigid_stage_jobs.txt")" -eq 5 ] && [ "$(grep -cE "^JOB	DIES:[35]:fx_links_(full|fallback)	" "$TMPD/rigid_stage_jobs.txt")" -eq 2 ] || { echo "FAIL — the rigid-links fixtures gave other than 5 jobs (2 of them the script's errors) for the stage comparison"; exit 1; }
+cat "$TMPD/rigid_stage_jobs.txt" >> "$TMPD/jobs.txt"
 # argument fixtures: post-edited (vehiclerig_fixtures.py --exits) into text the Lab's builder never writes. EXIT:/DIES:
 # keys name a required stop; unprefixed keys are valid argument variants and must complete like every positive fixture.
 "$TMPD/VehicleRigJobs.exe" "$WTMP/fixtures/recipes_exit" "$WTMP/fxwork" --all > "$TMPD/fxexit_raw.txt"; ferc=$?
@@ -99,7 +106,7 @@ tr -d '\r' < "$TMPD/twosided_jobs.txt" > "$TMPD/twosided_jobs_lf.txt"; cat "$TMP
 tr -d '\r' < "$TMPD/fxexit_raw.txt" > "$TMPD/fxexit_jobs_in.txt"
 python "$ROOT/tools/vehiclerig-drill/vehiclerig_fixtures.py" --exits "$TMPD/fxexit_jobs_in.txt" > "$TMPD/fxexit_jobs.txt" || { echo "FAIL — could not derive the vehicle_rig exit fixtures"; exit 1; }
 cat "$TMPD/fxexit_jobs.txt" >> "$TMPD/jobs.txt"
-n_fx=$(( $(grep -cE "^(JOB|FAST)	" "$TMPD/fxjobs_raw.txt") + $(grep -cE "^JOB	" "$TMPD/fxexit_jobs.txt") + $(grep -cE "^JOB	" "$TMPD/twosided_jobs_lf.txt") )); n_jobs=$((n_reg + n_fx)); n_fast=$(grep -c "^FAST	" "$TMPD/jobs.txt")
+n_fx=$(( $(grep -cE "^(JOB|FAST)	" "$TMPD/fxjobs_raw.txt") + $(grep -cE "^JOB	" "$TMPD/fxexit_jobs.txt") + $(grep -cE "^JOB	" "$TMPD/twosided_jobs_lf.txt") + $(grep -cE "^JOB	" "$TMPD/rigid_stage_jobs.txt") )); n_jobs=$((n_reg + n_fx)); n_fast=$(grep -c "^FAST	" "$TMPD/jobs.txt")
 [ "$n_fx" -gt 0 ] || { echo "FAIL — the vehicle_rig fixtures gave no job"; exit 1; }
 [ "$(grep -cE "^JOB	(EXIT|DIES):" "$TMPD/fxexit_jobs.txt")" -ge 8 ] || { echo "FAIL — the vehicle_rig exit fixtures gave fewer than 8 EXIT:/DIES: jobs"; exit 1; }
 
@@ -223,11 +230,14 @@ n_export=$(echo "$X5" | awk '{print $3}'); n_bytes=$(echo "$X5" | awk '{print $7
 [ -n "$n_export" ] && [ "$n_export" -gt 0 ] && [ "$n_export" = "$n_inprocess" ] || { echo "FAIL — not every supported export was written by the Generate wrapper ($X5)"; exit 1; }
 # every compared export is the COMPLETE file, byte for byte (review of #187: the row comparison passed a GLB whose bytes were never equal)
 [ "$n_bytes" = "$n_export" ] || { echo "FAIL — vehicle_rig drill: $n_bytes of $n_export exported GLBs are byte-identical to Blender's ($X5)"; exit 1; }
-# THE TREAD FIXTURES ARE COMPARED, NOT LEFT (d6, 2026-11-16): the carrier-skinned conveyor is modelled (BlenderVehicleRig.Tread.cs), so
-# each of its three fixtures must come out equal through the export - a leave here, however well named, is coverage lost.
-for key in fx_r_tracks_fallback fx_r_tracks_recoil fx_r_tracks_roads; do
+# THE TREAD FIXTURES ARE COMPARED, NOT LEFT (d6, 2026-11-16): the tread rig is modelled (BlenderVehicleRig.Tread.cs) - the carrier
+# skinning, the link bones, the rigid links -, so each of its fixtures must come out equal through the export - a leave here,
+# however well named, is coverage lost - and the two rigid-links errors must be the script's own deaths.
+for key in fx_r_tracks_fallback fx_r_tracks_recoil fx_r_tracks_roads fx_r_tracks_hybrid fx_links fx_links_dense fx_links_tight; do
   grep -qE "^EXPORT $key: equal - .* byte-identical GLB" "$TMPD/s1.txt" || { grep -E "^(FAIL|STAGE[0-9]) $key" "$TMPD/s1.txt" | head -3 | cut -c1-300; echo "FAIL — vehicle_rig drill: the tread fixture $key is not equal to Blender through the export (d6)"; exit 1; }
 done
+grep -qE "^STAGE3 DIES:3:fx_links_full: equal - dies: RuntimeError: rigid links need at least 4 bones per track" "$TMPD/s1.txt" || { echo "FAIL — vehicle_rig drill: the rigid-links budget error (fx_links_full) is not held as the script's death in stage 3"; exit 1; }
+grep -qE "^STAGE5 DIES:5:fx_links_fallback: equal - dies: RuntimeError: rigid links exceed the 126-bone budget" "$TMPD/s1.txt" || { echo "FAIL — vehicle_rig drill: the rigid-links bone-wall error (fx_links_fallback) is not held as the script's death in stage 5"; exit 1; }
 # Negative guards on the REAL dump: a missing or inconsistent record must never pass as evidence.
 VEHICLERIG_STAGES_OUT="$WTMP/s1.txt" python "$ROOT/tools/vehiclerig-drill/missing_vehiclerig.py" "$WTMP/missing" "$WTMP/jobs.txt" "${DUMPS[@]}" > "$TMPD/tampers_raw.txt" || { echo "FAIL — could not construct the damaged dumps"; exit 1; }
 tr -d '\r' < "$TMPD/tampers_raw.txt" > "$TMPD/tampers.txt"

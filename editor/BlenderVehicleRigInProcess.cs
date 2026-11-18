@@ -97,8 +97,8 @@ public static class BlenderVehicleRigInProcess
             string materialLimit = BlenderVehicleRig.ExportMaterialFallback(s, a, preserveJpegAlpha: true);
             if (materialLimit != null) { o.UseBlender = materialLimit; return o; }
             Tick(); BlenderVehicleRig.RunStage2(s, a, Tick); o.Log.AddRange(s.Logs2); Lap("reduce"); if (Stop()) return o;
-            Tick(); BlenderVehicleRig.RunStage3(s, a); o.Log.AddRange(s.Logs3); Lap("rig + skin + join"); if (Stop()) return o;
-            Tick(); BlenderVehicleRig.RunStage4(s, a); o.Log.AddRange(s.Logs4); Lap("clips"); if (Stop()) return o;
+            Tick(); BlenderVehicleRig.RunStage3(s, a, Tick); o.Log.AddRange(s.Logs3); Lap("rig + skin + join"); if (Stop()) return o;
+            Tick(); BlenderVehicleRig.RunStage4(s, a, Tick); o.Log.AddRange(s.Logs4); Lap("clips"); if (Stop()) return o;
             Tick(); var x = BlenderVehicleRig.RunStage5(s, a, preserveJpegAlpha: true, checkpoint: Tick);
             string completed = s.Logs5.LastOrDefault(l => l.StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal));
             o.Log.AddRange(s.Logs5.Where(l => !l.StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal))); Lap("mesh + export prep"); if (Stop()) return o;

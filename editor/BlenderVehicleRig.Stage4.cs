@@ -90,6 +90,7 @@ public static partial class BlenderVehicleRig
         }
 
         public void Recalc() { foreach (var k in Dirty) BlenderFCurve.RecalcHandles(Curves[k]); Dirty.Clear(); }
+        public void Recalc((string bone, string prop, int index) k) { if (Dirty.Remove(k)) BlenderFCurve.RecalcHandles(Curves[k]); }
         public void Linear(Func<(string bone, string prop, int index), bool> select = null)
         {
             Recalc(); // changing interpolation leaves the auto-clamped handles in place
@@ -109,7 +110,10 @@ public static partial class BlenderVehicleRig
         }
     }
 
-    public static void RunStage4(BlenderRigAnim.Stage1 s, Args a)
+    public static void RunStage4(BlenderRigAnim.Stage1 s, Args a) => RunStage4(s, a, null);
+
+    // A rigid circuit can key every link over thousands of frames; poll within that loop.
+    public static void RunStage4(BlenderRigAnim.Stage1 s, Args a, Action checkpoint)
     {
         if (s.Fallback != null || s.Exits || s.Dies != null) return;
         var st = s.VehicleState as RigState;
@@ -136,6 +140,8 @@ public static partial class BlenderVehicleRig
         var periods = new List<BigInteger> { frames };
         if (a.RockOn) periods.Add(a.RockFrames);
         if (st.Oars.Count > 0) periods.Add(a.OarFrames);
+        // rigid links: the whole loop in a whole number of spin cycles - every link is back at its own place on the last frame
+        if (a.TreadLinks && st.Tracks.Any(t => t.Job != null)) periods.Add(frames * st.Tracks.Where(t => t.Job != null).Max(t => t.Job.CircuitCycles));
         BigInteger clipBig = periods.Max();
         if (clipBig > MaxClipFrames) { s.Fallback = "stage 4: the clip of more than 100,000 frames is not modelled yet"; return; }
         int clip = (int)clipBig;
@@ -164,11 +170,15 @@ public static partial class BlenderVehicleRig
         var evaluatedAt = new Dictionary<(string bone, string prop, int index), int>();
         void FrameSet(int f) { anyFrameSet = true; s.FrameCurrent = f; frameHistory.Add(f); assignedSince.Clear(); }
         // frame_set(f) for the armature: every keyed channel takes its curve's value at f (BKE_fcurve evaluation of the BEZIER keys)
-        void EvaluatePose(int f)
+        // `only`: the bones whose state is read now - a channel left out keeps its place in the history and is evaluated when
+        // something does read it (a link bone keyed on every frame of a long circuit is never read between its keys: evaluating
+        // every curve at every frame recalculated each curve's handles once per key, the square of the clip)
+        void EvaluatePose(int f, HashSet<string> only = null)
         {
-            spin.Recalc();
+            if (only == null) spin.Recalc();
             foreach (var k3 in curveOrder)
             {
+                if (only != null) { if (!only.Contains(k3.bone)) continue; spin.Recalc(k3); }
                 float v = BlenderFCurve.Evaluate(curves[k3], f, constant: true);
                 int id = st.BoneId[k3.bone];
                 if (assignedSince.Contains((k3.bone, k3.prop))) continue;
@@ -391,6 +401,8 @@ public static partial class BlenderVehicleRig
         double ddRef = 0.0; bool firstM = true;
         foreach (var cl in clusters) { if (firstM || cl.m > ddRef) ddRef = cl.m; firstM = false; }   // max((cl["m"] ...), default=0.0)
         var carrier = new HashSet<int>(); var idler = new HashSet<int>();
+        double beltAdv = 0.0;
+        foreach (var tr in st.Tracks) if (tr.Job != null) beltAdv = PyMax(beltAdv, tr.Job.AdvCells * tr.Job.CellL);
         // the live treads' wrap carriers: each tread's frontmost and rearmost cluster, the rear one the idler
         foreach (var tr in st.Tracks)
         {
@@ -453,7 +465,9 @@ public static partial class BlenderVehicleRig
                 airborne.Add(bname);
             else if (ddRef > 1e-6 && bi < clusters.Count && clusters[bi].m > 1e-6 && !carrier.Contains(bi) && !clusters[bi].rotor)
             {
-                degI = degrees * (ddRef / clusters[bi].m);   // no belt: the drive wheel's rim ratio
+                // against a belt of link bones the wheels roll at the belt's advance per loop; without one, the drive wheel's rim ratio
+                if (beltAdv > 1e-6) degI = (beltAdv / (clusters[bi].m * 0.5)) * (180.0 / Math.PI) * (degrees >= 0 ? 1.0 : -1.0);
+                else degI = degrees * (ddRef / clusters[bi].m);
                 degI *= a.RoadSpeedMul;
                 if (Math.Abs(a.RoadSpeedMul - 1.0) < 1e-6)
                 {
@@ -519,9 +533,111 @@ public static partial class BlenderVehicleRig
             double driveD = PyMaxOf(clusters.Select(c => c.m)), convDeg = degrees / 3.0;
             double advance = Math.PI * driveD * (Math.Abs(convDeg) / 360.0);
             float flow = degrees >= 0 ? 1f : -1f; double sign = degrees >= 0 ? 1.0 : -1.0;
+            // the evaluated pose the later stages read is the one of the LAST frame_set here, before what is assigned after it
+            int treadSets = st.Tracks.Sum(t => t.Job != null ? clip + 1 + 2 * t.Job.Runs.Count : 18), treadSet = 0;
+            void TreadFrameSet(int f)
+            {
+                FrameSet(f);
+                if (++treadSet == treadSets) { EvaluatePose(f); st.EvaluatedPose = VehiclePoseMats(ad); }
+            }
+            void ToXyz(string bone)   // rotation_mode = 'XYZ': a bone still in QUATERNION reads its identity as the Euler (0, -0, 0)
+            {
+                bool wasQuat = !ad.RotMode.TryGetValue(st.BoneId[bone], out var oldMode) || oldMode == "QUATERNION";
+                SetPose(bone, "XYZ", null, null);
+                if (wasQuat) ad.PoseEuler[st.BoneId[bone]] = new[] { 0f, -0f, 0f };
+            }
             for (int ti = 0; ti < st.Tracks.Count; ti++)
             {
                 var t = st.Tracks[ti];
+                if (t.Job != null)
+                {
+                    // LINK BONES: every frame each wrap cell's bone is carried along the measured path - its pose matrix set whole
+                    // (rna_PoseChannel_matrix_set: into the bone's own space under its parent's pose at that frame, then location,
+                    // Euler and scale read back from it), location and rotation keyed; a straight run's shuttle bone slides
+                    var job = t.Job; string L2(int ci) => job.Prefix + "L" + ci.ToString("00", CultureInfo.InvariantCulture);
+                    double advLink = -job.AdvCells * job.CellL * (degrees >= 0 ? 1.0 : -1.0);
+                    if (a.TreadLinks) advLink = -(job.L / Math.Max(1, spinRepeats)) * (degrees >= 0 ? 1.0 : -1.0);
+                    var qprev = new Dictionary<int, float[]>();
+                    var names2 = job.Cells.Select(L2).Concat(job.Runs.Select((r, ri) => job.Prefix + "S" + ri.ToString("00", CultureInfo.InvariantCulture))).ToList();
+                    if (names2.Any(n => !st.BoneId.ContainsKey(n))) { s.Fallback = "stage 4: the tread's link bone under another name is not modelled yet"; return; }
+                    var p0s = new Dictionary<int, float[]>(); var t0s = new Dictionary<int, float[]>();
+                    foreach (int ci in job.Cells)
+                    {
+                        ToXyz(L2(ci));
+                        PathEval(job, job.SRest[ci], out var p0, out var t0); p0s[ci] = p0; t0s[ci] = t0;
+                    }
+                    // what a link's pose is set against: its parent chain's pose at the frame (the body bone under the wave rock)
+                    var parentChain = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (int ci in job.Cells) for (int pb = ad.Rest.Parent[st.BoneId[L2(ci)]]; pb >= 0; pb = ad.Rest.Parent[pb]) parentChain.Add(s.Names.BoneOfJoint[pb]);
+                    for (int f = 0; f <= clip; f++)
+                    {
+                        checkpoint?.Invoke();
+                        TreadFrameSet(f);
+                        EvaluatePose(f, parentChain); var poseNow = VehiclePoseMats(ad);
+                        foreach (int ci in job.Cells)
+                        {
+                            string bn = L2(ci); int id = st.BoneId[bn];
+                            int parent = ad.Rest.Parent[id];
+                            var rotscale = parent >= 0 ? VehicleProbe.MulM4(poseNow[parent], ad.Rest.OffsBone[id]) : ad.Rest.ArmMat[id];
+                            if (a.TreadLinks)
+                            {
+                                // a RIGID link: the chord between the cell's two ends, at rest and now - turned by the chords' angle about Y,
+                                // carried from the rest chord's middle to this one's; the pose read back as a quaternion kept on one side
+                                double h = 0.5 * job.CellL, s0 = job.SRest[ci], s1 = s0 + advLink * spinRepeats * f / clip;
+                                PathEval(job, s0 - h, out var a0, out _); PathEval(job, s0 + h, out var b0, out _);
+                                PathEval(job, s1 - h, out var a1, out _); PathEval(job, s1 + h, out var b1, out _);
+                                var c0 = Sub(b0, a0); var c1 = Sub(b1, a1);
+                                double th = BlenderTrig.Atan2(-(double)c1[2], c1[0]) - BlenderTrig.Atan2(-(double)c0[2], c0[0]);
+                                var mid1 = Scale(Add(a1, b1), 0.5f); var mid0 = Scale(Add(a0, b0), 0.5f);
+                                var rm = VehicleProbe.MatMulMathutils(LinkTranslation(mid1[0], mid1[1], mid1[2]), VehicleProbe.MatRotation(th, 'Y'));
+                                rm = VehicleProbe.MatMulMathutils(VehicleProbe.MatMulMathutils(rm, LinkTranslation(-mid0[0], -mid0[1], -mid0[2])), ad.Rest.MatrixLocal[id]);
+                                var rbasis = BlenderDeploy.PoseFromChannel(BlenderEigen.InvertM4(rotscale), VehicleProbe.ToColumnMajor(rm));
+                                VehicleProbe.Mat4ToLocRotSize(rbasis, out var rloc, out var rrot, out var rsize);
+                                var qn = VehicleProbe.Mat3NormalizedToQuat(rrot);
+                                if (qprev.TryGetValue(ci, out var qp) && VehicleProbe.DotQt(qp, qn) < 0.0f) qn = new[] { (float)(qn[0] * -1.0f), (float)(qn[1] * -1.0f), (float)(qn[2] * -1.0f), (float)(qn[3] * -1.0f) };
+                                qprev[ci] = qn;
+                                SetLoc(bn, rloc); SetPose(bn, "QUATERNION", null, qn); ad.PoseProps[id][2] = rsize;
+                                Insert(bn, "location", rloc, f); Insert(bn, "rotation_quaternion", qn, f);
+                                continue;
+                            }
+                            PathEval(job, job.SRest[ci] + advLink * spinRepeats * f / clip, out var p1, out var t1);
+                            var poseM = VehicleProbe.ToColumnMajor(LinkPoseMatrix(p0s[ci], t0s[ci], p1, t1, ad.Rest.MatrixLocal[id]));
+                            var basis = BlenderDeploy.PoseFromChannel(BlenderEigen.InvertM4(rotscale), poseM);
+                            VehicleProbe.Mat4ToLocRotSize(basis, out var loc, out var rot, out var size);
+                            var eul = BlenderDeploy.Mat3ToEulXYZ(rot);
+                            SetLoc(bn, loc); SetPose(bn, "XYZ", eul, null); ad.PoseProps[id][2] = size;
+                            Insert(bn, "location", loc, f); Insert(bn, "rotation_euler", eul, f);
+                        }
+                    }
+                    for (int ri = 0; ri < job.Runs.Count; ri++)
+                    {
+                        string bn = job.Prefix + "S" + ri.ToString("00", CultureInfo.InvariantCulture); var run = job.Runs[ri];
+                        PathEval(job, job.SRest[run[run.Count / 2]], out _, out var tm);
+                        var worldVec = Scale(tm, (float)advLink);
+                        var bm = MulMat4Row(VehicleProbe.ToRowMajor(arm.World), ad.Rest.MatrixLocal[st.BoneId[bn]]);
+                        var inv3 = VehicleProbe.Inverted3(new[] { bm[0], bm[1], bm[2], bm[4], bm[5], bm[6], bm[8], bm[9], bm[10] });
+                        if (inv3 == null) { s.Fallback = "stage 4: the tread's shuttle bone with no inverse is not modelled yet"; return; }
+                        var local = new float[3];
+                        for (int r = 0; r < 3; r++) { double dsum = 0.0; for (int k = 0; k < 3; k++) dsum += (double)(float)(inv3[3 * r + k] * worldVec[k]); local[r] = (float)dsum; }
+                        ToXyz(bn);
+                        TreadFrameSet(0);
+                        SetLoc(bn, new float[3]);
+                        Insert(bn, "location", new float[3], 0);
+                        TreadFrameSet(clip);
+                        var endLoc = Scale(local, (float)spinRepeats);
+                        SetLoc(bn, endLoc);
+                        Insert(bn, "location", endLoc, clip);
+                    }
+                    if (a.TreadLinks)
+                    {
+                        s.Logs4.Add("VEHICLE tread '" + t.Part + "' RIGID LINKS circuit: " + job.Cells.Count + " link bones, the whole loop " + BlenderRigAnim.PyFixed(job.L, 2) + " in " + clip + " frames (" + BlenderRigAnim.PyFixed(Math.Abs(advLink), 3) + " per spin cycle)");
+                        Note(s, "rigid links: every link keyed round the whole loop");
+                        continue;
+                    }
+                    s.Logs4.Add("VEHICLE tread '" + t.Part + "' HYBRID conveyor: " + job.Cells.Count + " link bones on wraps + " + job.Runs.Count + " shuttle(s), advance " + BlenderRigAnim.PyFixed(Math.Abs(advLink), 3) + "/loop");
+                    Note(s, "the tread's link bones carried along the path, every frame keyed");
+                    continue;
+                }
                 double pMeas = t.Pitch, adv = 0.04 <= pMeas && pMeas <= 0.3 ? pMeas : advance;
                 s.Logs4.Add("VEHICLE tread '" + t.Part + "' advance: " + BlenderRigAnim.PyFixed(adv, 3) + "/loop ("
                             + (adv == pMeas ? "= measured link pitch" : "quantum fallback, pitch " + BlenderRigAnim.PyFixed(pMeas, 3) + " rejected") + ")");

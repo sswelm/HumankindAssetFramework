@@ -3,8 +3,9 @@
 This records the acceptance work following PR #188, against merged commit `70dc263`.
 The factory default changed to C# on 2026-10-27; valid saved preferences and recipe choices still override it.
 The dated results and per-model visual/in-game checklist below retain their recorded acceptance status.
-Moving treads (d6): a tread without a link pitch runs in C# since 2026-11-16 (the carrier-skinned conveyor); a tread with
-one (the link bones) and Rigid links still go to Blender.
+Moving treads (d6): the conveyor runs in C# since 2026-11-16 - carrier bones without a link pitch, link bones with one (the
+Bradley's rig equal to Blender's in the drill; not yet looked at in the game), and Rigid links (equal on the five fixtures; not
+yet looked at in the game).
 
 ## Native JPEG-alpha support (October 19, 2026)
 
