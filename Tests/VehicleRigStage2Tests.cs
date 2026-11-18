@@ -71,7 +71,7 @@ public class VehicleRigStage2Tests
     static BMesh Build(BlenderRigAnim.MeshData d, BlenderWeld.Layers layers)
     {
         var m = typeof(BlenderVehicleRig).GetMethod("FromMeshData", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        return (BMesh)m.Invoke(null, new object[] { d, layers, true, false });
+        return (BMesh)m.Invoke(null, new object[] { d, layers, true, false, null });
     }
 
     [Fact]

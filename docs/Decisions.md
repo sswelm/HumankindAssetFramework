@@ -25,8 +25,8 @@ only in Python sends its jobs back through Blender: slower, a second install to 
 the previews use.
 
 **Order of what is left in the Lab (2026-11-16):** the Two-sided role (done with this entry), the tread rig with its
-rigid links (done the same day: carrier bones, link bones, rigid links, polygon meshes; the finishing passes on a polygon
-tread are next), the source-skeleton fast path.
+rigid links (done the same day: carrier bones, link bones, rigid links, polygon meshes, the finishing passes on a polygon
+tread), the source-skeleton fast path (next).
 
 **What this does not decide:** Blender stays installed on the build machine as the oracle; the parity drills need it.
 The code's default rig route (`rigRoute`) is a separate switch and is not flipped here.

@@ -280,11 +280,12 @@ public static partial class BlenderVehicleRig
     /// the faces with their corners' edges (SMOOTH unless sharp_face, the material); the loop layers per loop slot (corner
     /// 3f + k), the point colours per vertex. Face normals as normal_tri_v3 when asked; vertex normals as the mesh reports
     /// them when asked.</summary>
-    static BMesh FromMeshData(BlenderRigAnim.MeshData d, BlenderWeld.Layers layers, bool faceNormals, bool vertexNormals)
+    static BMesh FromMeshData(BlenderRigAnim.MeshData d, BlenderWeld.Layers layers, bool faceNormals, bool vertexNormals, Action checkpoint = null)
     {
+        checkpoint?.Invoke();
         int nv = d.Vertices, nf = d.FaceCount;
         if (d.Edges == null) throw new InvalidOperationException("a stage mesh without its edge list");
-        if (d.PolyStart != null && (faceNormals || vertexNormals)) throw new NotSupportedException("the normals of a mesh of polygons");
+        if (d.PolyStart != null && vertexNormals) throw new NotSupportedException("the vertex normals of a mesh of polygons");
         BMesh bm;
         var swf = System.Diagnostics.Stopwatch.StartNew(); bool timing = Environment.GetEnvironmentVariable("VEHICLERIG_DEBUG_TIME") == "1";
         if (HafNativeKernels.Available && d.PolyStart == null)
@@ -296,12 +297,17 @@ public static partial class BlenderVehicleRig
         else
         {
             bm = new BMesh();
-            for (int v = 0; v < nv; v++) bm.VertCreate(d.Positions[3 * v], d.Positions[3 * v + 1], d.Positions[3 * v + 2]);
+            for (int v = 0; v < nv; v++)
+            {
+                if ((v & 127) == 0) checkpoint?.Invoke();
+                bm.VertCreate(d.Positions[3 * v], d.Positions[3 * v + 1], d.Positions[3 * v + 2]);
+            }
             if (timing) Console.Error.WriteLine($"TIME     verts {swf.ElapsedMilliseconds} ms");
             int ne = d.Edges.Length / 2;
             var edgeOf = new Dictionary<long, int>(ne, BlenderMesh.EdgeKeyComparer.Instance);   // a packed pair hashes badly as a plain long (its halves XOR): the mesh's own comparer
             for (int e = 0; e < ne; e++)
             {
+                if ((e & 127) == 0) checkpoint?.Invoke();
                 int a = d.Edges[2 * e], b = d.Edges[2 * e + 1];
                 int i = bm.EdgeCreate(a, b);
                 bm.EFlag[i] = d.EdgeSharp != null && d.EdgeSharp[e] ? (byte)0 : BMesh.FlagSmooth;
@@ -310,6 +316,7 @@ public static partial class BlenderVehicleRig
             if (timing) Console.Error.WriteLine($"TIME     edges {swf.ElapsedMilliseconds} ms ({ne})");
             for (int f = 0; f < nf; f++)
             {
+                if ((f & 127) == 0) checkpoint?.Invoke();
                 int c0 = d.CornerStart(f), n = d.CornerCount(f); var verts = new int[n]; var edges = new int[n];
                 for (int k = 0; k < n; k++) verts[k] = d.Faces[c0 + k];
                 for (int k = 0; k < n; k++)
@@ -319,7 +326,7 @@ public static partial class BlenderVehicleRig
                 bm.FMat[i] = d.FaceMaterial[f];
             }
             if (timing) Console.Error.WriteLine($"TIME     faces {swf.ElapsedMilliseconds} ms ({nf})");
-            if (faceNormals) BlenderDecimate.FaceNormalsUpdate(bm);
+            if (faceNormals) { if (d.PolyStart != null) FaceNormalsAny(bm, checkpoint); else BlenderDecimate.FaceNormalsUpdate(bm); }
         }
         foreach (var u in d.UvAll) layers.Uv.Add((float[])u.Clone());
         if (d.UvAll.Count == 0 && d.Uv != null) layers.Uv.Add((float[])d.Uv.Clone());

@@ -2827,6 +2827,27 @@ or the five-minute limit. Six regression cases cover cancellation and deadlines 
 the Generate wrapper, which preserves the previous output without temporary files or a Blender fallback. The four stage-level
 cases fail without the polls. Uninterrupted results remain held to Blender by the stage and export comparisons above.
 
+The tread rig, fourth part (2026-11-16, d6): the FINISHING PASSES on a tread mesh of polygons. `FaceNormalsAny` is
+BM_face_calc_normal's three cases (normal_tri_v3; normal_quad_v3, the cross of the diagonals; Newell's sum from the last corner for
+a larger face); the doubling's face copy keeps every corner (it built triangles: the first run gave 704 corners for Blender's
+784); the inside-out fix's face centre is the corners' sum times 1.0f / len; the Two-sided scene takes a polygon mesh's loop
+triangles (`FbxModel.Tessellate`) and one twin entry per polygon whose corners make at most three distinct positions (a face of
+more can equal no triangle's set). Fixtures, each equal at every stage and byte-identical, and required by name in the drill:
+`fx_r_tracks_double` (the shell: 94 -> 188 vertices on the belt), `fx_r_tracks_roads_double` (both passes on the ribbon belt of
+n-gons: 428 -> 856), `fx_r_tracks_insideout` (0 islands reversed), `fx_r_tracks_inverted` (the belt wound inside-out: 1 island
+reversed - written because the first two never reversed one) and `fx_r_tracks_twosided` (a sheet beside the tread: 2 faces
+doubled). Left by name: a part that is both a live tread and Two-sided (`stage 5: the Two-sided pass on a tread mesh of polygons
+(d6)`), a polygon tread marked Flip, and a polygon tread requesting a shell for its Sail/Flag/Rudder role with global
+Double-sided off. A tread without a sprocket or idler cluster also remains a named fallback. NOT checked: nothing ran in Unity
+or in the game.
+
+Review of PR #293 (2026-11-18): the inside-out and double-sided finishing passes now poll Generate's cancellation/deadline
+callback during mesh conversion, normal calculation, island traversal, face copying and shell displacement. The original
+implementation never polled on these newly supported polygon paths. Four polygon regression cases fail that implementation;
+four wrapper cases also check that an interruption preserves the previous output, leaves no temporary file, and does not
+report completion or select Blender after a deadline. Capability and changelog limits now include the Flip and role-shell
+fallbacks retained in the code, rather than claiming that Two-sided on a tread is the only case left.
+
 The gun's recoil defects (2026-11-07): the recoil-side entries open since October, fixed in `vehicle_rig.py` and in the C#
 port in the same PR so the parity drill holds each fix (the fixtures are TAKEN by the port, unlike the tread's). (1) The arc's
 bore came from `gun_axis` (trunnion -> muzzle): at a pivot of 1.0 the trunnion is the muzzle and the difference is a float32

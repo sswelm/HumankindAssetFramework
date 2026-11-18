@@ -84,20 +84,86 @@ public class VehicleRigTreadTests
         Assert.Contains(s.Logs5, l => l.Contains(", " + all + " tris across 6 mesh(es)"));
     }
 
+    /// <summary>The whole-model doubling on a tread mesh of polygons: every face gets a copy of its own size on vertices of its own.</summary>
+    [Fact]
+    public void Double_sided_doubles_a_polygon_tread_face_for_face()
+    {
+        var a = TrackedArgs(); a.DoubleSided = true;
+        var s = Stages(Tracked(), a, 4); Assert.Null(s.Fallback);
+        var before = Mesh(s, "Mesh___track__Belt"); int nv = before.Vertices, nf = before.FaceCount, nc = before.Faces.Length;
+        var sizes = Enumerable.Range(0, nf).Select(f => before.CornerCount(f)).ToArray();
+        var x = BlenderVehicleRig.RunStage5(s, a);
+        Assert.Null(s.Fallback); Assert.NotNull(x); Assert.Null(x.Fallback);
+        var after = Mesh(s, "Mesh___track__Belt");
+        Assert.NotNull(after.PolyStart);
+        Assert.Equal(2 * nv, after.Vertices); Assert.Equal(2 * nf, after.FaceCount); Assert.Equal(2 * nc, after.Faces.Length);
+        Assert.Equal(sizes.Concat(sizes), Enumerable.Range(0, after.FaceCount).Select(f => after.CornerCount(f)));   // the copies after the originals, each its source's size
+        Assert.All(Enumerable.Range(nc, nc), c => Assert.True(after.Faces[c] >= nv));                                 // a copy stands on copied vertices only
+        Assert.Contains(s.Logs5, l => l.StartsWith("VEHICLE double-sided 'Mesh___track__Belt': " + nv + " -> " + 2 * nv + " verts", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_inside_out_fix_walks_a_polygon_tread_and_leaves_an_outward_one_alone()
+    {
+        var a = TrackedArgs(); a.FixInsideOut = true;
+        var s = Stages(Tracked(), a, 4); Assert.Null(s.Fallback);
+        var before = (int[])Mesh(s, "Mesh___track__Belt").Faces.Clone();
+        var x = BlenderVehicleRig.RunStage5(s, a);
+        Assert.Null(s.Fallback); Assert.NotNull(x); Assert.Null(x.Fallback);
+        Assert.Equal(before, Mesh(s, "Mesh___track__Belt").Faces);   // the belt box faces outward: kept as authored
+        Assert.Contains(s.Logs5, l => l.StartsWith("VEHICLE inside-out fix: 0 island(s) reversed (interior-facing), 6 kept as authored", StringComparison.Ordinal));
+    }
+
+    /// <summary>Both newly enabled finishing passes must observe Generate's callback while processing a polygon mesh.</summary>
     [Theory]
-    [InlineData("double", "stage 5: the double-sided shell of a tread mesh of polygons (d6) is not modelled yet")]
-    [InlineData("insideout", "stage 5: the inside-out fix of a tread mesh of polygons (d6) is not modelled yet")]
+    [InlineData(false, false)] [InlineData(false, true)]
+    [InlineData(true, false)] [InlineData(true, true)]
+    public void Polygon_finishing_observes_cancellation_and_deadlines_before_committing_the_mesh(bool doubleSided, bool cancel)
+    {
+        var a = TrackedArgs(); a.DoubleSided = doubleSided; a.FixInsideOut = !doubleSided;
+        var s = Stages(Tracked(), a, 4);
+        // Isolate the subdivided tread, so the polls exercise polygon finishing rather than
+        // stopping on one of the small triangular parts that normally precedes it.
+        s.Objects.RemoveAll(o => o.Type == "MESH" && o.Mesh.PolyStart == null);
+        var before = Mesh(s, "Mesh___track__Belt"); var positions = (float[])before.Positions.Clone(); var faces = (int[])before.Faces.Clone();
+        int polls = 0, caller = System.Threading.Thread.CurrentThread.ManagedThreadId;
+        Action checkpoint = () => {
+            Assert.Equal(caller, System.Threading.Thread.CurrentThread.ManagedThreadId);
+            if (++polls != 3) return;
+            if (cancel) throw new OperationCanceledException();
+            throw new TimeoutException("deadline");
+        };
+        if (cancel) Assert.Throws<OperationCanceledException>(() => BlenderVehicleRig.RunStage5(s, a, checkpoint: checkpoint));
+        else Assert.Throws<TimeoutException>(() => BlenderVehicleRig.RunStage5(s, a, checkpoint: checkpoint));
+        Assert.Equal(3, polls); Assert.Same(before, Mesh(s, "Mesh___track__Belt"));
+        Assert.Equal(positions, before.Positions); Assert.Equal(faces, before.Faces);
+        Assert.DoesNotContain(s.Logs5, l => l.StartsWith("VEHICLE double-sided '", StringComparison.Ordinal) || l.StartsWith("VEHICLE inside-out fix:", StringComparison.Ordinal));
+        Assert.Null(s.Fallback); Assert.Null(s.Dies);
+    }
+
+    /// <summary>From the review of PR 290, the two rows no fixture proves yet: a tread part also marked Flip, or a rudder (its own shell).</summary>
+    [Theory]
     [InlineData("flip", "stage 5: the winding flip of a tread mesh of polygons (d6) is not modelled yet")]
     [InlineData("rudder", "stage 5: the double-sided shell of a tread mesh of polygons (d6) is not modelled yet")]
-    public void A_pass_that_reads_triangles_leaves_a_polygon_tread_by_name(string pass, string reason)
+    public void A_pass_no_fixture_proves_leaves_a_polygon_tread_by_name(string pass, string reason)
     {
         var a = TrackedArgs();
-        if (pass == "double") a.DoubleSided = true;
-        else if (pass == "insideout") a.FixInsideOut = true;
-        else Mark(a, pass == "rudder" ? "rudders" : "flip", "Belt");
+        Mark(a, pass == "rudder" ? "rudders" : "flip", "Belt");
         var s = Stages(Tracked(), a, 4); Assert.Null(s.Fallback);
         Assert.Null(BlenderVehicleRig.RunStage5(s, a));
         Assert.Equal(reason, s.Fallback);
+    }
+
+    /// <summary>The one case still named: a part marked both a live tread and Two-sided keeps the Two-sided mesh name, so the pass's
+    /// own faces would be polygons.</summary>
+    [Fact]
+    public void A_part_that_is_a_live_tread_and_Two_sided_is_left_by_name()
+    {
+        var a = TrackedArgs(); Mark(a, "twosided", "Belt");
+        var s = Stages(Tracked(), a, 4); Assert.Null(s.Fallback);
+        Assert.NotNull(Mesh(s, "Mesh___two__Belt").PolyStart);
+        Assert.Null(BlenderVehicleRig.RunStage5(s, a));
+        Assert.Equal("stage 5: the Two-sided pass on a tread mesh of polygons (d6) is not modelled yet", s.Fallback);
     }
 
     [Fact]

@@ -174,9 +174,10 @@ or cannot write its output stops with an error instead.
   - **the probe**: a skinned mesh on an animated model or with a placed part, morph targets, an animated second model,
     a part placement on a model with bone-hung meshes, a model with bone-hung meshes whose first clip has CUBICSPLINE
     keys, and a mesh with a skin but no joint weights;
-  - **Generate**: **Use source skeleton (fast path)**; **Double-sided**, **Fix inside-out** or a Two-sided part beside a
-    moving tread (the moving tread itself - carrier bones, link bones, Rigid links - runs in C# since 2026-11-16;
-    **Static tracks (no movement)** always did); and a mesh placed on a joint node.
+  - **Generate**: **Use source skeleton (fast path)**; a moving tread also marked Two-sided or Flip, a polygon tread requesting
+    a shell for its Sail/Flag/Rudder role with global Double-sided off, or a tread missing a sprocket/idler cluster (a moving tread
+    itself - carrier bones, link bones, Rigid links, with Double-sided, Fix inside-out or Two-sided parts beside it -
+    runs in C# since 2026-11-16; **Static tracks (no movement)** always did); and a mesh placed on a joint node.
 - **FBX is read natively** (2026-11-02). A static `.fbx` goes through the same in-process path as a `.glb`: the
   Factory's static bake, its prep, the Vehicle Lab, the clip-range picker and the Model Reader, unless the console
   names a limit of the reader (a camera, shape keys, ...). A skinned or animated `.fbx` keeps Blender's FBX route in the
