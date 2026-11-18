@@ -114,6 +114,33 @@ public class VehicleRigTreadTests
         Assert.Contains(s.Logs5, l => l.StartsWith("VEHICLE inside-out fix: 0 island(s) reversed (interior-facing), 6 kept as authored", StringComparison.Ordinal));
     }
 
+    /// <summary>Both newly enabled finishing passes must observe Generate's callback while processing a polygon mesh.</summary>
+    [Theory]
+    [InlineData(false, false)] [InlineData(false, true)]
+    [InlineData(true, false)] [InlineData(true, true)]
+    public void Polygon_finishing_observes_cancellation_and_deadlines_before_committing_the_mesh(bool doubleSided, bool cancel)
+    {
+        var a = TrackedArgs(); a.DoubleSided = doubleSided; a.FixInsideOut = !doubleSided;
+        var s = Stages(Tracked(), a, 4);
+        // Isolate the subdivided tread, so the polls exercise polygon finishing rather than
+        // stopping on one of the small triangular parts that normally precedes it.
+        s.Objects.RemoveAll(o => o.Type == "MESH" && o.Mesh.PolyStart == null);
+        var before = Mesh(s, "Mesh___track__Belt"); var positions = (float[])before.Positions.Clone(); var faces = (int[])before.Faces.Clone();
+        int polls = 0, caller = System.Threading.Thread.CurrentThread.ManagedThreadId;
+        Action checkpoint = () => {
+            Assert.Equal(caller, System.Threading.Thread.CurrentThread.ManagedThreadId);
+            if (++polls != 3) return;
+            if (cancel) throw new OperationCanceledException();
+            throw new TimeoutException("deadline");
+        };
+        if (cancel) Assert.Throws<OperationCanceledException>(() => BlenderVehicleRig.RunStage5(s, a, checkpoint: checkpoint));
+        else Assert.Throws<TimeoutException>(() => BlenderVehicleRig.RunStage5(s, a, checkpoint: checkpoint));
+        Assert.Equal(3, polls); Assert.Same(before, Mesh(s, "Mesh___track__Belt"));
+        Assert.Equal(positions, before.Positions); Assert.Equal(faces, before.Faces);
+        Assert.DoesNotContain(s.Logs5, l => l.StartsWith("VEHICLE double-sided '", StringComparison.Ordinal) || l.StartsWith("VEHICLE inside-out fix:", StringComparison.Ordinal));
+        Assert.Null(s.Fallback); Assert.Null(s.Dies);
+    }
+
     /// <summary>From the review of PR 290, the two rows no fixture proves yet: a tread part also marked Flip, or a rudder (its own shell).</summary>
     [Theory]
     [InlineData("flip", "stage 5: the winding flip of a tread mesh of polygons (d6) is not modelled yet")]
