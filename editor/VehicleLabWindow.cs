@@ -358,6 +358,22 @@ public class VehicleLabWindow : EditorWindow
 
     // ── Recipes: the whole vehicleize configuration as a JSON file — reload it after a restart, keep one per model,
     // ship it next to the model so a collaborator reproduces the exact rig. ──
+    // The source path of a saved recipe, for the "Edit existing" list. The list is rebuilt on every repaint, so a file is read
+    // once per change of its write time.
+    [Serializable] class RecipeHead { public string srcFile; }
+    static readonly Dictionary<string, KeyValuePair<DateTime, string>> recipeSourceMemo = new Dictionary<string, KeyValuePair<DateTime, string>>();
+    static string RecipeSource(string recipePath)
+    {
+        try
+        {
+            DateTime t = File.GetLastWriteTimeUtc(recipePath);
+            if (recipeSourceMemo.TryGetValue(recipePath, out var hit) && hit.Key == t) return hit.Value;
+            string src = JsonUtility.FromJson<RecipeHead>(File.ReadAllText(recipePath))?.srcFile ?? "";
+            recipeSourceMemo[recipePath] = new KeyValuePair<DateTime, string>(t, src);
+            return src;
+        }
+        catch (Exception) { return ""; }   // unreadable or half-written: listed under "(no source)", still loadable
+    }
     [Serializable] class Recipe
     {
         public string generateRoute = ""; // absent: editor default, Blender until acceptance
@@ -520,6 +536,13 @@ public class VehicleLabWindow : EditorWindow
         {
             string rdirFull = Path.Combine(Directory.GetParent(Application.dataPath).FullName, RecipesDir);
             string[] rfiles = Directory.Exists(rdirFull) ? Directory.GetFiles(rdirFull, "*.json").OrderByDescending(File.GetLastWriteTime).ThenBy(x => x).ToArray() : new string[0];
+            // BY FOLDER (2026-11-18 user request: thirty recipes by date alone, "I'm getting confused"). Each row names the
+            // folder its source model lives in, and the list sorts on it; within a folder the newest stays on top.
+            string[] rfolders = VehicleLabRules.SourceFolders(rfiles.Select(RecipeSource).ToArray());
+            {
+                var order = Enumerable.Range(0, rfiles.Length).OrderBy(i => rfolders[i], StringComparer.OrdinalIgnoreCase).ToArray();   // stable: date order kept inside a folder
+                rfiles = order.Select(i => rfiles[i]).ToArray(); rfolders = order.Select(i => rfolders[i]).ToArray();
+            }
             var names = new string[rfiles.Length + 1];
             names[0] = "＜new model＞";
             // Display labels carry the file's last-modified stamp (user ask 2026-08-20: a bare name list can't tell
@@ -529,7 +552,9 @@ public class VehicleLabWindow : EditorWindow
             for (int i = 0; i < rfiles.Length; i++)
             {
                 names[i + 1] = Path.GetFileNameWithoutExtension(rfiles[i]);
-                labels[i + 1] = File.GetLastWriteTime(rfiles[i]).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture) + "   —  " + names[i + 1];   // stamp first, newest at the top
+                // Folder first (the sort key), then the name, the stamp last. A '/' in a popup label opens a submenu: none here.
+                labels[i + 1] = ((rfolders[i].Length > 0 ? rfolders[i] : "(no source)") + "   —  " + names[i + 1] + "      " +
+                    File.GetLastWriteTime(rfiles[i]).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)).Replace('/', '-');
             }
             int cur = 0;
             for (int i = 0; i < rfiles.Length; i++) if (names[i + 1] == loadedRecipe) { cur = i + 1; break; }
