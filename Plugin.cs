@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -158,6 +160,14 @@ namespace HumankindAssetFramework
         // game treats our window like one of its own (map input suppressed under it). Written every OnGUI event.
         internal static bool WindowHovered;
         private Vector2 scroll;
+        // THE UNIT TABLE (2026-11-19): a second window, opened by the "Units" button. Its rows are read when it opens and
+        // on Refresh - never per frame (the reads are reflection).
+        private bool showUnits;
+        private Rect unitsRect = new Rect(600, 60, 1240, 560);
+        private Vector2 unitsScroll;
+        private List<UnitRow> unitRows = new List<UnitRow>();
+        private int unitsSortColumn; private bool unitsSortDescending;
+        [ProcessLived("literal column widths")] private static readonly int[] UnitColumnWidths = { 190, 78, 92, 56, 118, 70, 70, 50, 92, 44, 210, 118 };
         private string atlasFilter = "";   // Dump Atlases: only layers whose name contains this (blank = all)
         private string previewEvent = "";  // F8 audition: Wwise event name to post via Play Event
 
@@ -611,11 +621,60 @@ namespace HumankindAssetFramework
 
         private void OnGUI()
         {
-            WindowHovered = show && winRect.Contains(Event.current.mousePosition);
+            WindowHovered = show && (winRect.Contains(Event.current.mousePosition) || (showUnits && unitsRect.Contains(Event.current.mousePosition)));
             if (!show) return;
+            if (showUnits) unitsRect = GUILayout.Window(GUID.GetHashCode() + 1, unitsRect, DrawUnitsWindow, "HAF units", GUILayout.Width(1240));
             // Fixed width: GUILayout.Window otherwise re-measures width from content every repaint, so the label
             // word-wrap "breathed" while dragging — the verdict text visibly reflowing read as instability.
             winRect = GUILayout.Window(GUID.GetHashCode(), winRect, DrawWindow, "Humankind Asset Framework", GUILayout.Width(520));
+        }
+
+        private void RefreshUnitRows()
+            => unitRows = UnitTableRules.Sorted(UniversalInject.UnitRows(), unitsSortColumn, unitsSortDescending);
+
+        // The unit table: a header of sort buttons, then one line per registry entry. Empty cell = not read (a unit
+        // that never loaded has no mesh to count); it is never shown as 0.
+        private void DrawUnitsWindow(int id)
+        {
+            int ceiling = UniversalInject.EngineQuadCeiling;
+            using (new GUILayout.HorizontalScope())
+            {
+                int over = unitRows.Count(r => UnitTableRules.QuadAlarm(r, ceiling) == 2), near = unitRows.Count(r => UnitTableRules.QuadAlarm(r, ceiling) == 1);
+                GUILayout.Label($"{unitRows.Count} unit(s). Largest mesh is against the engine's {ceiling:N0}-quad limit per mesh" +
+                                (over > 0 ? $" - {over} OVER it (red: the rest of that mesh is not drawn)" : "") + (near > 0 ? $" - {near} at 90% or more (amber)" : "") +
+                                ". Empty = not read. Click a column to sort.");
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("Refresh", GUILayout.Width(70))) RefreshUnitRows();
+                if (GUILayout.Button("Close", GUILayout.Width(60))) showUnits = false;
+            }
+            using (new GUILayout.HorizontalScope())
+                for (int c = 0; c < UnitTableRules.Columns.Length; c++)
+                {
+                    string mark = c != unitsSortColumn ? "" : unitsSortDescending ? " v" : " ^";
+                    if (GUILayout.Button(UnitTableRules.Columns[c] + mark, GUILayout.Width(UnitColumnWidths[c])))
+                    {
+                        // A number column starts with the largest first, a text column from A.
+                        bool numeric = c >= 3 && c != 10;
+                        unitsSortDescending = c == unitsSortColumn ? !unitsSortDescending : numeric;
+                        unitsSortColumn = c;
+                        unitRows = UnitTableRules.Sorted(unitRows, unitsSortColumn, unitsSortDescending);
+                    }
+                }
+            unitsScroll = GUILayout.BeginScrollView(unitsScroll, GUILayout.Height(470));
+            var normal = GUI.color;
+            foreach (var r in unitRows)
+                using (new GUILayout.HorizontalScope())
+                    for (int c = 0; c < UnitTableRules.Columns.Length; c++)
+                    {
+                        int alarm = c == 4 ? UnitTableRules.QuadAlarm(r, ceiling) : 0;
+                        GUI.color = alarm == 2 ? new Color(1f, 0.5f, 0.5f) : alarm == 1 ? new Color(1f, 0.85f, 0.5f)
+                                  : c == 1 && r.Status == "disabled" ? new Color(0.7f, 0.7f, 0.7f) : normal;
+                        string cell = UnitTableRules.Cell(r, c, ceiling);
+                        GUILayout.Label(new GUIContent(cell, c == 0 ? r.Pawn : c == 4 ? r.MaxQuadMesh : cell), GUILayout.Width(UnitColumnWidths[c] + 4));
+                    }
+            GUI.color = normal;
+            GUILayout.EndScrollView();
+            GUI.DragWindow(new Rect(0, 0, 10000, 24));
         }
 
         private void DrawWindow(int id)
@@ -653,6 +712,8 @@ namespace HumankindAssetFramework
             using (new GUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Dump Atlases")) UniversalInject.DumpOutputLayerAtlases(atlasFilter);   // Unit Retexture workflow: dump a unit's atlas to paint
+                if (GUILayout.Button(new GUIContent("Units", "A table of every unit in the registry: what it costs, its main settings and its bake date."), GUILayout.Width(60)))
+                { showUnits = !showUnits; if (showUnits) RefreshUnitRows(); }
                 if (GUILayout.Button("Smoke Test (full — adds the live-pawn checks)")) UniversalInject.RunSmokeTest();   // adopter check: bindings + registry + injection health -> [SmokeTest] PASS/FAIL
             }
             using (new GUILayout.HorizontalScope())

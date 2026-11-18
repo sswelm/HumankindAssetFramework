@@ -10,6 +10,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **F8 window: a "Units" button opens a table of every unit in the registry (2026-11-19).** One row per entry: its
+  status this session (in use, loaded, not loaded, disabled), its type (static, animated, state-driven, retexture), what
+  it costs - meshes, the largest mesh against the engine's 16,320-quad limit per mesh (amber from 90%, red past it),
+  total quads, vertices, bones, atlas size, clip collections -, its main settings (scale, turret, hand prop, deploys,
+  fires, sound, own skin) and its bake date. Click a column to sort; Refresh re-reads. A value that could not be read
+  (a unit that never loaded has no mesh to count) is an empty cell, never a 0. **The bake date is new in the registry**
+  (`bakedUtc`, written with the guids by every bake - Factory, Animation Lab and CLI - kept by Save, not inherited by a
+  clone): an entry shows a date only after its next bake. Checked: 13 unit tests on the rows' rules, the plugin builds,
+  the editor assembly compiles, the hand-list and schema parity gates. Not checked: the dialog has not been opened in
+  the game. Not covered: districts (their registry is separate), and the regex fallback parser does not read the date.
 - **Vehicle Lab: "Use source skeleton (fast path)" runs in C# (2026-11-16).** The fast path keeps the artist's own
   skeleton and weights: it only keys a Spin clip on the bones you mark as wheels and exports. In C# now: the script's
   refusals in its own order (oars, rotors, the wave rock, Flip, Two-sided, the sail fold, a second model, a source with no
