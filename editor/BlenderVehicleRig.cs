@@ -32,7 +32,7 @@ public static partial class BlenderVehicleRig
         public HashSet<string> Ignore = new HashSet<string>(StringComparer.Ordinal);
         public string Merge2;                       // the merge2= text, or null
         public double Bright1 = 1.0, Bright2 = 1.0;
-        public List<string> PartTx;                 // the parttx= lines, or null
+        public List<string> PartTx;                 // the parttx= lines, or null; rigfast keeps only presence for its warning
         public bool TracksStatic;                   // argv[16] "1": the tread loops rigid, no link bones (the line at argument time)
         public bool TreadLinks;                     // a `treadmode=links` argument on live tracks: one bone per molded link
         public bool PreserveJpegAlpha;              // not an argument: the caller's export option, for the fast path (it exports inside stage 1)
@@ -272,7 +272,10 @@ public static partial class BlenderVehicleRig
         if (tx != null)
         {
             string spec = tx.Substring(7);
-            a.PartTx = spec.StartsWith("@", StringComparison.Ordinal) ? System.IO.File.ReadAllLines(spec.Substring(1)).ToList() : spec.Split(';').ToList();
+            // rigfast only checks whether the tag exists and warns; part_placements() is called
+            // after that path has exported and exited. Do not open an unused placement file.
+            a.PartTx = a.Mode == "rigfast" ? new List<string>()
+                : spec.StartsWith("@", StringComparison.Ordinal) ? System.IO.File.ReadAllLines(spec.Substring(1)).ToList() : spec.Split(';').ToList();
         }
         // the dials the rig path reads before the orientation: int(argv[7]) and float(argv[8]) unconditionally, the rest when present and
         // non-blank; a value Python cannot parse - or int(float()) of inf or nan - is an uncaught exception: the script dies there

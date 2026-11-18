@@ -240,8 +240,8 @@ done
 grep -qE "^STAGE3 DIES:3:fx_links_full: equal - dies: RuntimeError: rigid links need at least 4 bones per track" "$TMPD/s1.txt" || { echo "FAIL — vehicle_rig drill: the rigid-links budget error (fx_links_full) is not held as the script's death in stage 3"; exit 1; }
 grep -qE "^STAGE5 DIES:5:fx_links_fallback: equal - dies: RuntimeError: rigid links exceed the 126-bone budget" "$TMPD/s1.txt" || { echo "FAIL — vehicle_rig drill: the rigid-links bone-wall error (fx_links_fallback) is not held as the script's death in stage 5"; exit 1; }
 # THE FAST PATH IS COMPARED, NOT LEFT (2026-11-16): the source-skeleton fast path is modelled (BlenderVehicleRig.Fast.cs), so its
-# three export fixtures must come out equal - every VEHICLE line and the file's bytes - and its three refusals the script's exit.
-for key in fx_fast_wall_126 fx_fast_wall_127 fx_fast_two_x; do
+# four export fixtures must come out equal - every VEHICLE line and the file's bytes - and its three refusals the script's exit.
+for key in fx_fast_wall_126 fx_fast_wall_127 fx_fast_two_x fx_fast_missing_placement; do
   grep -qE "^FAST $key: equal - .* byte-identical GLB" "$TMPD/s1.txt" || { grep -E "^(FAIL|STAGE1) $key" "$TMPD/s1.txt" | head -3 | cut -c1-300; echo "FAIL — vehicle_rig drill: the fast-path fixture $key is not equal to Blender through the export"; exit 1; }
 done
 for key in fx_x_fast_bone fx_x_fast_flip fx_x_fast_second; do

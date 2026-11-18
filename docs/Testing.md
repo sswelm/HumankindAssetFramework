@@ -2861,6 +2861,13 @@ the bytes of all three exports. `VehicleRigFastPathTests` (8) hold the refusals'
 skeleton. NOT covered: the Ehrhardt (the one saved fast-path recipe) is a skinned FBX and is left at the vehicle import by
 name, as before; nothing ran in Unity or in the game.
 
+Review of PR #294 (2026-11-18): `rigfast` only warns when a `parttx=` tag is present; it never calls the mesh path's placement
+reader. The C# argument parser now preserves that presence without opening the unused file. Four unit regressions cover
+missing files, directories, locked files and an empty path, all of which threw before the fast path could print its own
+warning/refusal. A control keeps placement-file loading on the mesh path. The required positive fixture
+`fx_fast_missing_placement` completes rigfast with `parttx=@<missing file>` and compares every line and the full exported GLB
+against Blender, including the Generate wrapper; this makes four required fast-path exports and three required refusals.
+
 The gun's recoil defects (2026-11-07): the recoil-side entries open since October, fixed in `vehicle_rig.py` and in the C#
 port in the same PR so the parity drill holds each fix (the fixtures are TAKEN by the port, unlike the tread's). (1) The arc's
 bore came from `gun_axis` (trunnion -> muzzle): at a pivot of 1.0 the trunnion is the muzzle and the difference is a float32

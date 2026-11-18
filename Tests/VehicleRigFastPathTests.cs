@@ -63,6 +63,46 @@ public class VehicleRigFastPathTests
         Assert.Equal("VEHICLE ERROR: a second model is not supported on the source-skeleton fast path " + Dash + " the merged pair needs the mesh path", s.Logs.Last());
     }
 
+    [Theory]
+    [InlineData("missing")] [InlineData("directory")] [InlineData("locked")] [InlineData("empty")]
+    public void Ignored_placement_files_are_not_opened_before_fast_path_refusals(string kind)
+    {
+        string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "rigfast-placement-" + Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(dir); System.IO.FileStream held = null;
+        try
+        {
+            string path = System.IO.Path.Combine(dir, "placements.txt");
+            if (kind == "directory") path = dir;
+            else if (kind == "empty") path = "";
+            else if (kind == "locked")
+            {
+                System.IO.File.WriteAllText(path, "Hull|1,2,3|2,2,2");
+                held = new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.None);
+            }
+            var a = Args("parttx=@" + path); a.Names["oars"].Add("Hull");
+            var s = Fast(a);
+            Assert.True(s.Exits); Assert.Null(s.Fallback); Assert.Null(s.FastExport);
+            Assert.Contains(s.Logs, l => l.StartsWith("VEHICLE WARN: per-part placement is a mesh-path feature", StringComparison.Ordinal));
+            Assert.Equal("VEHICLE ERROR: Oar recovery needs mesh parts; disable the source-skeleton fast path and probe the merged oar meshes", s.Logs.Last());
+        }
+        finally { held?.Dispose(); System.IO.Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void Placement_files_are_still_read_for_the_mesh_path()
+    {
+        string path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "rig-placement-" + Guid.NewGuid().ToString("N") + ".txt");
+        const string line = "Hull|1,2,3|2,2,2";
+        try
+        {
+            System.IO.File.WriteAllText(path, line);
+            var argv = Enumerable.Repeat("", 76).ToList(); argv[0] = "rig"; argv[1] = "scene.glb";
+            argv[7] = "15"; argv[8] = "-360"; argv[17] = "0"; argv[21] = "0"; argv.Add("parttx=@" + path);
+            Assert.Equal(new[] { line }, BlenderVehicleRig.ParseArgs(argv).PartTx);
+        }
+        finally { System.IO.File.Delete(path); }
+    }
+
     static BlenderRigAnim.Stage1 Fast(BlenderVehicleRig.Args a)
     {
         var m = new HafModel { Scene = 0 }; m.Scenes.Add(new HafScene());
@@ -73,9 +113,10 @@ public class VehicleRigFastPathTests
         Assert.Null(s.Dies); return s;
     }
 
-    static BlenderVehicleRig.Args Args()
+    static BlenderVehicleRig.Args Args(params string[] tags)
     {
         var argv = Enumerable.Repeat("", 76).ToList(); argv[0] = "rigfast"; argv[1] = "scene.glb"; argv[2] = "out.glb"; argv[7] = "15"; argv[8] = "-360"; argv[17] = "0"; argv[21] = "0";
+        argv.AddRange(tags);
         var a = BlenderVehicleRig.ParseArgs(argv); Assert.Equal("rigfast", a.Mode); return a;
     }
 }

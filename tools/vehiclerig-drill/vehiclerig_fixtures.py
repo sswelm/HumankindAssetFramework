@@ -508,6 +508,8 @@ def main(out):
     recipe(out, "fx_fast_two_x", fast_source, [("Body", 0, {})], useSourceRig=True, axisChoice=1, degrees=90.0, boneParts=two)
     for k in ("fx_x_fast_bone", "fx_x_fast_flip", "fx_x_fast_second"):
         recipe(out, k, fast_source, [("Body", 0, {})], sub="recipes_exit", useSourceRig=True, boneParts=two[:1])
+    # rigfast ignores per-part placement: the file is never opened, even when it is missing.
+    recipe(out, "fx_fast_missing_placement", fast_source, [("Body", 0, {})], sub="recipes_exit", useSourceRig=True, boneParts=two[:1])
     # two boxes under a turned root
     r = Rig(); m = r.material("Paint", (0.3, 0.5, 0.7)); root = r.node("Root", rotation=[0.0, 0.7071068, 0.0, 0.7071068])
     r.node("A", root, mesh=r.mesh("A", material=m)); r.node("B", root, mesh=r.mesh("B", at=(3.0, 0.0, 0.0), material=m), translation=[0.0, 2.0, 0.0])
@@ -1196,6 +1198,7 @@ def set_tag(argv, tag, value):
 
 
 EXITS = {
+    "fx_fast_missing_placement": (None, lambda a: set_tag(a, "parttx", "@" + a[1] + ".missing")),
     "fx_x_fast_bone": ("EXIT", lambda a: a.__setitem__(4, "NoSuchBone")),
     "fx_x_fast_flip": ("EXIT", lambda a: a.__setitem__(66, "Body")),
     "fx_x_fast_second": ("EXIT", lambda a: a.append("merge2=" + a[1] + "|0,0,0|0,0,0|1")),
