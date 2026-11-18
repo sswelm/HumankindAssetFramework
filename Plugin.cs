@@ -163,7 +163,8 @@ namespace HumankindAssetFramework
         // THE UNIT TABLE (2026-11-19): a second window, opened by the "Units" button. Its rows are read when it opens and
         // on Refresh - never per frame (the reads are reflection).
         private bool showUnits;
-        private Rect unitsRect = new Rect(600, 60, 1240, 560);
+        private Rect unitsRect = new Rect(600, 60, 1300, 560);
+        private bool unitsResizing; private Vector2 unitsResizeGrab;   // dragging the corner grip: where in the grip the mouse took hold
         private Vector2 unitsScroll;
         private List<UnitRow> unitRows = new List<UnitRow>();
         private int unitsSortColumn; private bool unitsSortDescending;
@@ -623,7 +624,9 @@ namespace HumankindAssetFramework
         {
             WindowHovered = show && (winRect.Contains(Event.current.mousePosition) || (showUnits && unitsRect.Contains(Event.current.mousePosition)));
             if (!show) return;
-            if (showUnits) unitsRect = GUILayout.Window(GUID.GetHashCode() + 1, unitsRect, DrawUnitsWindow, "HAF units", GUILayout.Width(1240));
+            // The size is the user's (the corner grip), so it is pinned: GUILayout.Window would otherwise grow the window
+            // back to its content on every repaint.
+            if (showUnits) unitsRect = GUILayout.Window(GUID.GetHashCode() + 1, unitsRect, DrawUnitsWindow, "HAF units", GUILayout.Width(unitsRect.width), GUILayout.Height(unitsRect.height));
             // Fixed width: GUILayout.Window otherwise re-measures width from content every repaint, so the label
             // word-wrap "breathed" while dragging — the verdict text visibly reflowing read as instability.
             winRect = GUILayout.Window(GUID.GetHashCode(), winRect, DrawWindow, "Humankind Asset Framework", GUILayout.Width(520));
@@ -647,6 +650,9 @@ namespace HumankindAssetFramework
                 if (GUILayout.Button("Refresh", GUILayout.Width(70))) RefreshUnitRows();
                 if (GUILayout.Button("Close", GUILayout.Width(60))) showUnits = false;
             }
+            // The header follows the rows sideways: it sits in its own bar-less scroll view at the rows' horizontal
+            // offset, so a window narrower than the table keeps each title over its column.
+            GUILayout.BeginScrollView(new Vector2(unitsScroll.x, 0f), false, false, GUIStyle.none, GUIStyle.none, GUILayout.Height(26));
             using (new GUILayout.HorizontalScope())
                 for (int c = 0; c < UnitTableRules.Columns.Length; c++)
                 {
@@ -660,7 +666,8 @@ namespace HumankindAssetFramework
                         unitRows = UnitTableRules.Sorted(unitRows, unitsSortColumn, unitsSortDescending);
                     }
                 }
-            unitsScroll = GUILayout.BeginScrollView(unitsScroll, GUILayout.Height(470));
+            GUILayout.EndScrollView();
+            unitsScroll = GUILayout.BeginScrollView(unitsScroll, GUILayout.ExpandHeight(true));
             var normal = GUI.color;
             foreach (var r in unitRows)
                 using (new GUILayout.HorizontalScope())
@@ -670,10 +677,37 @@ namespace HumankindAssetFramework
                         GUI.color = alarm == 2 ? new Color(1f, 0.5f, 0.5f) : alarm == 1 ? new Color(1f, 0.85f, 0.5f)
                                   : c == 1 && r.Status == "disabled" ? new Color(0.7f, 0.7f, 0.7f) : normal;
                         string cell = UnitTableRules.Cell(r, c, ceiling);
-                        GUILayout.Label(new GUIContent(cell, c == 0 ? r.Pawn : c == 4 ? r.MaxQuadMesh : cell), GUILayout.Width(UnitColumnWidths[c] + 4));
+                        GUILayout.Label(new GUIContent(cell, c == 0 ? r.Pawn : c == 4 ? r.MaxQuadMesh : cell), GUILayout.Width(UnitColumnWidths[c]));
                     }
             GUI.color = normal;
             GUILayout.EndScrollView();
+            GUILayout.Space(14);   // a strip of its own for the grip, clear of the scroll bars
+            // RESIZE: drag the grip in the bottom-right corner. The hot control keeps the drag alive when the mouse
+            // outruns the corner; the mouse position here is in the window's own coordinates.
+            {
+                var grip = new Rect(unitsRect.width - 18, unitsRect.height - 18, 18, 18);
+                GUI.Label(grip, new GUIContent("◢", "Drag to resize"));
+                int gripId = GUIUtility.GetControlID(FocusType.Passive);
+                var ev = Event.current;
+                switch (ev.GetTypeForControl(gripId))
+                {
+                    case EventType.MouseDown:
+                        if (grip.Contains(ev.mousePosition))
+                        { unitsResizing = true; unitsResizeGrab = new Vector2(unitsRect.width, unitsRect.height) - ev.mousePosition; GUIUtility.hotControl = gripId; ev.Use(); }
+                        break;
+                    case EventType.MouseDrag:
+                        if (unitsResizing)
+                        {
+                            unitsRect.width = Mathf.Clamp(ev.mousePosition.x + unitsResizeGrab.x, 420f, Screen.width);
+                            unitsRect.height = Mathf.Clamp(ev.mousePosition.y + unitsResizeGrab.y, 160f, Screen.height);
+                            ev.Use();
+                        }
+                        break;
+                    case EventType.MouseUp:
+                        if (unitsResizing) { unitsResizing = false; if (GUIUtility.hotControl == gripId) GUIUtility.hotControl = 0; ev.Use(); }
+                        break;
+                }
+            }
             GUI.DragWindow(new Rect(0, 0, 10000, 24));
         }
 
