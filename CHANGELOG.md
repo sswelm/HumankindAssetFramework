@@ -17,8 +17,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   takes a face's centre over its own corner count, and the Two-sided pass reads a tread as the model around its parts (its
   loop triangles in the tree, one twin entry per polygon). Five fixtures - the shell on the 8-vertex belt and on the ribbon
   belt, the fix on an outward belt and on one wound inside-out (its island reversed), a Two-sided sheet beside a tread - are
-  equal to Blender at every stage, the GLBs byte for byte. **Still Blender, by name:** one case, a part marked both a moving
-  tread and Two-sided.
+  equal to Blender at every stage, the GLBs byte for byte. **Still Blender, by name:** a moving tread also marked Two-sided
+  or Flip, and a polygon tread requesting a shell for its Sail/Flag/Rudder role with global Double-sided off. A tread without
+  a sprocket or idler cluster also remains a named fallback.
 - **Vehicle Lab: Rigid links run in C# - the tread rig is complete (2026-11-16; d6, third part).** Rigid links (the Tread
   type popup, PR #278) gives every molded link its own bone and rebuilds the band from copies of one link, so a link never
   bends. In C# now: the bone budget (what the 126-bone wall leaves a track once its nine carriers are gone), the choice of

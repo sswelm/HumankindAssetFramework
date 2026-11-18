@@ -92,6 +92,33 @@ public class VehicleRigInProcessTests : IDisposable
         }
         Assert.Equal(7, ticks); Assert.Equal("old", File.ReadAllText(a[2])); Assert.Empty(Directory.GetFiles(dir, "*.tmp"));
     }
+
+    [Theory]
+    [InlineData(false, false)] [InlineData(false, true)]
+    [InlineData(true, false)] [InlineData(true, true)]
+    public void Interrupted_inside_out_or_double_sided_finishing_preserves_the_previous_output(bool doubleSided, bool cancel)
+    {
+        var a = Args(); a[doubleSided ? 41 : 46] = "1";
+        File.WriteAllText(a[2], "old"); int ticks = 0;
+        // Six wrapper polls reach stage 5; poll seven must be within finishing,
+        // before its completed mesh and logs are published.
+        Action checkpoint = () => {
+            if (++ticks != 7) return;
+            if (cancel) throw new OperationCanceledException();
+            throw new TimeoutException("deadline");
+        };
+        if (cancel) Assert.Throws<OperationCanceledException>(() => BlenderVehicleRigInProcess.Run(a, checkpoint));
+        else
+        {
+            var result = BlenderVehicleRigInProcess.Run(a, checkpoint);
+            Assert.False(result.Written); Assert.Null(result.UseBlender); Assert.Contains("deadline", result.Error);
+            Assert.DoesNotContain(result.Log, l => l.StartsWith("VEHICLE inside-out fix:", StringComparison.Ordinal)
+                || l.StartsWith("VEHICLE double-sided '", StringComparison.Ordinal)
+                || l.StartsWith("VEHICLE RIG DONE:", StringComparison.Ordinal));
+        }
+        Assert.Equal(7, ticks); Assert.Equal("old", File.ReadAllText(a[2]));
+        Assert.Empty(Directory.GetFiles(dir, "*.tmp"));
+    }
     [Theory] [InlineData(false)] [InlineData(true)]
     public void Script_exit_and_known_death_do_not_fall_back_or_replace_output(bool dies)
     {

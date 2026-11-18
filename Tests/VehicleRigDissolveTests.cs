@@ -30,7 +30,7 @@ public class VehicleRigDissolveTests
     static BMesh Build(BlenderRigAnim.MeshData d, BlenderWeld.Layers layers)
     {
         var m = typeof(BlenderVehicleRig).GetMethod("FromMeshData", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-        return (BMesh)m.Invoke(null, new object[] { d, layers, true, false });
+        return (BMesh)m.Invoke(null, new object[] { d, layers, true, false, null });
     }
 
     static List<int> Alive(bool[] alive, int count) { var l = new List<int>(); for (int i = 0; i < count; i++) if (alive[i]) l.Add(i); return l; }
