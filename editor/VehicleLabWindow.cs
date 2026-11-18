@@ -678,6 +678,16 @@ public class VehicleLabWindow : EditorWindow
             {
                 // Tiny-fragment collapse: a triangle-soup FBX probes into THOUSANDS of 3-4-vert shards — they all belong
                 // to Body anyway (anything not marked wheel/turret skins to Root). Only substantial parts are listed.
+                // THE ARROWS BELONG TO THE PART LIST (2026-11-18, "these sliders keep getting shifted unrequested"). The review
+                // loop below reads the arrow keys, but it runs AFTER the filters draw, and a slider or popup that still has the
+                // keyboard focus from an earlier click takes the key first and moves. Drop that focus before they draw. A
+                // number being typed in a field keeps its keys.
+                {
+                    var kev = Event.current;
+                    if (kev.type == EventType.KeyDown && !EditorGUIUtility.editingTextField && GUIUtility.keyboardControl != 0 &&
+                        (kev.keyCode == KeyCode.UpArrow || kev.keyCode == KeyCode.DownArrow || kev.keyCode == KeyCode.LeftArrow || kev.keyCode == KeyCode.RightArrow))
+                        GUIUtility.keyboardControl = 0;
+                }
                 // SHOW ALL PARTS (2026-11-18 user request: "I often get confused by these filters"). Seven sliders and two
                 // popups each hide parts, and a list that reads "0 shown" does not say which one did it. One button opens
                 // them all. View only: no filter reaches Generate, and the roles are untouched.
@@ -2132,6 +2142,10 @@ public class VehicleLabWindow : EditorWindow
             Chk("spinEnabled", "spin switch");
             Chk("oarSweepDeg", "oar stroke");
             DestroyPreview();
+            // The view filters are not part of a recipe (only minVerts is), so they used to carry over from the model that was
+            // open before and clamp into this model's span: a "hide below" left at 5 on a ship became "hide everything" on a
+            // tank (2026-11-18: the Bradley loaded with 0 of 32 parts shown). A loaded recipe starts with every filter open.
+            ShowAllParts();
             srcFile = r.srcFile; outGlb = r.outGlb; frames = r.frames; axisChoice = r.axisChoice; minVerts = r.minVerts; degrees = r.degrees;
             treadAdvCells = r.treadAdvCells > 0 ? r.treadAdvCells : 3;   // pre-knob recipes default to road-wheel sync
             treadCellsPerLink = r.treadCellsPerLink > 0f ? r.treadCellsPerLink : 4f;

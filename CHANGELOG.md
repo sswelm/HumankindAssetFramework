@@ -13,7 +13,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 - **Vehicle Lab: a "Show all parts" button (2026-11-18).** The Parts section has seven sliders and two popups that
   each hide parts, and a list reading "0 shown" does not say which one did it. The button at the top of the section
   opens them all at once and says how many parts are hidden now. It changes the view only: marked roles stay, and the
-  filters never reach Generate. Checked: the editor assembly compiles. Not checked: nothing was clicked in Unity.
+  filters never reach Generate. **And the filters no longer move by themselves**, for two reasons found in the code:
+  (1) loading a saved recipe kept the filter positions of the model that was open before and clamped them into the new
+  model's span, so a "hide below" set on a ship became "hide everything" on a tank - a loaded recipe now starts with
+  every filter open; (2) a slider or popup that still had the keyboard focus from an earlier click took the arrow keys
+  meant for the part list - the arrows now always go to the list (a number being typed keeps its keys). Checked: the
+  editor assembly compiles. Not checked: nothing was clicked in Unity.
 - **Vehicle Lab: "Use source skeleton (fast path)" runs in C# (2026-11-16).** The fast path keeps the artist's own
   skeleton and weights: it only keys a Spin clip on the bones you mark as wheels and exports. In C# now: the script's
   refusals in its own order (oars, rotors, the wave rock, Flip, Two-sided, the sail fold, a second model, a source with no
