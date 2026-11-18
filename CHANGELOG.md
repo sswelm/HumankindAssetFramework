@@ -10,6 +10,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Vehicle Lab: a "Show all parts" button (2026-11-18).** The Parts section has seven sliders and two popups that
+  each hide parts, and a list reading "0 shown" does not say which one did it. The button at the top of the section
+  opens them all at once and says how many parts are hidden now. It changes the view only: marked roles stay, and the
+  filters never reach Generate. Checked: the editor assembly compiles. Not checked: nothing was clicked in Unity.
 - **Vehicle Lab: "Use source skeleton (fast path)" runs in C# (2026-11-16).** The fast path keeps the artist's own
   skeleton and weights: it only keys a Spin clip on the bones you mark as wheels and exports. In C# now: the script's
   refusals in its own order (oars, rotors, the wave rock, Flip, Two-sided, the sail fold, a second model, a source with no

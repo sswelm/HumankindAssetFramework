@@ -259,6 +259,13 @@ public class VehicleLabWindow : EditorWindow
     Dictionary<string, float> flatShare; GameObject flatShareFor; // resolved per-PART share memo (exact-first, digits-only ".NNN" alias merge)
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
     bool VisiblePart(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight && x.center.y >= minWidth && x.center.y <= maxWidth && FlatOk(x);
+    // Every part filter wide open (the "Show all parts" button). The height and side sliders clamp +-999 to the model's own
+    // padded span when they next draw, as after a reset.
+    void ShowAllParts()
+    {
+        minVerts = 1; minPartSize = 0f; minHeight = -999f; maxHeight = 999f; minWidth = -999f; maxWidth = 999f; minFlatPct = 0f;
+        partFilter = 0; visFilter = 0;
+    }
 
     // FLAT-SURFACE FILTER: the share of a part's surface area lying within 30° of level, measured on the
     // PREVIEW meshes (the preview stands upright in Unity, so world +Y is 'level'; the geometric triangle
@@ -671,6 +678,20 @@ public class VehicleLabWindow : EditorWindow
             {
                 // Tiny-fragment collapse: a triangle-soup FBX probes into THOUSANDS of 3-4-vert shards — they all belong
                 // to Body anyway (anything not marked wheel/turret skins to Root). Only substantial parts are listed.
+                // SHOW ALL PARTS (2026-11-18 user request: "I often get confused by these filters"). Seven sliders and two
+                // popups each hide parts, and a list that reads "0 shown" does not say which one did it. One button opens
+                // them all. View only: no filter reaches Generate, and the roles are untouched.
+                {
+                    int filteredOut = list.Count(x => !(VisiblePart(x) && MatchesFilter(x.role) && MatchesVis(x)));
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        using (new EditorGUI.DisabledScope(filteredOut == 0))
+                            if (GUILayout.Button(new GUIContent(filteredOut > 0 ? $"Show all {list.Count} parts  ({filteredOut} hidden now)" : $"All {list.Count} parts are shown",
+                                    "Opens every filter below at once: the verts, size, height, side and flat sliders, Show only and Visibility. " +
+                                    "The roles you marked stay as they are, and the filters never change what Generate builds."), GUILayout.Height(24)))
+                            { ShowAllParts(); GUI.FocusControl(null); Repaint(); }
+                    }
+                }
                 minVerts = EditorGUILayout.IntSlider(new GUIContent("Hide parts under (verts)",
                     "Parts smaller than this are collapsed into Body automatically (they skin to Root). Raise it if the list is still noisy; lower it if a small wheel is missing."), minVerts, 1, 2000);
                 minPartSize = EditorGUILayout.Slider(new GUIContent("Hide parts under (size)",
