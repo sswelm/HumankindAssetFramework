@@ -163,7 +163,7 @@ namespace HumankindAssetFramework
         // THE UNIT TABLE (2026-11-19): a second window, opened by the "Units" button. Its rows are read when it opens and
         // on Refresh - never per frame (the reads are reflection).
         private bool showUnits;
-        private Rect unitsRect = new Rect(600, 60, 1300, 560);
+        private Rect unitsRect = new Rect(60, 60, 1340, 600);   // wide enough for every column (1,188 px of columns + margins, scroll bar and frame): no sideways scroll bar at the first size
         private bool unitsResizing; private Vector2 unitsResizeGrab;   // dragging the corner grip: where in the grip the mouse took hold
         private Vector2 unitsScroll;
         private List<UnitRow> unitRows = new List<UnitRow>();
