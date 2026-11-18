@@ -11,8 +11,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 ## Infrastructure
 
 - **Vehicle Lab: the "Edit existing" list shows each recipe's folder and sorts on it (2026-11-18).** A row now reads
-  `Bradley — Bredley_Low  2026-08-19 22:23`: the folder the source model lives in (the first folder below what all
-  sources share, so `Bradley`, not its `FBX` subfolder), the recipe, then the date. Sorted on folder; within a folder
+  `2026-08-19 22:23  Bradley — Bredley_Low`: the date, the folder the source model lives in (the first folder below what all
+  sources share, so `Bradley`, not its `FBX` subfolder), then the recipe. Sorted on folder, not on date; within a folder
   the newest is on top. Checked: unit tests on the folder rule, the editor assembly compiles. Not checked in Unity.
 - **Vehicle Lab: a "Show all parts" button (2026-11-18).** The Parts section has seven sliders and two popups that
   each hide parts, and a list reading "0 shown" does not say which one did it. The button at the top of the section

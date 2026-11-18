@@ -552,9 +552,9 @@ public class VehicleLabWindow : EditorWindow
             for (int i = 0; i < rfiles.Length; i++)
             {
                 names[i + 1] = Path.GetFileNameWithoutExtension(rfiles[i]);
-                // Folder first (the sort key), then the name, the stamp last. A '/' in a popup label opens a submenu: none here.
-                labels[i + 1] = ((rfolders[i].Length > 0 ? rfolders[i] : "(no source)") + "   —  " + names[i + 1] + "      " +
-                    File.GetLastWriteTime(rfiles[i]).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)).Replace('/', '-');
+                // The stamp first (user, 2026-11-18), then the folder (the sort key), then the name. A '/' in a popup label opens a submenu: none here.
+                labels[i + 1] = (File.GetLastWriteTime(rfiles[i]).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture) + "      " +
+                    (rfolders[i].Length > 0 ? rfolders[i] : "(no source)") + "   —  " + names[i + 1]).Replace('/', '-');
             }
             int cur = 0;
             for (int i = 0; i < rfiles.Length; i++) if (names[i + 1] == loadedRecipe) { cur = i + 1; break; }
