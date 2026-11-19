@@ -3198,6 +3198,13 @@ with no Blender resolver, and verifies that an unsupported input and a direct Bl
 without claiming completion or replacing the previous GLB. It runs in the normal native suite, or on its own with
 `HAF_GENERATE_TEST_METHOD=RunAvailability bash tools/vehiclerig_unity_generate_drill.sh`.
 
+**Vehicle Lab filter resets (PR #296 review, 2026-11-19):** `bash tools/vehiclelab_filter_unity_drill.sh` runs the real
+window in a temporary Unity project, without Blender. Mesh-part and source-bone recipes have a saved vertex threshold
+of 100, parts with 3/20/200 vertices, interior/exterior visibility, marked roles, and centers beyond +/-999. The loaded
+view and Show all must expose every row, preserve roles and generation arguments, and leave the freshly loaded
+recipe clean. All 18 checks pass; the original PR failed eight, including restoration of the saved vertex filter after
+the reset and the fixed +/-999 bounds. This checks the window's reset methods, not interactive arrow-key routing.
+
 PR #212 review guards: missing, blank and unrecognized backend preferences use the C# factory default, while valid
 recipe/editor choices keep their precedence. The wrapper's timing labels describe its actual stage boundaries (rig,
 skinning and join together; then clips; then mesh/export preparation), and completion remains the last log line.

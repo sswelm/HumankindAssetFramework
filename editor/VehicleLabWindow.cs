@@ -259,6 +259,13 @@ public class VehicleLabWindow : EditorWindow
     Dictionary<string, float> flatShare; GameObject flatShareFor; // resolved per-PART share memo (exact-first, digits-only ".NNN" alias merge)
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
     bool VisiblePart(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight && x.center.y >= minWidth && x.center.y <= maxWidth && FlatOk(x);
+    // Every part filter wide open (the "Show all parts" button). Use the whole finite range, including authored parts
+    // beyond +/-999; the height and side sliders clamp to the model's padded span when they next draw.
+    void ShowAllParts()
+    {
+        minVerts = 1; minPartSize = 0f; minHeight = float.MinValue; maxHeight = float.MaxValue; minWidth = float.MinValue; maxWidth = float.MaxValue; minFlatPct = 0f;
+        partFilter = 0; visFilter = 0;
+    }
 
     // FLAT-SURFACE FILTER: the share of a part's surface area lying within 30° of level, measured on the
     // PREVIEW meshes (the preview stands upright in Unity, so world +Y is 'level'; the geometric triangle
@@ -351,6 +358,22 @@ public class VehicleLabWindow : EditorWindow
 
     // ── Recipes: the whole vehicleize configuration as a JSON file — reload it after a restart, keep one per model,
     // ship it next to the model so a collaborator reproduces the exact rig. ──
+    // The source path of a saved recipe, for the "Edit existing" list. The list is rebuilt on every repaint, so a file is read
+    // once per change of its write time.
+    [Serializable] class RecipeHead { public string srcFile; }
+    static readonly Dictionary<string, KeyValuePair<DateTime, string>> recipeSourceMemo = new Dictionary<string, KeyValuePair<DateTime, string>>();
+    static string RecipeSource(string recipePath)
+    {
+        try
+        {
+            DateTime t = File.GetLastWriteTimeUtc(recipePath);
+            if (recipeSourceMemo.TryGetValue(recipePath, out var hit) && hit.Key == t) return hit.Value;
+            string src = JsonUtility.FromJson<RecipeHead>(File.ReadAllText(recipePath))?.srcFile ?? "";
+            recipeSourceMemo[recipePath] = new KeyValuePair<DateTime, string>(t, src);
+            return src;
+        }
+        catch (Exception) { return ""; }   // unreadable or half-written: listed under "(no source)", still loadable
+    }
     [Serializable] class Recipe
     {
         public string generateRoute = ""; // absent: editor default, Blender until acceptance
@@ -513,6 +536,13 @@ public class VehicleLabWindow : EditorWindow
         {
             string rdirFull = Path.Combine(Directory.GetParent(Application.dataPath).FullName, RecipesDir);
             string[] rfiles = Directory.Exists(rdirFull) ? Directory.GetFiles(rdirFull, "*.json").OrderByDescending(File.GetLastWriteTime).ThenBy(x => x).ToArray() : new string[0];
+            // BY FOLDER (2026-11-18 user request: thirty recipes by date alone, "I'm getting confused"). Each row names the
+            // folder its source model lives in, and the list sorts on it; within a folder the newest stays on top.
+            string[] rfolders = VehicleLabRules.SourceFolders(rfiles.Select(RecipeSource).ToArray());
+            {
+                var order = Enumerable.Range(0, rfiles.Length).OrderBy(i => rfolders[i], StringComparer.OrdinalIgnoreCase).ToArray();   // stable: date order kept inside a folder
+                rfiles = order.Select(i => rfiles[i]).ToArray(); rfolders = order.Select(i => rfolders[i]).ToArray();
+            }
             var names = new string[rfiles.Length + 1];
             names[0] = "＜new model＞";
             // Display labels carry the file's last-modified stamp (user ask 2026-08-20: a bare name list can't tell
@@ -522,7 +552,9 @@ public class VehicleLabWindow : EditorWindow
             for (int i = 0; i < rfiles.Length; i++)
             {
                 names[i + 1] = Path.GetFileNameWithoutExtension(rfiles[i]);
-                labels[i + 1] = File.GetLastWriteTime(rfiles[i]).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture) + "   —  " + names[i + 1];   // stamp first, newest at the top
+                // The stamp first (user, 2026-11-18), then the folder (the sort key), then the name. A '/' in a popup label opens a submenu: none here.
+                labels[i + 1] = (File.GetLastWriteTime(rfiles[i]).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture) + "      " +
+                    (rfolders[i].Length > 0 ? rfolders[i] : "(no source)") + "   —  " + names[i + 1]).Replace('/', '-');
             }
             int cur = 0;
             for (int i = 0; i < rfiles.Length; i++) if (names[i + 1] == loadedRecipe) { cur = i + 1; break; }
@@ -671,6 +703,30 @@ public class VehicleLabWindow : EditorWindow
             {
                 // Tiny-fragment collapse: a triangle-soup FBX probes into THOUSANDS of 3-4-vert shards — they all belong
                 // to Body anyway (anything not marked wheel/turret skins to Root). Only substantial parts are listed.
+                // THE ARROWS BELONG TO THE PART LIST (2026-11-18, "these sliders keep getting shifted unrequested"). The review
+                // loop below reads the arrow keys, but it runs AFTER the filters draw, and a slider or popup that still has the
+                // keyboard focus from an earlier click takes the key first and moves. Drop that focus before they draw. A
+                // number being typed in a field keeps its keys.
+                {
+                    var kev = Event.current;
+                    if (kev.type == EventType.KeyDown && !EditorGUIUtility.editingTextField && GUIUtility.keyboardControl != 0 &&
+                        (kev.keyCode == KeyCode.UpArrow || kev.keyCode == KeyCode.DownArrow || kev.keyCode == KeyCode.LeftArrow || kev.keyCode == KeyCode.RightArrow))
+                        GUIUtility.keyboardControl = 0;
+                }
+                // SHOW ALL PARTS (2026-11-18 user request: "I often get confused by these filters"). Seven sliders and two
+                // popups each hide parts, and a list that reads "0 shown" does not say which one did it. One button opens
+                // them all. View only: no filter reaches Generate, and the roles are untouched.
+                {
+                    int filteredOut = list.Count(x => !(VisiblePart(x) && MatchesFilter(x.role) && MatchesVis(x)));
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        using (new EditorGUI.DisabledScope(filteredOut == 0))
+                            if (GUILayout.Button(new GUIContent(filteredOut > 0 ? $"Show all {list.Count} parts  ({filteredOut} hidden now)" : $"All {list.Count} parts are shown",
+                                    "Opens every filter below at once: the verts, size, height, side and flat sliders, Show only and Visibility. " +
+                                    "The roles you marked stay as they are, and the filters never change what Generate builds."), GUILayout.Height(24)))
+                            { ShowAllParts(); GUI.FocusControl(null); Repaint(); }
+                    }
+                }
                 minVerts = EditorGUILayout.IntSlider(new GUIContent("Hide parts under (verts)",
                     "Parts smaller than this are collapsed into Body automatically (they skin to Root). Raise it if the list is still noisy; lower it if a small wheel is missing."), minVerts, 1, 2000);
                 minPartSize = EditorGUILayout.Slider(new GUIContent("Hide parts under (size)",
@@ -2156,6 +2212,9 @@ public class VehicleLabWindow : EditorWindow
             parts = r.parts;
             boneParts = r.boneParts ?? new List<Part>();   // pre-fast-path recipes have no bone list
             useSourceRig = r.useSourceRig && boneParts.Count > 0;
+            // Start with every view filter open, AFTER restoring recipe fields: the legacy saved minVerts must not
+            // re-hide small parts. Reset before the clean-state snapshot so a fresh load has no unsaved changes.
+            ShowAllParts();
             loadedRecipe = Path.GetFileNameWithoutExtension(p);   // reflect the loaded recipe in the combobox
             recipeReadThisSession = true;   // the window now derives from the file — Save may overwrite silently
             savedRecipeJson = JsonUtility.ToJson(BuildRecipe());   // snapshot AFTER the load guards ran — normalization can't read as dirt

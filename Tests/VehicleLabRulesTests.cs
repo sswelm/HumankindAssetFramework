@@ -9,6 +9,22 @@ namespace HumankindAssetFramework.Tests
     // hard-capped at 8 fields, so the NEXT field added to the script would have emptied the Lab with no log.
     public class VehicleLabRulesTests
     {
+        [Fact]
+        public void A_recipe_is_listed_under_the_first_folder_below_what_all_sources_share()
+        {
+            var got = VehicleLabRules.SourceFolders(new[] {
+                "D:/3DModels/Bradley/FBX/Bredley_Low.fbx", "D:/3DModels/Rah66/rah66.glb", "d:\\3dmodels\\SS Romanic\\a.glb", "", null });
+            Assert.Equal(new[] { "Bradley", "Rah66", "SS Romanic", "", "" }, got);
+        }
+
+        [Fact]
+        public void A_lone_source_or_one_in_the_shared_folder_gets_its_own_folder_name()
+        {
+            Assert.Equal(new[] { "FBX" }, VehicleLabRules.SourceFolders(new[] { "D:/3DModels/Bradley/FBX/Bredley_Low.fbx" }));
+            Assert.Equal(new[] { "3DModels", "Rah66" }, VehicleLabRules.SourceFolders(new[] { "D:/3DModels/loose.glb", "D:/3DModels/Rah66/rah66.glb" }));
+            Assert.Equal(new[] { "" }, VehicleLabRules.SourceFolders(new[] { "bare.glb" }));
+        }
+
         [Theory]
         [InlineData(false, false, false, true, false, true)]
         [InlineData(false, false, false, false, false, false)]
