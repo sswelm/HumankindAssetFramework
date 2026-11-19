@@ -772,6 +772,31 @@ public static class NaturalOrder
 /// <summary>Vehicle Lab decisions over the Blender probe's stdout contract (VehicleLabWindow calls these; VehicleLabRulesTests locks them).</summary>
 public static class VehicleLabRules
 {
+    /// <summary>The folder each recipe's source model lives in, as shown in the "Edit existing" list: the first folder below
+    /// the part of the path all sources share (D:/3DModels/Bradley/FBX/x.fbx among D:/3DModels/... gives "Bradley", not
+    /// "FBX"). A source directly in the shared folder, or the only source, gives its own folder's name; no source gives "".</summary>
+    public static string[] SourceFolders(System.Collections.Generic.IReadOnlyList<string> srcFiles)
+    {
+        var dirs = new string[srcFiles.Count][];
+        string[] common = null;
+        for (int i = 0; i < srcFiles.Count; i++)
+        {
+            string f = (srcFiles[i] ?? "").Trim().Replace((char)92, '/');
+            int cut = f.LastIndexOf('/');
+            dirs[i] = cut <= 0 ? new string[0] : f.Substring(0, cut).Split(new[] { '/' }, System.StringSplitOptions.RemoveEmptyEntries);
+            if (dirs[i].Length == 0) continue;
+            if (common == null) { common = dirs[i]; continue; }
+            int n = 0;
+            while (n < common.Length && n < dirs[i].Length && string.Equals(common[n], dirs[i][n], System.StringComparison.OrdinalIgnoreCase)) n++;
+            if (n < common.Length) System.Array.Resize(ref common, n);
+        }
+        int shared = common == null ? 0 : common.Length;
+        var o = new string[srcFiles.Count];
+        for (int i = 0; i < o.Length; i++)
+            o[i] = dirs[i].Length == 0 ? "" : dirs[i].Length > shared ? dirs[i][shared] : dirs[i][dirs[i].Length - 1];
+        return o;
+    }
+
     /// <summary>Geometry-only Generate work, which is unavailable on the source-skeleton fast path.</summary>
     public static bool HasGeometryWork(bool fastPath, bool facingRequested, bool flipMarked, bool twoSidedMarked, bool reductionRequested)
         => !fastPath && (facingRequested || flipMarked || twoSidedMarked || reductionRequested);
