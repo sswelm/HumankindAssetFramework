@@ -10,6 +10,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Vehicle Lab: Show all also reveals small saved parts and distant parts (PR #296 review, 2026-11-19).** Recipe loading
+  now opens the filters after restoring saved fields, so a saved vertex threshold cannot hide the small parts again.
+  Show all opens height/side bounds beyond +/-999 too. Eighteen checks against the real window in a temporary Unity
+  project cover mesh parts and source bones, retained roles and generation arguments, and a clean loaded recipe.
 - **Vehicle Lab: the "Edit existing" list shows each recipe's folder and sorts on it (2026-11-18).** A row now reads
   `2026-08-19 22:23  Bradley — Bredley_Low`: the date, the folder the source model lives in (the first folder below what all
   sources share, so `Bradley`, not its `FBX` subfolder), then the recipe. Sorted on folder, not on date; within a folder

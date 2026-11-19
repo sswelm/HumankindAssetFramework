@@ -259,11 +259,11 @@ public class VehicleLabWindow : EditorWindow
     Dictionary<string, float> flatShare; GameObject flatShareFor; // resolved per-PART share memo (exact-first, digits-only ".NNN" alias merge)
     static float MaxDim(Part p) => Mathf.Max(p.size.x, Mathf.Max(p.size.y, p.size.z));
     bool VisiblePart(Part x) => x.verts >= minVerts && MaxDim(x) >= minPartSize && x.center.z >= minHeight && x.center.z <= maxHeight && x.center.y >= minWidth && x.center.y <= maxWidth && FlatOk(x);
-    // Every part filter wide open (the "Show all parts" button). The height and side sliders clamp +-999 to the model's own
-    // padded span when they next draw, as after a reset.
+    // Every part filter wide open (the "Show all parts" button). Use the whole finite range, including authored parts
+    // beyond +/-999; the height and side sliders clamp to the model's padded span when they next draw.
     void ShowAllParts()
     {
-        minVerts = 1; minPartSize = 0f; minHeight = -999f; maxHeight = 999f; minWidth = -999f; maxWidth = 999f; minFlatPct = 0f;
+        minVerts = 1; minPartSize = 0f; minHeight = float.MinValue; maxHeight = float.MaxValue; minWidth = float.MinValue; maxWidth = float.MaxValue; minFlatPct = 0f;
         partFilter = 0; visFilter = 0;
     }
 
@@ -2167,10 +2167,6 @@ public class VehicleLabWindow : EditorWindow
             Chk("spinEnabled", "spin switch");
             Chk("oarSweepDeg", "oar stroke");
             DestroyPreview();
-            // The view filters are not part of a recipe (only minVerts is), so they used to carry over from the model that was
-            // open before and clamp into this model's span: a "hide below" left at 5 on a ship became "hide everything" on a
-            // tank (2026-11-18: the Bradley loaded with 0 of 32 parts shown). A loaded recipe starts with every filter open.
-            ShowAllParts();
             srcFile = r.srcFile; outGlb = r.outGlb; frames = r.frames; axisChoice = r.axisChoice; minVerts = r.minVerts; degrees = r.degrees;
             treadAdvCells = r.treadAdvCells > 0 ? r.treadAdvCells : 3;   // pre-knob recipes default to road-wheel sync
             treadCellsPerLink = r.treadCellsPerLink > 0f ? r.treadCellsPerLink : 4f;
@@ -2216,6 +2212,9 @@ public class VehicleLabWindow : EditorWindow
             parts = r.parts;
             boneParts = r.boneParts ?? new List<Part>();   // pre-fast-path recipes have no bone list
             useSourceRig = r.useSourceRig && boneParts.Count > 0;
+            // Start with every view filter open, AFTER restoring recipe fields: the legacy saved minVerts must not
+            // re-hide small parts. Reset before the clean-state snapshot so a fresh load has no unsaved changes.
+            ShowAllParts();
             loadedRecipe = Path.GetFileNameWithoutExtension(p);   // reflect the loaded recipe in the combobox
             recipeReadThisSession = true;   // the window now derives from the file — Save may overwrite silently
             savedRecipeJson = JsonUtility.ToJson(BuildRecipe());   // snapshot AFTER the load guards ran — normalization can't read as dirt
