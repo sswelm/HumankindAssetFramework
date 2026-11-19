@@ -32,6 +32,15 @@ cases pass after the fixes. An isolated Unity 2021.3.1 embedded-Mono probe also 
 and parallel live-key lookups with incremental GC enabled, plus factory re-entry and cross-thread access. This checks
 the replacement's behavior; the original native game crash was not reproduced by a standalone test.
 
+**F8 Units table (PR #297 review, 2026-11-19):** `UnitTableTests` covers adjustment-only retextures (desaturate,
+brightness and each tint channel) using the same rule as injection, including pending/in-use status and a baked-model
+control. Five cases failed on the original PR. Two window-result cases hold the returned title-bar position together
+with a resize callback's requested dimensions. `bash tools/unit_table_unity_drill.sh` renders the plugin's actual
+Units frame in a hidden, graphics-enabled temporary Unity editor, without BepInEx startup or a game. Twelve checks
+hold rendered and retained sizes at 600x350, 500x250, 420x160 and 1000x600; the summary wraps to avoid imposing its
+own minimum width. The original summary widened a requested 600-pixel frame to 825 pixels in the probe. This tests
+layout and the size/position rule; mouse routing and dragging in the game's host are not exercised by this runner.
+
 ## The fast gates — two lanes, `check.sh` and CI
 
 The fast guards used to be separate scripts you had to remember to run. They're now one in-repo command

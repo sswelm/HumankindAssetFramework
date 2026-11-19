@@ -18,6 +18,17 @@ namespace HumankindAssetFramework.Tests
         }
         static KeyValuePair<string, int> Mesh(string n, int quads) => new KeyValuePair<string, int>(n, quads);
 
+        [Theory]
+        [InlineData(500, 250)]
+        [InlineData(1000, 700)]
+        public void Window_layout_retains_a_callback_resize_and_the_title_bars_returned_position(float width, float height)
+        {
+            var drawn = new UnityEngine.Rect(40, 50, 600, 350);
+            var requested = new UnityEngine.Rect(10, 20, width, height);
+            var result = UnitTableRules.WindowResult(drawn, requested);
+            Assert.Equal((40f, 50f, width, height), (result.x, result.y, result.width, result.height));
+        }
+
         [Fact]
         public void The_type_follows_what_the_entry_owns()
         {
@@ -27,6 +38,24 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal("animated", UnitTableRules.TypeOf(Baked("a", clip: true)));
             var sd = Baked("a", clip: true); sd.animStateDriven = true;
             Assert.Equal("state-driven", UnitTableRules.TypeOf(sd));
+        }
+
+        [Theory]
+        [InlineData("desaturate", 0.5f)]
+        [InlineData("brightness", 1.5f)]
+        [InlineData("tintR", 0.2f)]
+        [InlineData("tintG", -0.2f)]
+        [InlineData("tintB", 0.2f)]
+        public void An_adjustment_only_retexture_does_not_need_a_png_or_a_baked_skeleton(string field, float value)
+        {
+            var e = new ModelEntry();
+            typeof(ModelEntry).GetField(field).SetValue(e, value);
+            Assert.Equal("retexture", UnitTableRules.TypeOf(e));
+            Assert.Equal("waiting", UnitTableRules.StatusOf(e, skeletonLoaded: false));
+            e.repointed = true;
+            Assert.Equal("in use", UnitTableRules.StatusOf(e, skeletonLoaded: false));
+            e.sa = 1;
+            Assert.Equal("static", UnitTableRules.TypeOf(e));
         }
 
         [Fact]

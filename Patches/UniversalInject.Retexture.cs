@@ -227,7 +227,7 @@ namespace HumankindAssetFramework
         }
 
         // True if this entry carries any texture adjustment (brightness gamma, desaturate or a non-zero colour offset).
-        static bool NeedsAdjust(ModelEntry e) => e.desaturate > 0f || e.tintR != 0f || e.tintG != 0f || e.tintB != 0f || UnityEngine.Mathf.Abs(e.brightness - 1f) > 0.001f;
+        internal static bool NeedsAdjust(ModelEntry e) => e.desaturate > 0f || e.tintR != 0f || e.tintG != 0f || e.tintB != 0f || UnityEngine.Mathf.Abs(e.brightness - 1f) > 0.001f;
 
     }
 }

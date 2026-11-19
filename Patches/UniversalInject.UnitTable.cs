@@ -20,11 +20,15 @@ namespace HumankindAssetFramework
     {
         [ProcessLived("literal column titles")] internal static readonly string[] Columns = { "Unit", "Status", "Type", "Meshes", "Largest mesh", "Quads", "Verts", "Bones", "Atlas", "Clips", "Properties", "Baked" };
 
-        // What the entry is. A retexture owns no skeleton; an entry with neither a skeleton guid nor a texture was never baked.
+        // Layout owns the dragged position; the resize callback owns the requested dimensions for the next event.
+        internal static UnityEngine.Rect WindowResult(UnityEngine.Rect drawn, UnityEngine.Rect requested)
+            => new UnityEngine.Rect(drawn.position, requested.size);
+
+        // Match injection's texture-only route: either a PNG or adjustments to the donor's atlas, with no own skeleton.
         internal static string TypeOf(ModelEntry e)
         {
             bool hasSkeleton = (e.sa | e.sb | e.sc | e.sd) != 0;
-            if (!hasSkeleton) return string.IsNullOrEmpty(e.textureFile) ? "not baked" : "retexture";
+            if (!hasSkeleton) return !string.IsNullOrEmpty(e.textureFile) || UniversalInject.NeedsAdjust(e) ? "retexture" : "not baked";
             if (!e.Roles[0].Authored) return "static";
             return e.animStateDriven ? "state-driven" : "animated";
         }

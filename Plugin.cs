@@ -168,6 +168,7 @@ namespace HumankindAssetFramework
         private Vector2 unitsScroll;
         private List<UnitRow> unitRows = new List<UnitRow>();
         private int unitsSortColumn; private bool unitsSortDescending;
+        private GUIStyle unitsSummaryStyle;
         [ProcessLived("literal column widths")] private static readonly int[] UnitColumnWidths = { 190, 78, 92, 56, 118, 70, 70, 50, 92, 44, 210, 118 };
         private string atlasFilter = "";   // Dump Atlases: only layers whose name contains this (blank = all)
         private string previewEvent = "";  // F8 audition: Wwise event name to post via Play Event
@@ -626,7 +627,7 @@ namespace HumankindAssetFramework
             if (!show) return;
             // The size is the user's (the corner grip), so it is pinned: GUILayout.Window would otherwise grow the window
             // back to its content on every repaint.
-            if (showUnits) unitsRect = GUILayout.Window(GUID.GetHashCode() + 1, unitsRect, DrawUnitsWindow, "HAF units", GUILayout.Width(unitsRect.width), GUILayout.Height(unitsRect.height));
+            if (showUnits) DrawUnitsFrame();
             // Fixed width: GUILayout.Window otherwise re-measures width from content every repaint, so the label
             // word-wrap "breathed" while dragging — the verdict text visibly reflowing read as instability.
             winRect = GUILayout.Window(GUID.GetHashCode(), winRect, DrawWindow, "Humankind Asset Framework", GUILayout.Width(520));
@@ -635,17 +636,27 @@ namespace HumankindAssetFramework
         private void RefreshUnitRows()
             => unitRows = UnitTableRules.Sorted(UniversalInject.UnitRows(), unitsSortColumn, unitsSortDescending);
 
+        private Rect DrawUnitsFrame()
+        {
+            var drawn = GUILayout.Window(GUID.GetHashCode() + 1, unitsRect, DrawUnitsWindow, "HAF units", GUILayout.Width(unitsRect.width), GUILayout.Height(unitsRect.height));
+            // Window returns its layout size from before the callback. Keep a size requested by the grip during that
+            // callback, but retain the returned position so title-bar dragging still works.
+            unitsRect = UnitTableRules.WindowResult(drawn, unitsRect);
+            return drawn;
+        }
+
         // The unit table: a header of sort buttons, then one line per registry entry. Empty cell = not read (a unit
         // that never loaded has no mesh to count); it is never shown as 0.
         private void DrawUnitsWindow(int id)
         {
             int ceiling = UniversalInject.EngineQuadCeiling;
+            if (unitsSummaryStyle == null) unitsSummaryStyle = new GUIStyle(GUI.skin.label) { wordWrap = true };
             using (new GUILayout.HorizontalScope())
             {
                 int over = unitRows.Count(r => UnitTableRules.QuadAlarm(r, ceiling) == 2), near = unitRows.Count(r => UnitTableRules.QuadAlarm(r, ceiling) == 1);
                 GUILayout.Label($"{unitRows.Count} unit(s). Largest mesh is against the engine's {ceiling:N0}-quad limit per mesh" +
                                 (over > 0 ? $" - {over} OVER it (red: the rest of that mesh is not drawn)" : "") + (near > 0 ? $" - {near} at 90% or more (amber)" : "") +
-                                ". Empty = not read. Click a column to sort.");
+                                ". Empty = not read. Click a column to sort.", unitsSummaryStyle, GUILayout.ExpandWidth(true));
                 GUILayout.FlexibleSpace();
                 if (GUILayout.Button("Refresh", GUILayout.Width(70))) RefreshUnitRows();
                 if (GUILayout.Button("Close", GUILayout.Width(60))) showUnits = false;

@@ -10,6 +10,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **F8 Units table review fixes (2026-11-19).** Adjustment-only retextures now have the same type/status as PNG
+  retextures. The Units frame retains dimensions requested by the resize grip while keeping the returned title-bar
+  position, and its summary wraps so narrow sizes remain narrow. Checked: seven regression cases and twelve layout
+  checks rendering the real frame in an isolated Unity editor; in-game mouse routing remains untested.
 - **F8 window: a "Units" button opens a table of every unit in the registry (2026-11-19).** One row per entry: its
   status this session (in use, loaded, not loaded, disabled), its type (static, animated, state-driven, retexture), what
   it costs - meshes, the largest mesh against the engine's 16,320-quad limit per mesh (amber from 90%, red past it),
