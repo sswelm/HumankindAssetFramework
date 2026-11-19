@@ -10,6 +10,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **F8 Units table review fixes (2026-11-19).** Adjustment-only retextures now have the same type/status as PNG
+  retextures. The Units frame retains dimensions requested by the resize grip while keeping the returned title-bar
+  position, and its summary wraps so narrow sizes remain narrow. Checked: seven regression cases and twelve layout
+  checks rendering the real frame in an isolated Unity editor; in-game mouse routing remains untested.
+- **F8 window: a "Units" button opens a table of every unit in the registry (2026-11-19).** One row per entry: its
+  status this session (in use, loaded, not loaded, disabled), its type (static, animated, state-driven, retexture), what
+  it costs - meshes, the largest mesh against the engine's 16,320-quad limit per mesh (amber from 90%, red past it),
+  total quads, vertices, bones, atlas size, clip collections -, its main settings (scale, turret, hand prop, deploys,
+  fires, sound, own skin) and its bake date. Click a column to sort; Refresh re-reads. A value that could not be read
+  (a unit that never loaded has no mesh to count) is an empty cell, never a 0. **The bake date is new in the registry**
+  (`bakedUtc`, written with the guids by every bake - Factory, Animation Lab and CLI - kept by Save, not inherited by a
+  clone): an entry shows a date only after its next bake. Checked: 13 unit tests on the rows' rules, the plugin builds,
+  the editor assembly compiles, the hand-list and schema parity gates. Not checked: the dialog has not been opened in
+  the game. Not covered: districts (their registry is separate), and the regex fallback parser does not read the date.
 - **Vehicle Lab: Show all also reveals small saved parts and distant parts (PR #296 review, 2026-11-19).** Recipe loading
   now opens the filters after restoring saved fields, so a saved vertex threshold cannot hide the small parts again.
   Show all opens height/side bounds beyond +/-999 too. Eighteen checks against the real window in a temporary Unity

@@ -852,6 +852,7 @@ public class ModelFactoryWindow : EditorWindow
                     // fields rather than trusting the list). If you add a guid field to ModelDef, add it here too.
                     clone.clipPreMove = new int[4]; clone.clipIdle = new int[4];
                     clone.clipIdleAlt = new int[4]; clone.clipIdleAlt2 = new int[4];
+                    clone.bakedUtc = "";         // nor a bake date: the clone has no bake
                     clone.bakeLocked = false; clone.disabled = false;
                     cur = clone; selected = 0; sel = 0; GUI.FocusControl(null);   // sel too — else the popup-apply below reads the stale index as a "selection change" and reloads the source entry right over the clone
                     formDiffersFromRegistry = false;   // the banner is about a SAVED entry's form; a clone is unsaved by definition (and the banner's Reload would wipe it)
@@ -2118,6 +2119,7 @@ public class ModelFactoryWindow : EditorWindow
     {
         bool sd = cfg.animated && cfg.animStateDriven;
         int[] Role(string guid) => sd && !string.IsNullOrEmpty(guid) ? ModelRegistry.ParseGuid(guid) : new int[4];
+        d.bakedUtc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);   // the date belongs to the assets these guids name
         d.skel = ModelRegistry.ParseGuid(r.skeletonGuid);
         d.atlas = ModelRegistry.ParseGuid(r.atlasGuid);
         d.clip = cfg.animated ? ModelRegistry.ParseGuid(r.clipGuid) : new int[4];
@@ -2340,7 +2342,7 @@ public class ModelFactoryWindow : EditorWindow
         bool modelFileChanged = false;
         if (regE != null)
         {
-            cur.skel = regE.skel; cur.atlas = regE.atlas; cur.clip = regE.clip;
+            cur.skel = regE.skel; cur.atlas = regE.atlas; cur.clip = regE.clip; cur.bakedUtc = regE.bakedUtc;
             cur.clipMove = regE.clipMove; cur.clipAfter = regE.clipAfter; cur.clipAttack = regE.clipAttack;
             cur.clipCombat = regE.clipCombat; cur.clipPreMove = regE.clipPreMove; cur.clipIdle = regE.clipIdle;
             cur.clipIdleAlt = regE.clipIdleAlt; cur.clipIdleAlt2 = regE.clipIdleAlt2;

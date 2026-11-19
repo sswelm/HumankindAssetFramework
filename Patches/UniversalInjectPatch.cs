@@ -31,6 +31,7 @@ namespace HumankindAssetFramework
     internal class ModelEntry : Haf.Schema.HafModelSchema   // the ~64 shared behavioral/sound/prop fields live in Haf.Schema now (one definition, inherited); only GUID (sa/sb/..), runtime-state, and non-shared fields stay below
     {
         public string coreDesc = "";     // pawnDescription minus the trailing _NN instance suffix, computed ONCE at registry publish. The per-frame movement polls + the sim-thread FindEntryForUnitDefinition matched units by re-running Regex.Replace(pawnDescription,"_[0-9]+$","") per entry per unit — pure garbage since it's a load-time constant. Read-only after publish (safe from any thread).
+        public string bakedUtc = "";     // when the Factory last baked this entry (UTC, ISO 8601; "" = baked before 2026-11-19, when the registry began to keep it). Shown in the F8 unit table; nothing else reads it.
         public int sa, sb, sc, sd, ta, tb, tc, td;   // skeleton + atlas Amplitude guid components
         public object skeleton;
         public object hostOutputLayer;
@@ -703,6 +704,7 @@ namespace HumankindAssetFramework
                 keys.Add(f.Name);
             keys.UnionWith(new[] {
                 "rotorSpinBones", "rotorSpinSpeed",   // plugin-only config (no editor field; parity-allowlisted runtime-only keys)
+                "bakedUtc",                           // the date stamp of the bake, for the F8 unit table
                 "skel", "atlas", "clip", "clipMove", "clipAfter", "clipAttack", "clipCombat",
                 "clipPreMove", "clipIdle", "clipIdleAlt", "clipIdleAlt2",   // GUID arrays — hand-pinned after ToObject, so they must survive the strip
             });
