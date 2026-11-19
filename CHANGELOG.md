@@ -20,6 +20,23 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   clone): an entry shows a date only after its next bake. Checked: 13 unit tests on the rows' rules, the plugin builds,
   the editor assembly compiles, the hand-list and schema parity gates. Not checked: the dialog has not been opened in
   the game. Not covered: districts (their registry is separate), and the regex fallback parser does not read the date.
+- **Vehicle Lab: Show all also reveals small saved parts and distant parts (PR #296 review, 2026-11-19).** Recipe loading
+  now opens the filters after restoring saved fields, so a saved vertex threshold cannot hide the small parts again.
+  Show all opens height/side bounds beyond +/-999 too. Eighteen checks against the real window in a temporary Unity
+  project cover mesh parts and source bones, retained roles and generation arguments, and a clean loaded recipe.
+- **Vehicle Lab: the "Edit existing" list shows each recipe's folder and sorts on it (2026-11-18).** A row now reads
+  `2026-08-19 22:23  Bradley — Bredley_Low`: the date, the folder the source model lives in (the first folder below what all
+  sources share, so `Bradley`, not its `FBX` subfolder), then the recipe. Sorted on folder, not on date; within a folder
+  the newest is on top. Checked: unit tests on the folder rule, the editor assembly compiles. Not checked in Unity.
+- **Vehicle Lab: a "Show all parts" button (2026-11-18).** The Parts section has seven sliders and two popups that
+  each hide parts, and a list reading "0 shown" does not say which one did it. The button at the top of the section
+  opens them all at once and says how many parts are hidden now. It changes the view only: marked roles stay, and the
+  filters never reach Generate. **And the filters no longer move by themselves**, for two reasons found in the code:
+  (1) loading a saved recipe kept the filter positions of the model that was open before and clamped them into the new
+  model's span, so a "hide below" set on a ship became "hide everything" on a tank - a loaded recipe now starts with
+  every filter open; (2) a slider or popup that still had the keyboard focus from an earlier click took the arrow keys
+  meant for the part list - the arrows now always go to the list (a number being typed keeps its keys). Checked: the
+  editor assembly compiles. Not checked: nothing was clicked in Unity.
 - **Vehicle Lab: "Use source skeleton (fast path)" runs in C# (2026-11-16).** The fast path keeps the artist's own
   skeleton and weights: it only keys a Spin clip on the bones you mark as wheels and exports. In C# now: the script's
   refusals in its own order (oars, rotors, the wave rock, Flip, Two-sided, the sail fold, a second model, a source with no
