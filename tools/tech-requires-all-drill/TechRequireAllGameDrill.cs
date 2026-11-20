@@ -117,6 +117,33 @@ static class TechRequireAllGameDrill
         foreach (var c in l) s.Add(names[(int)c.GetType().GetField("ParentTechnologyIndex").GetValue(c)] + ">" + names[(int)c.GetType().GetField("ChildTechnologyIndex").GetValue(c)]);
         s.Sort(StringComparer.Ordinal); return string.Join(" ", s);
     }
+    // A queue as a SAVE made with a list carries it: A,B,T,X queued, T behind two constraints (A>T, B>T) and B behind A.
+    // Built by hand, no hook involved: the game's own queueing never makes a technology the child of two constraints.
+    static void SavedOverlappingQueue()
+    {
+        Build(("A", new string[0], 2), ("B", new[] { "A" }, 1), ("T", new[] { "B", "A" }, 1), ("X", new string[0], 2));
+        foreach (var n in new[] { "A", "B", "T", "X" }) GameAdd(n);
+        var fc = tQueue.GetField("QueuedTechnologyConstraints");
+        var l = (IList)fc.GetValue(fQueue.GetValue(dept));
+        var tc = fc.FieldType.GetGenericArguments()[0];
+        // In the ORDER the plan writes them (measured: queueing T below leaves exactly this list). The order decides:
+        // the cascade scans from the end, so A puts T then B on its work list, B is taken first and puts T on again.
+        // With A>T first in the list T is taken before B and nothing is visited twice.
+        foreach (var (p, c) in new[] { ("B", "T"), ("A", "B"), ("A", "T") })
+        {
+            object k = Activator.CreateInstance(tc);
+            tc.GetField("ParentTechnologyIndex").SetValue(k, Idx(p));
+            tc.GetField("ChildTechnologyIndex").SetValue(k, Idx(c));
+            l.Add(k);
+        }
+    }
+    // null = the cascade ran to its end; otherwise the exception the game's code threw
+    static Exception RemoveCascadeAt(int indexInQueue)
+    {
+        try { AccessTools.Method(tDept, "RemoveTechnologyAndChildrenFromQueueAt").Invoke(dept, new object[] { indexInQueue }); return null; }
+        catch (TargetInvocationException ex) { return ex.InnerException ?? ex; }
+    }
+
     // A,B roots; T=A+B (LISTED); U=A+B (not listed); C=T; X root. States: 1 locked by technology, 2 available, 3 completed.
     static void Tree(int a, int b, int t) => Build(("A", new string[0], a), ("B", new string[0], b), ("T", new[] { "A", "B" }, t), ("U", new[] { "A", "B" }, 1), ("C", new[] { "T" }, 1), ("X", new string[0], 2));
 
@@ -151,8 +178,11 @@ static class TechRequireAllGameDrill
         var log = new BepInEx.Logging.ManualLogSource("drill");
         log.LogEvent += (s, e) => Console.WriteLine("      log " + e.Level + ": " + e.Data);
         Plugin.Log = log;
+        // HAF_DRILL_STAGE=nolist: the same process WITHOUT a list file, for the one hook that must work without one.
+        // A stage of its own because the plugin reads the list once per process.
+        bool noList = Environment.GetEnvironmentVariable("HAF_DRILL_STAGE") == "nolist";
         var cfg = Path.Combine(Path.GetTempPath(), "haf-techall-drill-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(cfg);
-        File.WriteAllText(Path.Combine(cfg, "haf_tech_requires_all.json"), "{\"technologies\":[\"T\",\"NotATech\"]}");
+        if (!noList) File.WriteAllText(Path.Combine(cfg, "haf_tech_requires_all.json"), "{\"technologies\":[\"T\",\"NotATech\"]}");
         typeof(BepInEx.Paths).GetProperty("ConfigPath", ALL).SetValue(null, cfg, null);
 
         var h = new Harmony("drill");
@@ -167,10 +197,28 @@ static class TechRequireAllGameDrill
         Tree(2, 2, 1);
         GameQueue("C", 1);
         Check("vanilla: queueing C puts ONE parent of T in front", Queue() == "A,T,C", Queue() + " | " + Constraints());
+        SavedOverlappingQueue();
+        var thrown = RemoveCascadeAt(0);
+        Check("vanilla: a saved queue with T behind two constraints THROWS when A is removed", thrown is ArgumentOutOfRangeException, thrown == null ? "no exception | " + Queue() : thrown.GetType().Name);
 
         Console.WriteLine("--- the HAF hooks, applied as the plugin applies them ---");
         foreach (var t in new[] { typeof(Hk_TechRequireAllCheck), typeof(Hk_TechRequireAllQueue), typeof(Hk_TechRequireAllRemove) })
         { var applied = h.CreateClassProcessor(t).Patch(); Check(t.Name + " patched a method", applied != null && applied.Count > 0); }
+
+        if (noList)
+        {
+            Console.WriteLine("--- NO list file: the save's constraints are still there ---");
+            Check("no list file: the feature is inactive", !TechRequireAll.Active);
+            Tree(3, 2, 1);
+            Check("no list file: T (A done, B not) is available, the game's rule", GameCheck("T"));
+            SavedOverlappingQueue();
+            thrown = RemoveCascadeAt(0);
+            Check("no list file: removing A from the saved queue removes B and T once and keeps X",
+                  thrown == null && Queue() == "X" && Constraints() == "", thrown != null ? thrown.ToString() : Queue() + " | " + Constraints());
+            Console.WriteLine(fails == 0 ? "DRILL PASS" : "DRILL FAIL (" + fails + ")");
+            try { Directory.Delete(cfg, true); } catch { }
+            return fails == 0 ? 0 : 1;
+        }
 
         Tree(3, 2, 1);
         Check("listed T: A done, B not -> LOCKED", !GameCheck("T"));
@@ -212,15 +260,9 @@ static class TechRequireAllGameDrill
         GameQueue("T", 1);
         GameAdd("X");
         Check("overlapping branches queue both required parents", Queue() == "A,B,T,X" && Constraints() == "A>B A>T B>T", Queue() + " | " + Constraints());
-        try
-        {
-            AccessTools.Method(tDept, "RemoveTechnologyAndChildrenFromQueueAt").Invoke(dept, new object[] { 0 });
-            Check("removing A removes B and T once and keeps unrelated X", Queue() == "X" && Constraints() == "", Queue() + " | " + Constraints());
-        }
-        catch (TargetInvocationException ex)
-        {
-            Check("removing A removes B and T once and keeps unrelated X", false, ex.InnerException?.ToString());
-        }
+        thrown = RemoveCascadeAt(0);
+        Check("removing A removes B and T once and keeps unrelated X", thrown == null && Queue() == "X" && Constraints() == "",
+              thrown != null ? thrown.ToString() : Queue() + " | " + Constraints());
 
         Console.WriteLine(fails == 0 ? "DRILL PASS" : "DRILL FAIL (" + fails + ")");
         try { Directory.Delete(cfg, true); } catch { }

@@ -3,8 +3,13 @@
 // The game unlocks a technology as soon as ONE of its listed prerequisites is completed, and its data has no field to
 // say otherwise (TechnologyPrerequisite is a bare list of names). The editor's "Tech Requires All" window writes the
 // names of the technologies that must wait for EVERY prerequisite to haf_tech_requires_all.json in BepInEx/config;
-// this file makes the game obey that list. No baked asset, nothing in the save: remove a name and the technology is
-// vanilla on the next launch. Without the file both hooks return at their first line.
+// this file makes the game obey that list. No baked asset: remove a name and the technology is vanilla on the next
+// launch. Without the file the availability and queue hooks return at their first line.
+//
+// ONE thing does reach the save: the ordering constraints of a queue planned here (the game serializes
+// TechnologyQueue.QueuedTechnologyConstraints). A technology can then be the child of TWO constraints, which the
+// game's own queueing never produces, so hook 3 below is NOT gated on the list: a save made with a list must stay
+// safe after the list is emptied or switched off. With the plugin uninstalled nothing guards such a save.
 //
 // The lock is only half of the game's rule (decompiled 2026-11-20, DepartmentOfScience):
 //   1. CheckTechnologyPrerequisite — the availability test, called for every technology by UpdateTechnologiesState.
@@ -13,14 +18,18 @@
 //      queue in order with no look at a technology's state, so the queue's order is the real guard, and vanilla puts
 //      ONE chain of parents in front (one parent per level). Prefix: when a listed technology is in that tree, queue
 //      every missing parent in front instead, with the game's own queue methods and its own ordering constraints.
-//   3. RemoveTechnologyFromQueueAt — ignore a missing index when overlapping branches schedule a child twice.
+//   3. RemoveTechnologyFromQueueAt — the game's removal cascade (RemoveTechnologyAndChildrenFromQueueAt) puts a
+//      technology on its work list once per constraint that names it as the child. With two such constraints the
+//      second visit finds it gone and calls this with -1, which throws. Prefix: -1 is skipped, ALWAYS (see above);
+//      unpatched that call can only throw, so skipping it changes nothing the game could have done.
 //
 // The hooks run on the SIMULATION thread. Everything they share sits behind one lock; the member lookups go through the
 // plugin's concurrent reflection cache. Every game member is resolved once and a missing one THROWS by name, so a
 // game update shows as one warning and vanilla behaviour, never as a silently wrong lock.
 //
 // Not covered: a technology already sitting in a saved queue behind only one parent keeps that place (the queue is
-// only planned when something is added), and anything that completes a technology outside the research queue.
+// only planned when something is added), anything that completes a technology outside the research queue, and a save
+// with such a planned queue loaded WITHOUT the plugin (see hook 3).
 
 using System;
 using System.Collections;
@@ -315,12 +324,17 @@ namespace HumankindAssetFramework
         static MethodBase TargetMethod()
         {
             var t = GameBinding.DepartmentOfScience;
-            return t != null ? AccessTools.Method(t, "RemoveTechnologyFromQueueAt") : null;
+            var m = t != null ? AccessTools.Method(t, "RemoveTechnologyFromQueueAt") : null;
+            if (m != null) Plugin.Log.LogInfo("[TechAll] hooked DepartmentOfScience.RemoveTechnologyFromQueueAt (a technology behind two queued prerequisites is removed once)");
+            else Plugin.Log.LogWarning("[TechAll] NOT found: DepartmentOfScience.RemoveTechnologyFromQueueAt — removing a prerequisite shared by two queued branches can throw in the game's own removal");
+            return m;
         }
 
         // The game's cascade can put the same technology on its work list through two branches.
         // Once one branch removes it, FindTechnologyIndexInQueue returns -1 for the second.
         // Let the cascade finish draining its work list and process valid removals normally.
-        static bool Prefix(int __0) => __0 != -1 || !TechRequireAll.Active;
+        // NOT gated on the list: the constraints that cause the second visit are in the SAVE, and a save made with a
+        // list is loaded just the same after the list is emptied or [Technologies] TechRequireAll is set to false.
+        static bool Prefix(int __0) => __0 != -1;
     }
 }

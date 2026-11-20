@@ -38,9 +38,15 @@ rules: the list parser (a broken file is no names plus a reason, never an empty 
 The planner also refuses a locked technology whose prerequisite names are all unknown and uses the vanilla route
 for a listed technology with only one prerequisite.
 `bash tools/tech_requires_all_game_drill.sh` runs the hooks against the **installed game's own assemblies**. The
-20 checks cover prerequisite checks, locked enqueue, and cascading removal. In the overlapping-branch fixture,
+21 checks cover prerequisite checks, locked enqueue, and cascading removal. In the overlapping-branch fixture,
 removing A from the queue also removes B and T and leaves the unrelated X. Before the fix, the game's cascade tried
-to remove T twice and threw. Leaf queue mutations that need the live Sandbox are replaced by list operations.
+to remove T twice and threw; the control now shows that on the unpatched game, with the queue and its three
+constraints built by hand as a save carries them (in the order the plan writes them: with `A>T` first in the list the
+cascade takes T before B and nothing is visited twice). The script then runs a second time with **no list file**
+(9 checks): the feature is inactive, the game's ANY rule is back, and the same saved queue is still removed cleanly,
+because the removal guard is not gated on the list. With the old list-gated guard planted back, that run fails with
+the game's `ArgumentOutOfRangeException`. Leaf queue mutations that need the live Sandbox are replaced by list
+operations.
 Set `HAF_DRILL_MONO` to run the checks under the Unity editor's Mono as well.
 `bash tools/tech_requires_all_unity_drill.sh` drives the real window in a
 temporary Unity project (add, save, reopen, remove; 14 checks) and reads every deployed file back with the plugin's

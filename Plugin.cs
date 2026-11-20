@@ -220,7 +220,7 @@ namespace HumankindAssetFramework
                 typeof(Hk_MouseCoverExtend),  // F8 window click-through fix: hovering our window counts as the game's own mouse-covered (map stops panning under it) (2026-08-17)
                 typeof(Hk_TechRequireAllCheck),  // TECHNOLOGIES: a listed technology stays locked until ALL its prerequisites are completed (vanilla: any one) (2026-11-20)
                 typeof(Hk_TechRequireAllQueue),  // TECHNOLOGIES: queueing a locked technology puts EVERY missing prerequisite of a listed one in front (vanilla: one chain) (2026-11-20)
-                typeof(Hk_TechRequireAllRemove), // TECHNOLOGIES: tolerate a second visit during removal of overlapping prerequisites
+                typeof(Hk_TechRequireAllRemove), // TECHNOLOGIES: the game's removal cascade survives a technology queued behind two prerequisites; NOT gated on the list, the constraints are in the save (2026-11-20)
         };
 
         private void Awake()

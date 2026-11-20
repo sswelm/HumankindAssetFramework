@@ -14,12 +14,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   listed prerequisite is researched, and a `TechnologyDefinition` has no field to say otherwise. A new window,
   `Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites`, holds a list of technologies (and only that) for which every
   prerequisite must be researched; it saves `haf_tech_requires_all.json` on the shared registry engine. The plugin
-  applies it with two hooks on `DepartmentOfScience`: the availability test keeps a listed technology locked until all
+  applies it with three hooks on `DepartmentOfScience`: the availability test keeps a listed technology locked until all
   its prerequisites are completed, and queueing a locked technology puts every missing prerequisite of a listed one in
-  front of it (the game queues one chain, and research is paid into the queue without looking at the lock). Off with
-  `[Technologies] TechRequireAll = false`; inert without the file. It changes the simulation, so multiplayer needs the
-  same list on every machine. Checked: 21 unit tests on the rules; a drill of both hooks against the installed game's
-  assemblies with the unpatched game as the control (17 checks, .NET Framework and the Unity editor's Mono); a drill of
+  front of it (the game queues one chain, and research is paid into the queue without looking at the lock). The third
+  guards the game's own removal cascade: a queue planned here can put a technology behind two ordering constraints,
+  and removing a shared prerequisite then visits it twice and throws. Those constraints are written into the save, so
+  that guard is **not** gated on the list: a save made with a list stays safe after the list is emptied or switched
+  off (with the plugin uninstalled nothing guards it). Off with
+  `[Technologies] TechRequireAll = false`; the lock and the queue plan are inert without the file. It changes the
+  simulation, so multiplayer needs the
+  same list on every machine. Checked: 23 unit tests on the rules; a drill of the hooks against the installed game's
+  assemblies with the unpatched game as the control (21 checks with a list, 9 without one, .NET Framework and the Unity
+  editor's Mono); a drill of
   the real window in a temporary Unity project (14 checks, deployed files read back by the plugin's parser); every
   bound game member resolves (bindcheck). Not checked: nothing was run in the game - the tech screen, a real research
   queue, the AI and a multiplayer session are untested. Not covered: a technology already in a saved queue behind one

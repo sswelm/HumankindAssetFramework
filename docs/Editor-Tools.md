@@ -527,6 +527,9 @@ windows. **Deep dive:**
   `[Technologies] TechRequireAll = false` in the plugin's `.cfg` ignores the file. Not covered: a technology that is
   already in a saved research queue behind one prerequisite keeps that place, anything that completes a technology
   outside the research queue, and the tech screen gives no hint that a technology needs all its prerequisites.
+  **Saves:** a research queue planned under a list is saved with its ordering constraints. The plugin keeps such a save
+  safe whether or not the list is still there; loaded with the plugin **uninstalled**, removing a queued prerequisite
+  that two queued branches share can throw in the game's own code. Clear the research queue before uninstalling.
 - **Pawn Rig Dump** — `Tools ▸ HAF ▸ Diagnostics ▸ Pawn Rig Dump`. Dump every matching `PresentationPawnDefinition`'s full
   serialized graph (skeleton, clip collections, assets) to `rig_dump.txt` for rig investigation.
 - **Export selected atlas to PNG** — `Tools ▸ HAF ▸ Export selected atlas to PNG`. Blit a selected compressed atlas through a
