@@ -6,15 +6,16 @@
 // this file makes the game obey that list. No baked asset, nothing in the save: remove a name and the technology is
 // vanilla on the next launch. Without the file both hooks return at their first line.
 //
-// TWO hooks, because the lock is only half of the game's rule (decompiled 2026-11-20, DepartmentOfScience):
+// The lock is only half of the game's rule (decompiled 2026-11-20, DepartmentOfScience):
 //   1. CheckTechnologyPrerequisite — the availability test, called for every technology by UpdateTechnologiesState.
 //      Postfix: a listed technology the game calls available stays locked until all its prerequisites are completed.
 //   2. AddLockedTechnologyToQueue — what a click (or the AI) on a LOCKED technology runs. Research is paid into the
 //      queue in order with no look at a technology's state, so the queue's order is the real guard, and vanilla puts
 //      ONE chain of parents in front (one parent per level). Prefix: when a listed technology is in that tree, queue
 //      every missing parent in front instead, with the game's own queue methods and its own ordering constraints.
+//   3. RemoveTechnologyFromQueueAt — ignore a missing index when overlapping branches schedule a child twice.
 //
-// Both run on the SIMULATION thread. Everything they share sits behind one lock; the member lookups go through the
+// The hooks run on the SIMULATION thread. Everything they share sits behind one lock; the member lookups go through the
 // plugin's concurrent reflection cache. Every game member is resolved once and a missing one THROWS by name, so a
 // game update shows as one warning and vanilla behaviour, never as a silently wrong lock.
 //
@@ -307,5 +308,19 @@ namespace HumankindAssetFramework
                 return true;
             }
         }
+    }
+
+    [HarmonyPatch] internal static class Hk_TechRequireAllRemove
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.DepartmentOfScience;
+            return t != null ? AccessTools.Method(t, "RemoveTechnologyFromQueueAt") : null;
+        }
+
+        // The game's cascade can put the same technology on its work list through two branches.
+        // Once one branch removes it, FindTechnologyIndexInQueue returns -1 for the second.
+        // Let the cascade finish draining its work list and process valid removals normally.
+        static bool Prefix(int __0) => __0 != -1 || !TechRequireAll.Active;
     }
 }

@@ -227,6 +227,28 @@ namespace HumankindAssetFramework.Tests
         }
 
         [Fact]
+        public void Plan_AllPrerequisiteNamesUnknown_DoesNotQueueTheLockedTechnology()
+        {
+            var t = new Tree();
+            t.Parents[10] = new[] { -1, -1 };
+            t.All.Add(10);
+            var p = t.Plan(10);
+            Assert.True(p.UsesRequireAll);
+            Assert.False(p.Ok);
+            Assert.Empty(p.Order);
+        }
+
+        [Fact]
+        public void Plan_AListedTechnologyWithOnePrerequisite_UsesTheVanillaRoute()
+        {
+            var t = new Tree();
+            t.Parents[10] = new[] { 1 };
+            t.States[1] = R.State.Available;
+            t.All.Add(10);
+            Assert.False(t.Plan(10).UsesRequireAll);
+        }
+
+        [Fact]
         public void Plan_AnUnlistedLockedTechnologyWithNoKnownParent_IsRefused_AsTheGameRefusesIt()
         {
             var t = new Tree();

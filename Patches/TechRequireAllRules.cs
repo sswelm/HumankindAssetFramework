@@ -99,14 +99,21 @@ namespace HumankindAssetFramework
             var parents = prerequisites(tech) ?? new int[0];
             open.Add(tech);
 
-            if (requireAll(tech))
+            if (parents.Count >= 2 && requireAll(tech))
             {
                 plan.UsesRequireAll = true;
+                bool foundParent = false;
                 for (int i = 0; i < parents.Count && plan.Ok; i++)
                 {
                     int p = parents[i];
                     if (p < 0) continue;
+                    foundParent = true;
                     Require(plan, p, tech, depth, prerequisites, state, inQueue, requireAll, visited, open);
+                }
+                if (!foundParent)
+                {
+                    plan.Ok = false;
+                    plan.Why = $"technology #{tech} is locked and names no prerequisite the game holds";
                 }
             }
             else

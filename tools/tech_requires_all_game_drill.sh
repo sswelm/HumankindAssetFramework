@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-# Drive the two TechRequireAll hooks against the REAL game assemblies, without launching the game: a
-# DepartmentOfScience built without its constructor, six technologies, and the game's own
-# CheckTechnologyPrerequisite / AddLockedTechnologyToQueue called by reflection - first unpatched (the control: one
-# prerequisite unlocks, one parent chain is queued), then with the plugin's hooks applied as the plugin applies them.
-# The two game methods that reach the live Sandbox (AddTechnologyToQueue, MoveTechnologyInQueue) are replaced by plain
-# list operations; that part is not the game's code. Not in the push gate: it needs an installed game.
+# Drive the TechRequireAll hooks against the installed game assemblies. Call the game's prerequisite check,
+# locked enqueue and cascading removal on a DepartmentOfScience built without its constructor. The leaf queue
+# mutations that need a live Sandbox are replaced by list operations. This drill needs an installed game.
 #
 #   bash tools/tech_requires_all_game_drill.sh [<Humankind .../Humankind_Data/Managed>]
 #

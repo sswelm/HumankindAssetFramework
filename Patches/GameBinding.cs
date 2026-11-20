@@ -623,7 +623,7 @@ namespace HumankindAssetFramework
             new Dep(PresentationAirUnit, nameof(PresentationAirUnit), "PresentationUnit", "MainPawn"),
             new Dep(MajorEmpire, nameof(MajorEmpire), "DepartmentOfScience", "Armies", "Squadrons"),   // Armies/Squadrons: CurrentEra's built-unit walk (ScaleEra.cs), read through a name loop
             new Dep(DepartmentOfScience, nameof(DepartmentOfScience), "GetTechnologicalEra", "CurrentTechnologicalEraIndex",
-                "CheckTechnologyPrerequisite", "AddLockedTechnologyToQueue",   // TechRequireAllPatch.cs: the two hook targets...
+                "CheckTechnologyPrerequisite", "AddLockedTechnologyToQueue", "RemoveTechnologyFromQueueAt",   // TechRequireAllPatch.cs: hook targets
                 "Technologies", "TechnologyQueue", "GetTechnologyIndex", "FindTechnologyIndexInQueue", "AddTechnologyToQueue", "MoveTechnologyInQueue"),   // ...and what its Bind resolves
             new Dep(Timeline, nameof(Timeline), "GetGlobalEraIndex"),
             new Dep(PresentationLevelBuildComponent, nameof(PresentationLevelBuildComponent), "channels", "RefreshChannel"),

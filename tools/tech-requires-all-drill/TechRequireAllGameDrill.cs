@@ -4,14 +4,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Runtime.Serialization;
 using HarmonyLib;
 using HumankindAssetFramework;
 
-// Drives the two TechRequireAll hooks against the REAL game assemblies, outside the game: a DepartmentOfScience built
-// without its constructor, six technologies, the game's own CheckTechnologyPrerequisite and AddLockedTechnologyToQueue
-// called by reflection. The two game methods that reach the live Sandbox (AddTechnologyToQueue, MoveTechnologyInQueue)
-// are replaced by plain list operations - that part is NOT the game's code.
+// Drive the TechRequireAll hooks on the installed game assemblies without launching the game.
+// The drill runs the game's prerequisite check, locked enqueue and cascading removal. It stubs the leaf
+// queue mutations (AddTechnologyToQueue, MoveTechnologyInQueue, RemoveTechnologyFromQueueAt) that need a live Sandbox.
 static class TechRequireAllGameDrill
 {
     const BindingFlags ALL = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
@@ -35,6 +35,25 @@ static class TechRequireAllGameDrill
         var list = (List<int>)tQueue.GetField("TechnologyIndices").GetValue(fQueue.GetValue(__instance));
         int v = list[fromIndex]; list.RemoveAt(fromIndex); if (toIndex >= list.Count) list.Add(v); else list.Insert(toIndex, v);
         return false;
+    }
+
+    static void RemoveStub(object department, int indexInQueue)
+    {
+        var list = (List<int>)tQueue.GetField("TechnologyIndices").GetValue(fQueue.GetValue(department));
+        int technologyIndex = list[indexInQueue];   // like the game's leaf method, this requires a valid queue index
+        list.RemoveAt(indexInQueue);
+        var t = data.GetValue(technologyIndex);
+        tTech.GetField("IsInQueue").SetValue(t, false);
+        data.SetValue(t, technologyIndex);
+    }
+
+    // Substitute the leaf body so the production removal prefix still runs before it.
+    static IEnumerable<CodeInstruction> StubRemoveBody(IEnumerable<CodeInstruction> instructions)
+    {
+        yield return new CodeInstruction(OpCodes.Ldarg_0);
+        yield return new CodeInstruction(OpCodes.Ldarg_1);
+        yield return new CodeInstruction(OpCodes.Call, typeof(TechRequireAllGameDrill).GetMethod(nameof(RemoveStub), ALL));
+        yield return new CodeInstruction(OpCodes.Ret);
     }
 
     static object SS(string s) => Activator.CreateInstance(tSS, new object[] { s });
@@ -139,6 +158,8 @@ static class TechRequireAllGameDrill
         var h = new Harmony("drill");
         h.Patch(AccessTools.Method(tDept, "AddTechnologyToQueue"), prefix: new HarmonyMethod(typeof(TechRequireAllGameDrill).GetMethod("AddStub", ALL)));
         h.Patch(AccessTools.Method(tDept, "MoveTechnologyInQueue"), prefix: new HarmonyMethod(typeof(TechRequireAllGameDrill).GetMethod("MoveStub", ALL)));
+        h.Patch(AccessTools.Method(tDept, "RemoveTechnologyFromQueueAt"),
+            transpiler: new HarmonyMethod(typeof(TechRequireAllGameDrill).GetMethod(nameof(StubRemoveBody), ALL)));
 
         Console.WriteLine("--- CONTROL: the game's own code, HAF hooks not applied ---");
         Tree(3, 2, 1);
@@ -147,8 +168,8 @@ static class TechRequireAllGameDrill
         GameQueue("C", 1);
         Check("vanilla: queueing C puts ONE parent of T in front", Queue() == "A,T,C", Queue() + " | " + Constraints());
 
-        Console.WriteLine("--- the two HAF hooks, applied as the plugin applies them ---");
-        foreach (var t in new[] { typeof(Hk_TechRequireAllCheck), typeof(Hk_TechRequireAllQueue) })
+        Console.WriteLine("--- the HAF hooks, applied as the plugin applies them ---");
+        foreach (var t in new[] { typeof(Hk_TechRequireAllCheck), typeof(Hk_TechRequireAllQueue), typeof(Hk_TechRequireAllRemove) })
         { var applied = h.CreateClassProcessor(t).Patch(); Check(t.Name + " patched a method", applied != null && applied.Count > 0); }
 
         Tree(3, 2, 1);
@@ -185,6 +206,21 @@ static class TechRequireAllGameDrill
         Tree(2, 2, 1);
         GameQueue("U", 1);
         Check("unlisted U: the game's own queueing runs (one parent)", Queue() == "A,U" && Constraints() == "A>U", Queue() + " | " + Constraints());
+
+        Build(("A", new string[0], 2), ("B", new[] { "A" }, 1),
+              ("T", new[] { "B", "A" }, 1), ("X", new string[0], 2));
+        GameQueue("T", 1);
+        GameAdd("X");
+        Check("overlapping branches queue both required parents", Queue() == "A,B,T,X" && Constraints() == "A>B A>T B>T", Queue() + " | " + Constraints());
+        try
+        {
+            AccessTools.Method(tDept, "RemoveTechnologyAndChildrenFromQueueAt").Invoke(dept, new object[] { 0 });
+            Check("removing A removes B and T once and keeps unrelated X", Queue() == "X" && Constraints() == "", Queue() + " | " + Constraints());
+        }
+        catch (TargetInvocationException ex)
+        {
+            Check("removing A removes B and T once and keeps unrelated X", false, ex.InnerException?.ToString());
+        }
 
         Console.WriteLine(fails == 0 ? "DRILL PASS" : "DRILL FAIL (" + fails + ")");
         try { Directory.Delete(cfg, true); } catch { }

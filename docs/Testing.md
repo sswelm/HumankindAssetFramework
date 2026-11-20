@@ -32,15 +32,17 @@ cases pass after the fixes. An isolated Unity 2021.3.1 embedded-Mono probe also 
 and parallel live-key lookups with incremental GC enabled, plus factory re-entry and cross-thread access. This checks
 the replacement's behavior; the original native game crash was not reproduced by a standalone test.
 
-**Technologies that require all prerequisites (2026-11-20):** `TechRequireAllRulesTests` (21 cases) holds the pure
+**Technologies that require all prerequisites (2026-11-20):** `TechRequireAllRulesTests` (23 cases) holds the pure
 rules: the list parser (a broken file is no names plus a reason, never an empty list), the ALL rule, and the queue plan
 (both parents, a completed parent left out, a diamond, a parent already queued, an era lock, a cycle, an unknown name).
-`bash tools/tech_requires_all_game_drill.sh` runs the two hooks against the **installed game's own assemblies** without
-launching it: a `DepartmentOfScience` built without its constructor and the game's `CheckTechnologyPrerequisite` and
-`AddLockedTechnologyToQueue` called by reflection, first unpatched as the control (one prerequisite unlocks; one parent
-chain is queued), then with the hooks applied (17 checks, also under the Unity editor's Mono with
-`HAF_DRILL_MONO`). The two game methods that reach the live Sandbox (`AddTechnologyToQueue`, `MoveTechnologyInQueue`)
-are replaced by plain list operations there. `bash tools/tech_requires_all_unity_drill.sh` drives the real window in a
+The planner also refuses a locked technology whose prerequisite names are all unknown and uses the vanilla route
+for a listed technology with only one prerequisite.
+`bash tools/tech_requires_all_game_drill.sh` runs the hooks against the **installed game's own assemblies**. The
+20 checks cover prerequisite checks, locked enqueue, and cascading removal. In the overlapping-branch fixture,
+removing A from the queue also removes B and T and leaves the unrelated X. Before the fix, the game's cascade tried
+to remove T twice and threw. Leaf queue mutations that need the live Sandbox are replaced by list operations.
+Set `HAF_DRILL_MONO` to run the checks under the Unity editor's Mono as well.
+`bash tools/tech_requires_all_unity_drill.sh` drives the real window in a
 temporary Unity project (add, save, reopen, remove; 14 checks) and reads every deployed file back with the plugin's
 parser; the tech tree is injected, so the picker's list over a real modding project is not exercised. Neither drill is
 in the push gate, and neither is a game session: `UpdateTechnologiesState`, research investment, the tech screen and the
