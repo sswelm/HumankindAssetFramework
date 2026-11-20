@@ -1823,6 +1823,12 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`). Nothin
 - **The tech screen gives no hint** that a technology needs all its prerequisites.
 - **The planner walks up to 32 levels where the game stops at 5** (`TryFillParentTechnologiesToCompleteBefore`), in a
   tree that holds a listed technology. Deliberate; noted because it is a difference from the game.
+- **The new window depends on a local change to the Tech Tree viewer.** `TechRequireAllWindow` reuses the viewer's
+  `TechPickerDropdown` (`editor/TechTreeWindow.cs`) and passes a heading as a fourth constructor argument; the picker's
+  heading was a fixed text before. The viewer came from another modder's tool (the user, 2026-11-20; the file has no
+  credit line and its history here starts at 2026-08-24, the move into this repo). Replacing the file with a newer
+  copy of that tool drops the `title` parameter and the new window stops compiling. Fine for now (the user, same day);
+  the clean cut is to give the new window its own picker so the viewer file is untouched.
 - **A save with a planned queue, loaded with the plugin uninstalled, is not guarded** against the double visit in
   `RemoveTechnologyAndChildrenFromQueueAt`. Documented in Editor-Tools and Capabilities; no fix is possible from a
   plugin that is not there.
