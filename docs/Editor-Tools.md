@@ -520,7 +520,8 @@ windows. **Deep dive:**
   technologies that have two or more prerequisites; each row shows what "all" means for it (`Needs all of: A + B`) and
   warns when an entry can have no effect (unknown name, fewer than two prerequisites). The prerequisites themselves are
   not edited here — that stays in the Tech Tree viewer. **Save** writes the project's
-  `haf_tech_requires_all.backup.json` and deploys `haf_tech_requires_all.json`; relaunch the game to apply. The plugin
+  `haf_tech_requires_all.backup.json` and deploys `haf_tech_requires_all.json`; relaunch the game to apply. The file is
+  one list of `TechnologyDefinition` names, `{"technologies": ["Technology_Era4_LandClearance", …]}`. The plugin
   (`Patches/TechRequireAllPatch.cs`) then keeps a listed technology locked until every prerequisite is completed, and
   when a locked one is queued (by the player or the AI) it queues **every** missing prerequisite in front of it, where
   the game queues one chain. It changes the simulation, so in multiplayer every player needs the same list;
