@@ -537,18 +537,21 @@ class TechPickerDropdown : AdvancedDropdown
     readonly List<TechTreeData.Node> _candidates;
     readonly Action<string> _onPick;
     readonly Dictionary<AdvancedDropdownItem, string> _map = new();
+    readonly string _title;   // the list's heading: the Tech Requires All window picks a technology with the same list
 
-    public TechPickerDropdown(AdvancedDropdownState state, List<TechTreeData.Node> candidates, Action<string> onPick)
+    public TechPickerDropdown(AdvancedDropdownState state, List<TechTreeData.Node> candidates, Action<string> onPick,
+                              string title = "Add prerequisite")
         : base(state)
     {
         _candidates = candidates;
         _onPick = onPick;
+        _title = title;
         minimumSize = new Vector2(320, 420);
     }
 
     protected override AdvancedDropdownItem BuildRoot()
     {
-        var root = new AdvancedDropdownItem("Add prerequisite");
+        var root = new AdvancedDropdownItem(_title);
         foreach (var era in _candidates.Select(c => c.Era).Distinct()
                                        .OrderBy(e => string.IsNullOrEmpty(e) ? "zzz" : e))
         {

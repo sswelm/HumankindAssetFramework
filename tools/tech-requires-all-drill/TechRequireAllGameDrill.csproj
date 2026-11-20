@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The game-side drill of Patches/TechRequireAllPatch.cs: tools/tech_requires_all_game_drill.sh builds and runs it. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net471</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <LangVersion>latest</LangVersion>
+    <!-- the name the plugin's InternalsVisibleTo grants: the drill applies the internal hook classes directly -->
+    <AssemblyName>HumankindAssetFramework.Tests</AssemblyName>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!-- this folder also holds the Unity window drill, which only Unity's compiler can build -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="TechRequireAllGameDrill.cs" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="HumankindAssetFramework"><HintPath>..\..\bin\Release\HumankindAssetFramework.dll</HintPath></Reference>
+    <Reference Include="BepInEx"><HintPath>..\..\References\BepInEx.dll</HintPath></Reference>
+    <Reference Include="0Harmony"><HintPath>..\..\References\0Harmony.dll</HintPath></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>..\..\References\Newtonsoft.Json.dll</HintPath></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>..\..\References\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>..\..\References\UnityEngine.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

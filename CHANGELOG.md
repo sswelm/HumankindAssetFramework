@@ -10,6 +10,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Technologies can require ALL their prerequisites (2026-11-20).** The game unlocks a technology as soon as any one
+  listed prerequisite is researched, and a `TechnologyDefinition` has no field to say otherwise. A new window,
+  `Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites`, holds a list of technologies (and only that) for which every
+  prerequisite must be researched; it saves `haf_tech_requires_all.json` on the shared registry engine. The plugin
+  applies it with two hooks on `DepartmentOfScience`: the availability test keeps a listed technology locked until all
+  its prerequisites are completed, and queueing a locked technology puts every missing prerequisite of a listed one in
+  front of it (the game queues one chain, and research is paid into the queue without looking at the lock). Off with
+  `[Technologies] TechRequireAll = false`; inert without the file. It changes the simulation, so multiplayer needs the
+  same list on every machine. Checked: 21 unit tests on the rules; a drill of both hooks against the installed game's
+  assemblies with the unpatched game as the control (17 checks, .NET Framework and the Unity editor's Mono); a drill of
+  the real window in a temporary Unity project (14 checks, deployed files read back by the plugin's parser); every
+  bound game member resolves (bindcheck). Not checked: nothing was run in the game - the tech screen, a real research
+  queue, the AI and a multiplayer session are untested. Not covered: a technology already in a saved queue behind one
+  prerequisite, technologies completed outside the research queue, and any on-screen hint that a technology needs all.
 - **F8 Units table review fixes (2026-11-19).** Adjustment-only retextures now have the same type/status as PNG
   retextures. The Units frame retains dimensions requested by the resize grip while keeping the returned title-bar
   position, and its summary wraps so narrow sizes remain narrow. Checked: seven regression cases and twelve layout
