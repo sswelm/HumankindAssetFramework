@@ -38,7 +38,10 @@ rules: the list parser (a broken file is no names plus a reason, never an empty 
 The planner also refuses a locked technology whose prerequisite names are all unknown and uses the vanilla route
 for a listed technology with only one prerequisite.
 `bash tools/tech_requires_all_game_drill.sh` runs the hooks against the **installed game's own assemblies**. The
-21 checks cover prerequisite checks, locked enqueue, and cascading removal. In the overlapping-branch fixture,
+25 checks cover state updates, locked enqueue, and cascading removal. Four assertions share a prerequisite array
+between a listed and an unlisted definition in both registration orders. Before the fix, whichever definition came
+last supplied the rule for both. The game drill runs the original state update loop with the era check, Sandbox frame
+read, and empire counter updates stubbed. In the overlapping-branch fixture,
 removing A from the queue also removes B and T and leaves the unrelated X. Before the fix, the game's cascade tried
 to remove T twice and threw; the control now shows that on the unpatched game, with the queue and its three
 constraints built by hand as a save carries them (in the order the plan writes them: with `A>T` first in the list the
@@ -51,8 +54,7 @@ Set `HAF_DRILL_MONO` to run the checks under the Unity editor's Mono as well.
 `bash tools/tech_requires_all_unity_drill.sh` drives the real window in a
 temporary Unity project (add, save, reopen, remove; 14 checks) and reads every deployed file back with the plugin's
 parser; the tech tree is injected, so the picker's list over a real modding project is not exercised. Neither drill is
-in the push gate, and neither is a game session: `UpdateTechnologiesState`, research investment, the tech screen and the
-AI have not been run with the hooks.
+in the push gate. Research investment, the tech screen and the AI still need live game coverage.
 
 **F8 Units table (PR #297 review, 2026-11-19):** `UnitTableTests` covers adjustment-only retextures (desaturate,
 brightness and each tint channel) using the same rule as injection, including pending/in-use status and a baked-model

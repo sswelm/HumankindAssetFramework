@@ -10,8 +10,8 @@ using HarmonyLib;
 using HumankindAssetFramework;
 
 // Drive the TechRequireAll hooks on the installed game assemblies without launching the game.
-// The drill runs the game's prerequisite check, locked enqueue and cascading removal. It stubs the leaf
-// queue mutations (AddTechnologyToQueue, MoveTechnologyInQueue, RemoveTechnologyFromQueueAt) that need a live Sandbox.
+// The drill runs the game's state update loop, locked enqueue and cascading removal with the live simulation
+// reads and leaf queue mutations stubbed.
 static class TechRequireAllGameDrill
 {
     const BindingFlags ALL = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
@@ -53,6 +53,33 @@ static class TechRequireAllGameDrill
         yield return new CodeInstruction(OpCodes.Ldarg_0);
         yield return new CodeInstruction(OpCodes.Ldarg_1);
         yield return new CodeInstruction(OpCodes.Call, typeof(TechRequireAllGameDrill).GetMethod(nameof(RemoveStub), ALL));
+        yield return new CodeInstruction(OpCodes.Ret);
+    }
+
+    static bool StubEraCheck(ref bool __result)
+    {
+        __result = true;
+        return false;
+    }
+
+    // Keep the game's state loop, including its prerequisite call and state write. Stub the frame read
+    // and stop at the empire counter updates, which need the live simulation.
+    static IEnumerable<CodeInstruction> StubStateUpdateEnvironment(IEnumerable<CodeInstruction> instructions)
+    {
+        var code = instructions.ToList();
+        int empire = code.FindIndex(i => i.opcode == OpCodes.Ldfld && i.operand is FieldInfo f && f.Name == "majorEmpire");
+        if (empire < 2 || code[empire - 1].opcode != OpCodes.Ldarg_0 || code[empire - 2].opcode != OpCodes.Ldloc_0)
+            throw new InvalidOperationException("State update's empire counter block was not found");
+        for (int i = 0; i < empire - 2; i++)
+        {
+            var instruction = code[i];
+            if (instruction.opcode == OpCodes.Ldsfld && instruction.operand is FieldInfo frame && frame.Name == "Frame")
+            {
+                instruction.opcode = OpCodes.Ldc_I4_0;
+                instruction.operand = null;
+            }
+            yield return instruction;
+        }
         yield return new CodeInstruction(OpCodes.Ret);
     }
 
@@ -103,9 +130,17 @@ static class TechRequireAllGameDrill
     static void SetState(string n, int s) { var t = data.GetValue(Idx(n)); tTech.GetField("TechnologyState").SetValue(t, Enum.ToObject(tTech.GetField("TechnologyState").FieldType, s)); data.SetValue(t, Idx(n)); }
     static bool GameCheck(string n)
     {
-        var def = tTech.GetField("TechnologyDefinition").GetValue(data.GetValue(Idx(n)));
-        var pre = tDef.GetField("TechnologyPrerequisite", ALL).GetValue(def);
-        return (bool)AccessTools.Method(tDept, "CheckTechnologyPrerequisite").Invoke(dept, new[] { pre });
+        AccessTools.Method(tDept, "UpdateTechnologiesState").Invoke(dept, null);
+        return Convert.ToInt32(tTech.GetField("TechnologyState").GetValue(data.GetValue(Idx(n)))) == 2;
+    }
+
+    static void SharePrerequisites(string from, string to)
+    {
+        var definition = tTech.GetField("TechnologyDefinition");
+        var prerequisite = tDef.GetField("TechnologyPrerequisite", ALL);
+        var source = definition.GetValue(data.GetValue(Idx(from)));
+        var destination = definition.GetValue(data.GetValue(Idx(to)));
+        prerequisite.SetValue(destination, prerequisite.GetValue(source));
     }
     static void GameQueue(string n, int pos) => AccessTools.Method(tDept, "AddLockedTechnologyToQueue").Invoke(dept, new object[] { Idx(n), Enum.ToObject(tEnq, pos) });
     static void GameAdd(string n) => AccessTools.Method(tDept, "AddTechnologyToQueue").Invoke(dept, new object[] { Idx(n), Enum.ToObject(tEnq, 1) });
@@ -190,6 +225,10 @@ static class TechRequireAllGameDrill
         h.Patch(AccessTools.Method(tDept, "MoveTechnologyInQueue"), prefix: new HarmonyMethod(typeof(TechRequireAllGameDrill).GetMethod("MoveStub", ALL)));
         h.Patch(AccessTools.Method(tDept, "RemoveTechnologyFromQueueAt"),
             transpiler: new HarmonyMethod(typeof(TechRequireAllGameDrill).GetMethod(nameof(StubRemoveBody), ALL)));
+        h.Patch(AccessTools.Method(tDept, "IsEraValidFor"),
+            prefix: new HarmonyMethod(typeof(TechRequireAllGameDrill).GetMethod(nameof(StubEraCheck), ALL)));
+        h.Patch(AccessTools.Method(tDept, "UpdateTechnologiesState"),
+            transpiler: new HarmonyMethod(typeof(TechRequireAllGameDrill).GetMethod(nameof(StubStateUpdateEnvironment), ALL)));
 
         Console.WriteLine("--- CONTROL: the game's own code, HAF hooks not applied ---");
         Tree(3, 2, 1);
@@ -230,6 +269,17 @@ static class TechRequireAllGameDrill
         Check("listed T: nothing done -> locked", !GameCheck("T"));
         Tree(2, 3, 1);
         Check("listed T: only B done -> LOCKED", !GameCheck("T"));
+
+        Tree(3, 2, 1);
+        SharePrerequisites("T", "U");
+        Check("shared array: listed T stays locked when the unlisted definition comes last", !GameCheck("T"));
+        Check("shared array: unlisted U still unlocks on A", GameCheck("U"));
+
+        Build(("A", new string[0], 3), ("B", new string[0], 2),
+              ("U", new[] { "A", "B" }, 1), ("T", new[] { "A", "B" }, 1));
+        SharePrerequisites("U", "T");
+        Check("shared array: unlisted U unlocks when the listed definition comes last", GameCheck("U"));
+        Check("shared array: listed T still waits for B", !GameCheck("T"));
 
         Tree(2, 2, 1);
         GameQueue("C", 1);

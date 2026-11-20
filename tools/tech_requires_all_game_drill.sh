@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Drive the TechRequireAll hooks against the installed game assemblies. Call the game's prerequisite check,
-# locked enqueue and cascading removal on a DepartmentOfScience built without its constructor. The leaf queue
-# mutations that need a live Sandbox are replaced by list operations. This drill needs an installed game.
+# Drive the TechRequireAll hooks against the installed game assemblies. Call the game's state update loop,
+# locked enqueue and cascading removal on a DepartmentOfScience built without its constructor. Replace the
+# state update's live simulation reads and the leaf queue mutations with stubs. This drill needs an installed game.
 # It runs twice: with a list, and with NO list file (the removal guard must hold then too: a save made with a list
 # keeps its queue constraints).
 #

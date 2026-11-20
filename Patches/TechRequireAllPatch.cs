@@ -12,8 +12,8 @@
 // safe after the list is emptied or switched off. With the plugin uninstalled nothing guards such a save.
 //
 // The lock is only half of the game's rule (decompiled 2026-11-20, DepartmentOfScience):
-//   1. CheckTechnologyPrerequisite — the availability test, called for every technology by UpdateTechnologiesState.
-//      Postfix: a listed technology the game calls available stays locked until all its prerequisites are completed.
+//   1. UpdateTechnologiesState — refine the result of the game's prerequisite check using the technology definition
+//      from that call site. A listed technology stays locked until all its prerequisites are completed.
 //   2. AddLockedTechnologyToQueue — what a click (or the AI) on a LOCKED technology runs. Research is paid into the
 //      queue in order with no look at a technology's state, so the queue's order is the real guard, and vanilla puts
 //      ONE chain of parents in front (one parent per level). Prefix: when a listed technology is in that tree, queue
@@ -35,7 +35,9 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
+using System.Reflection.Emit;
 using BepInEx;
 using HarmonyLib;
 
@@ -47,12 +49,6 @@ namespace HumankindAssetFramework
         static volatile bool loaded;
         [ProcessLived("the list from haf_tech_requires_all.json: read once, replaced whole, never mutated")]
         static volatile HashSet<string> listed = new HashSet<string>(StringComparer.Ordinal);
-        // A technology is recognised in the availability hook by the IDENTITY of its prerequisite-name array: the game
-        // passes the prerequisite struct by value, without the technology it belongs to, but the array inside is the
-        // definition's own. Scenario filtering duplicates definitions per session, so the table is capped, not exact.
-        [ProcessLived("identity table of the game's prerequisite arrays; cleared when it passes ArrayTableCap")]
-        static readonly Dictionary<Array, bool> listedByArray = new Dictionary<Array, bool>();
-        const int ArrayTableCap = 8192;
         static Bind bind;   // resolved under `gate`, read-only afterwards
 
         internal static bool Active
@@ -135,6 +131,14 @@ namespace HumankindAssetFramework
                 UniversalInject.CachedField(t, name) ?? throw new InvalidOperationException($"{t.Name}.{name} not found");
             static MethodInfo M(Type t, string name) =>
                 AccessTools.Method(t, name) ?? throw new InvalidOperationException($"{t.Name}.{name}() not found");
+
+            public Array NamesOf(object def) => def == null ? null : Names.GetValue(Prerequisite.GetValue(def)) as Array;
+            public string NameOf(object def)
+            {
+                if (def == null) return "";
+                var value = Name is PropertyInfo p ? p.GetValue(def, null) : ((FieldInfo)Name).GetValue(def);
+                return value?.ToString() ?? "";
+            }
         }
 
         static Bind BindFor(object dept)
@@ -159,14 +163,7 @@ namespace HumankindAssetFramework
             public object Def(int i) => b.Definition.GetValue(techs.GetValue(i));
             public TechRequireAllRules.State State(int i) => (TechRequireAllRules.State)Convert.ToInt32(b.State.GetValue(techs.GetValue(i)));
             public bool InQueue(int i) => (bool)b.InQueue.GetValue(techs.GetValue(i));
-            public Array NamesOf(object def) => def == null ? null : b.Names.GetValue(b.Prerequisite.GetValue(def)) as Array;
-            public string NameOf(object def)
-            {
-                if (def == null) return "";
-                var v = b.Name is PropertyInfo p ? p.GetValue(def, null) : ((FieldInfo)b.Name).GetValue(def);
-                return v?.ToString() ?? "";
-            }
-            public bool Listed(int i) => listed.Contains(NameOf(Def(i)));
+            public bool Listed(int i) => listed.Contains(b.NameOf(Def(i)));
             public int[] IndicesOf(Array names)
             {
                 var idx = new int[names?.Length ?? 0];
@@ -175,50 +172,39 @@ namespace HumankindAssetFramework
             }
             public int[] Prerequisites(int i)
             {
-                if (!prereqMemo.TryGetValue(i, out var idx)) prereqMemo[i] = idx = IndicesOf(NamesOf(Def(i)));
+                if (!prereqMemo.TryGetValue(i, out var idx)) prereqMemo[i] = idx = IndicesOf(b.NamesOf(Def(i)));
                 return idx;
             }
         }
 
-        // Is the technology that owns this prerequisite-name array in the list? First sight of an unknown array indexes
-        // the whole department in one pass (and says once which listed names this game does not hold).
-        static bool ListedArray(View v, Array names)
+        static void ReportList(Bind b, object dept)
         {
-            lock (gate)
+            if (!Plugin.Once("techall:census")) return;
+            var v = new View(b, dept);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var single = new List<string>();
+            for (int i = 0; i < v.Count; i++)
             {
-                if (listedByArray.TryGetValue(names, out bool known)) return known;
-                if (listedByArray.Count > ArrayTableCap) listedByArray.Clear();
-                var seen = new HashSet<string>(StringComparer.Ordinal);
-                var single = new List<string>();
-                for (int i = 0; i < v.Count; i++)
-                {
-                    var def = v.Def(i);
-                    var arr = v.NamesOf(def);
-                    string name = v.NameOf(def);
-                    bool isListed = listed.Contains(name);
-                    if (isListed) { seen.Add(name); if ((arr?.Length ?? 0) < 2) single.Add(name); }
-                    if (arr != null && arr.Length >= 2) listedByArray[arr] = isListed;   // shorter arrays may be shared, and ANY equals ALL for them
-                }
-                if (Plugin.Once("techall:census"))
-                {
-                    var missing = new List<string>();
-                    foreach (var n in listed) if (!seen.Contains(n)) missing.Add(n);
-                    if (missing.Count > 0) Plugin.Log.LogWarning($"[TechAll] {missing.Count} listed name(s) are not technologies in this game (no effect): {string.Join(", ", missing.ToArray())}");
-                    if (single.Count > 0) Plugin.Log.LogWarning($"[TechAll] {single.Count} listed technolog{(single.Count == 1 ? "y has" : "ies have")} fewer than two prerequisites (no effect): {string.Join(", ", single.ToArray())}");
-                }
-                if (!listedByArray.TryGetValue(names, out known)) listedByArray[names] = known = false;   // not a technology of this department
-                return known;
+                var def = v.Def(i);
+                string name = b.NameOf(def);
+                if (!listed.Contains(name)) continue;
+                seen.Add(name);
+                if ((b.NamesOf(def)?.Length ?? 0) < 2) single.Add(name);
             }
+            var missing = listed.Where(n => !seen.Contains(n)).OrderBy(n => n, StringComparer.Ordinal).ToArray();
+            if (missing.Length > 0) Plugin.Log.LogWarning($"[TechAll] {missing.Length} listed name(s) are not technologies in this game (no effect): {string.Join(", ", missing)}");
+            if (single.Count > 0) Plugin.Log.LogWarning($"[TechAll] {single.Count} listed technolog{(single.Count == 1 ? "y has" : "ies have")} fewer than two prerequisites (no effect): {string.Join(", ", single)}");
         }
 
         /// <summary>The availability hook: the game says "available"; true = the ALL rule says it is still locked.</summary>
-        internal static bool StillLocked(object dept, object prerequisite)
+        internal static bool StillLocked(object dept, object definition)
         {
             var b = BindFor(dept);
-            var names = b.Names.GetValue(prerequisite) as Array;
+            ReportList(b, dept);
+            if (!listed.Contains(b.NameOf(definition))) return false;
+            var names = b.NamesOf(definition);
             if (names == null || names.Length < 2) return false;
             var v = new View(b, dept);
-            if (!ListedArray(v, names)) return false;
             return !TechRequireAllRules.AllCompleted(v.IndicesOf(names), v.State);
         }
 
@@ -233,7 +219,7 @@ namespace HumankindAssetFramework
             if (target < 0 || target >= v.Count || v.State(target) != TechRequireAllRules.State.LockedByTechnology) return false;
             var plan = TechRequireAllRules.PlanQueue(target, v.Prerequisites, v.State, v.InQueue, v.Listed);
             if (!plan.UsesRequireAll) return false;
-            string targetName = v.NameOf(v.Def(target));
+            string targetName = b.NameOf(v.Def(target));
             if (!plan.Ok)
             {
                 Plugin.LogOnceWarning("techall:plan:" + targetName, $"[TechAll] '{targetName}' was not queued: {plan.Why}.");
@@ -281,17 +267,52 @@ namespace HumankindAssetFramework
         static MethodBase TargetMethod()
         {
             var t = GameBinding.DepartmentOfScience;
-            var m = t != null ? AccessTools.Method(t, "CheckTechnologyPrerequisite") : null;
-            if (m != null) Plugin.Log.LogInfo("[TechAll] hooked DepartmentOfScience.CheckTechnologyPrerequisite (listed technologies need ALL prerequisites)");
-            else Plugin.Log.LogWarning("[TechAll] NOT found: DepartmentOfScience.CheckTechnologyPrerequisite — listed technologies unlock on ANY prerequisite (vanilla)");
+            var m = t != null ? AccessTools.Method(t, "UpdateTechnologiesState") : null;
+            if (m == null) Plugin.Log.LogWarning("[TechAll] NOT found: DepartmentOfScience.UpdateTechnologiesState — listed technologies unlock on ANY prerequisite (vanilla)");
             return m;
         }
-        // only ever turns the game's "available" into "locked"; any failure = the game's answer
-        static void Postfix(object __instance, object[] __args, ref bool __result)
+
+        static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions, ILGenerator generator)
         {
-            if (!__result || !TechRequireAll.Active) return;
-            try { if (TechRequireAll.StillLocked(__instance, __args[0])) __result = false; }
-            catch (Exception ex) { Plugin.LogOnceWarning("techall:check:" + ex.GetType().Name, "[TechAll] availability check failed — the game's own answer stands (first occurrence): " + ex); }
+            var check = AccessTools.Method(GameBinding.DepartmentOfScience, "CheckTechnologyPrerequisite");
+            var field = AccessTools.Field(GameBinding.TechnologyDefinition, "TechnologyPrerequisite");
+            var code = instructions.ToList();
+            var calls = code.Select((instruction, index) => (instruction, index))
+                            .Where(x => check != null && x.instruction.Calls(check)).Select(x => x.index).ToArray();
+            if (field == null || calls.Length != 1 || calls[0] == 0)
+                throw new InvalidOperationException("Expected one prerequisite check in DepartmentOfScience.UpdateTechnologiesState");
+            int call = calls[0];
+            var load = code[call - 1];
+            if (load.opcode != OpCodes.Ldfld || !Equals(load.operand, field) || code[call].labels.Count != 0 ||
+                load.blocks.Count != 0 || code[call].blocks.Count != 0 || field.DeclaringType.IsValueType)
+                throw new InvalidOperationException("Expected a technology definition field load before the prerequisite check");
+
+            // Keep the exact definition on a local before the game's call consumes its prerequisite struct.
+            // Another definition can share that same struct's array but have a different configured rule.
+            var definition = generator.DeclareLocal(field.DeclaringType);
+            var applyRequirement = ((Func<bool, object, object, bool>)ApplyRequirement).Method;
+            var copy = new CodeInstruction(OpCodes.Dup);
+            copy.labels.AddRange(load.labels);
+            load.labels.Clear();
+            code.InsertRange(call + 1, new[] {
+                new CodeInstruction(OpCodes.Ldarg_0),
+                new CodeInstruction(OpCodes.Ldloc, definition),
+                new CodeInstruction(OpCodes.Call, applyRequirement)
+            });
+            code.InsertRange(call - 1, new[] { copy, new CodeInstruction(OpCodes.Stloc, definition) });
+            Plugin.Log.LogInfo("[TechAll] hooked DepartmentOfScience.UpdateTechnologiesState (listed technologies need ALL prerequisites)");
+            return code;
+        }
+
+        static bool ApplyRequirement(bool available, object department, object definition)
+        {
+            if (!available || !TechRequireAll.Active) return available;
+            try { return !TechRequireAll.StillLocked(department, definition); }
+            catch (Exception ex)
+            {
+                Plugin.LogOnceWarning("techall:check:" + ex.GetType().Name, "[TechAll] availability check failed — the game's own answer stands (first occurrence): " + ex);
+                return available;
+            }
         }
     }
 

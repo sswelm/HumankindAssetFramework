@@ -24,8 +24,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   `[Technologies] TechRequireAll = false`; the lock and the queue plan are inert without the file. It changes the
   simulation, so multiplayer needs the
   same list on every machine. Checked: 23 unit tests on the rules; a drill of the hooks against the installed game's
-  assemblies with the unpatched game as the control (21 checks with a list, 9 without one, .NET Framework and the Unity
-  editor's Mono); a drill of
+  assemblies with the unpatched game as the control (25 checks with a list, 9 without one, .NET Framework and the Unity
+  editor's Mono). The availability rule now uses the actual technology definition, so listed and unlisted definitions
+  can share a prerequisite array and still get their own rules. A drill of
   the real window in a temporary Unity project (14 checks, deployed files read back by the plugin's parser); every
   bound game member resolves (bindcheck). Not checked: nothing was run in the game - the tech screen, a real research
   queue, the AI and a multiplayer session are untested. Not covered: a technology already in a saved queue behind one
