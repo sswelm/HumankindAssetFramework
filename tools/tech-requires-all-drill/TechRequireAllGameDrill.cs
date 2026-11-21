@@ -354,11 +354,11 @@ static class TechRequireAllGameDrill
         labelSets = 0;
         RefreshItem(itemT);
         Check("listed T: marked, and the tooltip names its prerequisites (internal names until their items are seen)",
-              Shown(itemT) == "[SharedProject] Tee | desc\\n<i>Requires both A and B</i>", Shown(itemT));
+              Shown(itemT) == "[SharedProject] Tee | desc\\n[SharedProject] <i>Requires both A and B</i>", Shown(itemT));
         RefreshItem(itemA); RefreshItem(itemB);
         Check("prerequisites A and B themselves: untouched", Shown(itemA) == "Alpha | desc" && Shown(itemB) == "Beta | desc", Shown(itemA) + " || " + Shown(itemB));
         RefreshItem(itemT);
-        Check("listed T: the tooltip now uses the titles the screen showed for A and B", Shown(itemT) == "[SharedProject] Tee | desc\\n<i>Requires both Alpha and Beta</i>", Shown(itemT));
+        Check("listed T: the tooltip now uses the titles the screen showed for A and B", Shown(itemT) == "[SharedProject] Tee | desc\\n[SharedProject] <i>Requires both Alpha and Beta</i>", Shown(itemT));
         RefreshItem(itemT);
         Check("listed T: three refreshes wrote its label once", labelSets == 1, "label writes " + labelSets);
         RefreshItem(itemU);

@@ -496,11 +496,11 @@ namespace HumankindAssetFramework
                                   "Empty = no mark. Display only.");
             TechRequireAllTooltip = Config.Bind("Technologies", "TechRequireAllTooltip", TechRequireAllRules.DefaultTooltip,
                                   "The line added to the tooltip of such a technology on the tech screen when it has exactly TWO " +
-                                  "prerequisites: {0} is the first one's title, {1} the second's. The game's text markup works (<i>, <b>, " +
+                                  "prerequisites: {0} is the first one's title, {1} the second's, {2} the mark above. The game's text markup works (<i>, <b>, " +
                                   "<c=RRGGBB>). Empty = no line. Display only.");
             TechRequireAllTooltipMany = Config.Bind("Technologies", "TechRequireAllTooltipMany", TechRequireAllRules.DefaultTooltipMany,
                                   "The same line for a technology with THREE OR MORE prerequisites: {0} is every title but the last, " +
-                                  "comma-separated, {1} the last. Without {1} the whole list goes into {0}. Empty = no line. Display only.");
+                                  "comma-separated, {1} the last, {2} the mark. Without {1} the whole list goes into {0}. Empty = no line. Display only.");
 
             // Patch each hook independently so a single missing Amplitude target (a game update renaming one type) only
             // disables THAT hook -- instead of a null TargetMethod throwing out of PatchAll and failing the whole plugin.

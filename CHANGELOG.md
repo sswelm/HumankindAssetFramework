@@ -12,8 +12,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 - **The tech screen marks a technology that needs ALL its prerequisites (2026-11-21).** A technology in the Tech
   Requires All list now carries a mark in front of its title on the tech screen, and its tooltip ends with a line that
-  names the prerequisites it waits for, in italics: *Requires both Multimedia Computer and Ethernet*, or *Requires all
-  of A, B and C* for three or more. One display-only hook on
+  names the prerequisites it waits for, in italics behind the same mark: *Requires both Multimedia Computer and
+  Ethernet*, or *Requires all of A, B and C* for three or more (`{2}` in the two texts is the mark, so one setting
+  changes the icon in both places). One display-only hook on
   `TechnologyItem.RefreshTooltips` (main thread; the first HAF code that writes game UI); the prerequisite titles are
   the ones the screen itself resolved. The texts are config: `[Technologies] TechRequireAllMark` (default
   `[SharedProject]`, the game's branching symbol; the game's text markup works, so an inline symbol or a colour can be

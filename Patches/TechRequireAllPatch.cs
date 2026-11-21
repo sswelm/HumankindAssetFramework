@@ -439,7 +439,7 @@ namespace HumankindAssetFramework
             var shown = new string[prerequisites.Length];
             for (int k = 0; k < shown.Length; k++)
                 shown[k] = titles.TryGetValue(prerequisites[k], out var t) ? t : prerequisites[k];
-            string line = TechRequireAllRules.TooltipLine(Tooltip, TooltipMany, shown);
+            string line = TechRequireAllRules.TooltipLine(Tooltip, TooltipMany, shown, mark);
             if (line.Length == 0) return;
             string description = b.Description.GetValue(target) as string;
             string with = TechRequireAllRules.WithTooltipLine(description, line);

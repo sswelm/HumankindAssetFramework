@@ -56,7 +56,10 @@ cascade takes T before B and nothing is visited twice). The script then runs a s
 saved queue is still removed cleanly, because the removal guard is not gated on the list. With the old list-gated guard planted back, that run fails with
 the game's `ArgumentOutOfRangeException`. Leaf queue mutations that need the live Sandbox are replaced by list
 operations.
-Set `HAF_DRILL_MONO` to run the checks under the Unity editor's Mono as well.
+Set `HAF_DRILL_MONO` to run the checks under the Unity editor's Mono as well. That Mono crashes while exiting, and the
+script compares its exit code with a load-only control (139). On 2026-11-21, with the push gate and the game running
+beside it, one run of three exited 127 after `DRILL PASS` and was reported as a failure; two reruns exited 139. A
+failure of that shape (every check passed, only the exit code differs) is the runtime's exit, not the hooks: rerun.
 `bash tools/tech_requires_all_unity_drill.sh` drives the real window in a
 temporary Unity project (add, save, reopen, remove; 14 checks) and reads every deployed file back with the plugin's
 parser; the tech tree is injected, so the picker's list over a real modding project is not exercised. Neither drill is

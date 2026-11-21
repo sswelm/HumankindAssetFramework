@@ -529,13 +529,14 @@ windows. **Deep dive:**
   already in a saved research queue behind one prerequisite keeps that place, and anything that completes a technology
   outside the research queue.
   **On the tech screen (2026-11-21)** a listed technology carries a mark in front of its title and its tooltip ends
-  with a line in italics that names the prerequisites it waits for: *Requires both Multimedia Computer and Ethernet*,
-  or *Requires all of A, B and C* for three or more. All of it is display only and set in the plugin's `.cfg`:
+  with a line in italics, behind the same mark, that names the prerequisites it waits for: *Requires both Multimedia
+  Computer and Ethernet*, or *Requires all of A, B and C* for three or more. All of it is display only and set in the plugin's `.cfg`:
   `[Technologies] TechRequireAllMark` (default `[SharedProject]`, the game's own branching symbol; plain text or the
   game's own text markup, an inline symbol such as `[Technology]` or a colour as `<c=FFCC66>&</c>`; empty = no mark),
-  `TechRequireAllTooltip` for a technology with two prerequisites (default `<i>Requires both {0} and {1}</i>`) and
-  `TechRequireAllTooltipMany` for three or more (default `<i>Requires all of {0} and {1}</i>`; `{0}` = every title but
-  the last, comma-separated, `{1}` = the last; without `{1}` the whole list goes into `{0}`; empty = no line). A listed
+  `TechRequireAllTooltip` for a technology with two prerequisites (default `{2} <i>Requires both {0} and {1}</i>`) and
+  `TechRequireAllTooltipMany` for three or more (default `{2} <i>Requires all of {0} and {1}</i>`; `{0}` = every title
+  but the last, comma-separated, `{1}` = the last, `{2}` = the mark, so one setting changes the icon in both places;
+  without `{1}` the whole list goes into `{0}`; empty = no line). A listed
   technology with fewer than two prerequisites gets neither. Only the tech screen's nodes are marked, not the search results or notifications.
   **Saves:** a research queue planned under a list is saved with its ordering constraints. The plugin keeps such a save
   safe whether or not the list is still there; loaded with the plugin **uninstalled**, removing a queued prerequisite
