@@ -21,6 +21,7 @@ public static class TechRequireAllWindowDrill
     static string output, config;
     static readonly System.Text.StringBuilder log = new System.Text.StringBuilder();
     static readonly List<string> errors = new List<string>();
+    static readonly List<string> warnings = new List<string>();   // the viewer's own warnings, for the checks that expect one
     static int failed, step, draws;
     static double deadline;
     static TechRequireAllWindow window;
@@ -142,6 +143,7 @@ public static class TechRequireAllWindowDrill
                 // the tech-tree read finds no game types in a bare project and says so: expected here, and replaced by InjectTree
                 if ((type == LogType.Error || type == LogType.Exception || type == LogType.Assert) && !msg.StartsWith("[TechTree] Tech/Mapper type not found"))
                     errors.Add(type + ": " + msg);
+                if (type == LogType.Warning && msg.StartsWith("[TechTree]")) warnings.Add(msg);
             };
             OpenWindow();
             deadline = EditorApplication.timeSinceStartup + 60;
@@ -500,7 +502,7 @@ public static class TechRequireAllWindowDrill
                           TechTreeWindow.RuleNote(1, RegistryRules.SaveOutcome.Saved, false, false) == ", 1 rule switch (OR / AND): the list already held it, so nothing was written or deployed",
                           TechTreeWindow.RuleNote(1, RegistryRules.SaveOutcome.Saved, false, false));
                     Check("save line: written, refused and unsettled each say their own thing",
-                          TechTreeWindow.RuleNote(2, RegistryRules.SaveOutcome.Saved, true, false).Contains("relaunch the game to apply") && TechTreeWindow.RuleNote(2, RegistryRules.SaveOutcome.Saved, true, false).EndsWith("(a rule switch is not part of Undo)")
+                          TechTreeWindow.RuleNote(2, RegistryRules.SaveOutcome.Saved, true, false).EndsWith("relaunch the game to apply")
                           && TechTreeWindow.RuleNote(2, RegistryRules.SaveOutcome.Saved, true, true).Contains("not refreshed yet")
                           && TechTreeWindow.RuleNote(2, RegistryRules.SaveOutcome.Refused, false, false).Contains("REFUSED") && TechTreeWindow.RuleNote(2, RegistryRules.SaveOutcome.Unknown, false, false).Contains("could NOT be confirmed")
                           && TechTreeWindow.RuleNote(2, RegistryRules.SaveOutcome.Unknown, false, false).EndsWith("kept staged unless the reload that follows finds them there"));
@@ -533,6 +535,21 @@ public static class TechRequireAllWindowDrill
                     Check("save into assets: every written part left the staged set, and the reload reads them back",
                           Staged == 0 && (int)VCall("EffX", N(M)) == 20 && (int)VCall("EffY", N(M)) == 6 && (int)VCall("EffVisibility", N(M)) == 0 && Prereqs(M).SequenceEqual(new[] { "Technology_A" }), "staged " + Staged);
                     Check("save: the view is the one from before it", VGet<Vector2>("_pan") == new Vector2(-123, 45) && VGet<float>("_zoom") == 0.7f, VGet<Vector2>("_pan") + " zoom " + VGet<float>("_zoom"));
+                    // A Save is not part of Undo. On the real ENC data (review round 3) Ctrl+Z after a Save took the saved
+                    // positions back in memory, silently, and the next Save wrote the old values over them.
+                    Undo.PerformUndo();
+                    mMap = Asset<TechTreeDrillMapper>(DbMaps + "/" + M + ".asset"); mDef = Asset<TechTreeDrillDefinition>(DbDefs + "/" + M + ".asset");
+                    Check("undo after a save takes nothing of the save back", mMap.TechTreeX == 20 && mMap.TechTreeY == 6 && mDef.Visibility == TechTreeDrillDefinition.Flags.Never && NamesOf(mDef).SequenceEqual(new[] { "Technology_A" })
+                          && (int)VCall("EffX", N(M)) == 20 && Staged == 0, mMap.TechTreeX + "," + mMap.TechTreeY + " " + mDef.Visibility);
+                    // An undo from elsewhere that does change a technology in memory is shown AND said
+                    int warnedBefore = warnings.Count(w => w.Contains("Undo / Redo changed"));
+                    mMap.TechTreeX = 99;   // what such an undo leaves: the object changed, the file not
+                    VCall("OnUndoRedo");
+                    Check("an undo that changes a technology in memory is shown and said in the Console",
+                          (int)VCall("EffX", N(M)) == 99 && warnings.Count(w => w.Contains("Undo / Redo changed 1 technology in memory (Em)")) == warnedBefore + 1, string.Join(" | ", warnings.Where(w => w.Contains("Undo"))));
+                    mMap.TechTreeX = 20;
+                    VCall("OnUndoRedo");
+                    Check("    and the wording for several", TechTreeWindow.UndoNote(3, "Em").StartsWith("Undo / Redo changed 3 technologies in memory (Em, ...): position, prerequisites or visibility are now different from the file on disk"));
                     break;
                 }
                 case 12:

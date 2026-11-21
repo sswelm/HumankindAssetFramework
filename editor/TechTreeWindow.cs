@@ -30,8 +30,9 @@ using UnityEngine;
 ///    A card shows its artwork: the project's own image file, or one of the game's own out of the game's UI bundle
 ///    (TechTreeData.ArtPathOf, TechTreeVanillaArt, ArtRect).
 ///  - Editing is ON when the window opens and the choice is remembered (EditorPrefs "TechTree.EditMode").
-///  - Save writes part by part (CommitChanges), says what each outcome guarantees (RuleNote), and never writes a
-///    technology that is not in the tree.
+///  - Save writes part by part (CommitChanges), says what each outcome guarantees (RuleNote), never writes a
+///    technology that is not in the tree, and is NOT registered with Undo; an undo that changes technology assets
+///    in memory is said (OnUndoRedo).
 ///  - Frame All may zoom below the wheel's floor (MIN_ZOOM); a drag starts after a few pixels and not on a card
 ///    that is only a pixel or two high.
 ///  - Seams and hooks for the list's window and the drill: BuildTreeImpl, RepaintOpenWindows.
@@ -242,11 +243,32 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 
     void OnUndoRedo()
     {
-        // An undo/redo changed an asset on disk; rebuild from disk but keep the view. Not the rules: the list is not
-        // under Undo, and this fires for every undo anywhere in the editor.
+        // Undo is not this window's: a Save here is not registered with it (see CommitChanges) and staged edits never
+        // were. But an undo anywhere in the editor can still change technology assets IN MEMORY (an Inspector edit, a
+        // Save by an older version of this window in the same session). The window shows that state and SAYS so: it is
+        // not on disk yet, and the project's next save writes it. Not the rules: the list is not under Undo, and this
+        // fires for every undo anywhere in the editor.
+        var before = _byName;
         Reload(keepView: true, rules: false);
+        int changed = 0; string example = null;
+        if (before != null)
+            foreach (var n in _nodes)
+                if (before.TryGetValue(n.Name, out var was)
+                    && (was.BaseX != n.BaseX || was.BaseY != n.BaseY || was.BaseVisibility != n.BaseVisibility
+                        || !(was.BasePrereqs ?? new string[0]).SequenceEqual(n.BasePrereqs ?? new string[0])))
+                { changed++; if (example == null) example = n.Label ?? n.Name; }
+        if (changed > 0)
+        {
+            string note = UndoNote(changed, example);
+            Debug.LogWarning("[TechTree] " + note);
+            ShowNotification(new GUIContent(note), 10);
+        }
         Repaint();
     }
+
+    internal static string UndoNote(int changed, string example) =>
+        $"Undo / Redo changed {changed} technolog{(changed == 1 ? "y" : "ies")} in memory ({example}{(changed > 1 ? ", ..." : "")}): position, prerequisites or visibility " +
+        "are now different from the file on disk, and the next save of the project writes them as they are shown here. Redo (or Undo) once more takes this back.";
 
     // Seam for the drill (tools/tech_requires_all_unity_drill.sh): its temporary project holds no technology assets.
     internal static Func<string, List<TechTreeData.Node>> BuildTreeImpl = modPath => TechTreeData.Build(modPath);
@@ -392,7 +414,8 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         using (new EditorGUI.DisabledScope(live == 0))
         {
             GUI.backgroundColor = live > 0 ? EDIT_DOT : Color.white;
-            if (GUILayout.Button(SaveLabel(live, missing), EditorStyles.toolbarButton, GUILayout.Width(missing > 0 ? 150 : 80)))
+            if (GUILayout.Button(new GUIContent(SaveLabel(live, missing), "Writes the staged edits into the assets and the Tech Requires All list. A Save is not part of Undo: Ctrl+Z does not take it back (Revert discards edits BEFORE they are saved)."),
+                                 EditorStyles.toolbarButton, GUILayout.Width(missing > 0 ? 150 : 80)))
                 CommitChanges();
             GUI.backgroundColor = Color.white;
         }
@@ -1026,7 +1049,10 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 var mapper = TechTreeData.EnsureWritable(node, true, _modPath);
                 if (mapper != null)
                 {
-                    Undo.RecordObject(mapper, "Tech position");
+                    // NOT registered with Undo, on purpose (review 2026-11-21, executed on the real ENC data). With it,
+                    // a later Ctrl+Z — pressed to take back a staged drag, which Undo never held — took the SAVED
+                    // positions back in memory while the file kept them, said nothing, and the next Save wrote the
+                    // old values over the saved ones under "Saved: 1 position".
                     TechTreeData.WritePosition(mapper, p.X ?? node.BaseX, p.Y ?? node.BaseY);
                     EditorUtility.SetDirty(mapper);
                     pos++; p.X = null; p.Y = null;
@@ -1041,7 +1067,6 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 if (def == null) skipped += (p.Prereqs != null ? 1 : 0) + (p.Visibility.HasValue ? 1 : 0);
                 else
                 {
-                    Undo.RecordObject(def, "Tech definition");
                     if (p.Prereqs != null)
                     {
                         if (TechTreeData.WritePrereqs(def, p.Prereqs.ToArray())) { pre++; p.Prereqs = null; }
@@ -1095,7 +1120,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             return $", {what}: the list already held {(count == 1 ? "it" : "them")}, so nothing was written or deployed";
         return (deployPending
             ? $", {what} — written to the project, but the game's {TechRequireAllRegistry.ArtifactName} is not refreshed yet (see the Console)"
-            : $", {what} -> {TechRequireAllRegistry.ArtifactName}; relaunch the game to apply") + " (a rule switch is not part of Undo)";
+            : $", {what} -> {TechRequireAllRegistry.ArtifactName}; relaunch the game to apply");
     }
 
     void RevertChanges()
