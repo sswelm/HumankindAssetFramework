@@ -72,7 +72,7 @@ public static class TechRequireAllWindowDrill
         TechTreeWindow.BuildTreeImpl = _ =>
         {
             var tree = Tree();
-            tree[1].BaseX = 8; tree[2].BaseX = 16; tree[2].BaseY = 4; tree[3].BaseX = 16; tree[3].BaseY = 9;
+            tree[1].BaseX = 8; tree[1].BaseY = -2; tree[2].BaseX = 16; tree[2].BaseY = 4; tree[3].BaseX = 16; tree[3].BaseY = 9;
             return tree;
         };
         viewer = ScriptableObject.CreateInstance<TechTreeWindow>();   // OnEnable: reads the tree and the list
@@ -229,7 +229,7 @@ public static class TechRequireAllWindowDrill
                 case 9:
                     errors.RemoveAll(e => e.Contains("[TechAll]"));   // the broken list, said again by the draws in between
                     File.WriteAllText(TechRequireAllRegistry.SourcePath, goodSource);
-                    VCall("Reload", true);
+                    VCall("Reload", true, true);
                     Check("viewer: the repaired list is read again and the staged switch survived", !VGet<bool>("_rulesUnreadable") && Staged == 1 && !All("Technology_S"), "staged " + Staged);
                     VCall("CommitChanges");
                     Check("viewer save: S is back under OR and the list is empty", Deployed == "" && Staged == 0, Deployed + " staged " + Staged);
@@ -264,13 +264,27 @@ public static class TechRequireAllWindowDrill
                     Check("visibility: the tech-screen bit decides (Always and TechnologyScreen show, Never and the popup-only value do not)",
                           TechTreeData.OnTechScreen(-1) && TechTreeData.OnTechScreen(1) && !TechTreeData.OnTechScreen(0) && !TechTreeData.OnTechScreen(2));
                     VCall("SetVisibility", N("Technology_T"), 0);
-                    Check("visibility: switching to Invisible is staged", (int)VCall("EffVisibility", N("Technology_T")) == 0 && (bool)VCall("Hidden", N("Technology_T")) && Staged == 1);
+                    Check("visibility: switching off is staged, and the card counts as not on the tech screen", (int)VCall("EffVisibility", N("Technology_T")) == 0 && (bool)VCall("Hidden", N("Technology_T")) && Staged == 1);
                     VCall("SetVisibility", N("Technology_T"), -1);
                     Check("visibility: switching back is no change", (int)VCall("EffVisibility", N("Technology_T")) == -1 && Staged == 0);
-                    Check("visibility: the note names an invisible technology and says nothing for the usual case",
-                          TechTreeWindow.VisibilityNote("Future Technology", 0) == "Future Technology is INVISIBLE: the game does not show it on its tech screen (Visibility = Never). Its card is faint here."
-                          && TechTreeWindow.VisibilityNote("Future Technology", -1) == "" && TechTreeWindow.VisibilityNote("X", 1).Contains("Visibility = TechnologyScreen"),
-                          TechTreeWindow.VisibilityNote("Future Technology", 0));
+                    // The switch is "in the game" (any value but Never) against "switched off" (Never): the game creates a
+                    // technology for an empire only when Visibility != 0 (DepartmentOfScience.CreateTechnologies).
+                    Check("visibility: 'In the game' keeps a value that already is in the game and turns Never into Always; 'Switched off' is Never",
+                          TechTreeWindow.SwitchedVisibility(-1, true) == -1 && TechTreeWindow.SwitchedVisibility(0, true) == -1
+                          && TechTreeWindow.SwitchedVisibility(1, true) == 1 && TechTreeWindow.SwitchedVisibility(2, true) == 2
+                          && TechTreeWindow.SwitchedVisibility(-1, false) == 0 && TechTreeWindow.SwitchedVisibility(2, false) == 0 && TechTreeWindow.SwitchedVisibility(0, false) == 0);
+                    Check("visibility: the note says a Never technology is switched off in the game, not merely hidden",
+                          TechTreeWindow.VisibilityNote("Future Technology", 0, null) == "Future Technology is SWITCHED OFF (Visibility = Never): the game does not create it for any empire. It is not on the tech screen and cannot be researched, traded or granted."
+                          && TechTreeWindow.VisibilityNote("Future Technology", -1, null) == "",
+                          TechTreeWindow.VisibilityNote("Future Technology", 0, null));
+                    Check("visibility: the note names what depends on a switched-off technology",
+                          TechTreeWindow.VisibilityNote("X", 0, new List<string> { "Alpha", "Beta" }).EndsWith(" 2 technologies name it as a prerequisite (Alpha, Beta): one that names no other can never unlock.")
+                          && TechTreeWindow.VisibilityNote("X", 0, new List<string> { "Alpha" }).Contains(" 1 technology names it as a prerequisite (Alpha)"),
+                          TechTreeWindow.VisibilityNote("X", 0, new List<string> { "Alpha", "Beta" }));
+                    Check("visibility: a value that is in the game is named as it is, with or without a card on the tech screen",
+                          TechTreeWindow.VisibilityNote("X", 1, null) == "X is in the game and on its tech screen, with Visibility = TechnologyScreen (not Always)."
+                          && TechTreeWindow.VisibilityNote("X", 2, null) == "X is in the game but has NO card on its tech screen (Visibility = ControlBannerTechnologyPopup).",
+                          TechTreeWindow.VisibilityNote("X", 2, null));
                     var fakeDef = ScriptableObject.CreateInstance<TechTreeDrillDefinition>();
                     Check("visibility: read from a definition's field as its number", TechTreeData.ReadVisibility(fakeDef) == -1);
                     Check("visibility: written to the field as the enum's value, and read back",
@@ -308,6 +322,70 @@ public static class TechRequireAllWindowDrill
                     Check("canvas: five rows down is 89 px at zoom 1 (17.8 per row), the same column the same x",
                           Mathf.Abs((rectS.y - rectT.y) / VGet<float>("_zoom") - 5 * 17.8f) < 0.01f && Mathf.Abs(rectS.x - rectT.x) < 0.01f, rectS + " vs " + rectT);
                     break;
+                case 10:
+                {
+                    // ---- the fixes of the first review round (2026-11-21) ----
+                    const string T = "Technology_T";
+                    VCall("SetPosition", N(T), 20, 4); VCall("SetVisibility", N(T), 0); VCall("SetRule", N(T), true);
+                    var fullTree = TechTreeWindow.BuildTreeImpl;
+                    TechTreeWindow.BuildTreeImpl = _ => fullTree(null).Where(n => n.Name != T).ToList();
+                    VCall("Reload", true, false);
+                    Check("a reload that does not find a technology keeps its staged edits", Staged == 1, "staged " + Staged);
+                    VCall("CommitChanges");
+                    Check("    a save while it is absent writes nothing of it and keeps it staged", Staged == 1 && Deployed == "", Deployed + " staged " + Staged);
+                    TechTreeWindow.BuildTreeImpl = fullTree;
+                    VCall("Reload", true, false);
+                    Check("    and with the technology back the same edits apply", (int)VCall("EffX", N(T)) == 20 && (int)VCall("EffVisibility", N(T)) == 0 && All(T) && Staged == 1);
+                    // a script reload: Unity serializes the window and builds its fields again
+                    VSet("_selected", N(T));
+                    string frozen = EditorJsonUtility.ToJson(viewer);
+                    ((System.Collections.IDictionary)typeof(TechTreeWindow).GetField("_pending", Private).GetValue(viewer)).Clear();
+                    VSet("_selected", null);
+                    EditorJsonUtility.FromJsonOverwrite(frozen, viewer);
+                    VCall("Reload", true, false);
+                    Check("a script reload keeps every kind of staged edit and the selection",
+                          Staged == 1 && (int)VCall("EffX", N(T)) == 20 && (int)VCall("EffVisibility", N(T)) == 0 && All(T) && ReferenceEquals(VGet<TechTreeData.Node>("_selected"), N(T)),
+                          "staged " + Staged + " selected " + (VGet<TechTreeData.Node>("_selected")?.Name ?? "none"));
+                    VCall("CommitChanges");   // the rule is written; position and visibility have no asset here and stay
+                    Check("save: the written part (the rule) leaves the overlay, the parts without an asset stay",
+                          Deployed == T && Staged == 1 && (int)VCall("EffX", N(T)) == 20 && (int)VCall("EffVisibility", N(T)) == 0 && VGet<HashSet<string>>("_requireAll").Contains(T), Deployed + " staged " + Staged);
+                    VCall("SetPosition", N(T), 16, 4); VCall("SetVisibility", N(T), -1);
+                    Check("    typed back: nothing staged", Staged == 0, "staged " + Staged);
+                    VCall("SetRule", N(T), false); VCall("CommitChanges");
+                    Check("    the list is empty again", Deployed == "" && Staged == 0, Deployed);
+
+                    // the floor at 0 is for the axis being changed: B sits at (8, -2)
+                    const string B = "Technology_B";
+                    VCall("SetPosition", N(B), 9, -2);
+                    Check("position: typing X leaves a negative Y alone", (int)VCall("EffX", N(B)) == 9 && (int)VCall("EffY", N(B)) == -2);
+                    VCall("SetPosition", N(B), 9, -5);
+                    Check("position: a typed negative Y is floored at 0", (int)VCall("EffY", N(B)) == 0);
+                    VCall("SetPosition", N(B), 8, -2);
+                    Check("position: the saved negative value can be typed back", Staged == 0, "staged " + Staged);
+
+                    // Frame All: a tree as wide as ENC's (TechTreeX up to 411) in a narrow window
+                    TechTreeWindow.BuildTreeImpl = _ => { var wide = fullTree(null); var far = Node("Technology_Far", "Far"); far.BaseX = 411; far.BaseY = 33; wide.Add(far); return wide; };
+                    VCall("Reload", true, false);
+                    var narrow = new Rect(0, 21, 485, 479);
+                    VSet("_fitWholeTree", true);
+                    VCall("FrameAll", narrow);
+                    var all = VGet<List<TechTreeData.Node>>("_nodes").Select(n => (Rect)VCall("NodeRect", n)).ToList();
+                    Check("Frame All fits a tree as wide as ENC's into a 485 px canvas (it stopped at zoom 0.05 and cut both ends off)",
+                          all.Min(r => r.xMin) >= narrow.xMin && all.Max(r => r.xMax) <= narrow.xMax && all.Min(r => r.yMin) >= narrow.yMin && all.Max(r => r.yMax) <= narrow.yMax && VGet<float>("_zoom") < 0.05f,
+                          "zoom " + VGet<float>("_zoom") + " x " + all.Min(r => r.xMin) + ".." + all.Max(r => r.xMax));
+                    TechTreeWindow.BuildTreeImpl = fullTree;
+                    VCall("Reload", true, false);
+
+                    // the Save line says what the outcome guarantees
+                    Check("save line: a switch the list already held is not called deployed",
+                          TechTreeWindow.RuleNote(1, RegistryRules.SaveOutcome.Saved, false, false) == ", 1 rule switch (OR / AND): the list already held it, so nothing was written or deployed",
+                          TechTreeWindow.RuleNote(1, RegistryRules.SaveOutcome.Saved, false, false));
+                    Check("save line: written, refused and unsettled each say their own thing",
+                          TechTreeWindow.RuleNote(2, RegistryRules.SaveOutcome.Saved, true, false).Contains("relaunch the game to apply") && TechTreeWindow.RuleNote(2, RegistryRules.SaveOutcome.Saved, true, false).EndsWith("(a rule switch is not part of Undo)")
+                          && TechTreeWindow.RuleNote(2, RegistryRules.SaveOutcome.Saved, true, true).Contains("not refreshed yet")
+                          && TechTreeWindow.RuleNote(2, RegistryRules.SaveOutcome.Refused, false, false).Contains("REFUSED") && TechTreeWindow.RuleNote(2, RegistryRules.SaveOutcome.Unknown, false, false).Contains("could NOT be confirmed"));
+                    break;
+                }
                 default:
                     Check("no error or exception was logged while the windows drew", errors.Count == 0, string.Join(" | ", errors));
                     EditorApplication.update -= Step; window.Close(); if (viewer != null) viewer.Close(); Finish(null);

@@ -651,11 +651,20 @@ windows. **Deep dive:**
     read the heading names no rule and the buttons are replaced by a warning; the list's own window says why.
   - **Position X / Y.** The selected node's position in grid cells, as two number fields (type, or drag the `X` / `Y`
     label). Same staged values as a drag on the canvas, same floor of 0.
-  - **Visible / Invisible.** Whether the game shows the technology on its tech screen
-    (`TechnologyDefinition.Visibility`: the game skips a technology without the `TechnologyScreen` bit). Two buttons
-    in the side strip switch between `Always` and `Never`, staged and written to the definition on Save; a note
-    under them says when the selected technology is invisible. An invisible technology's card and links are faint
-    and the card says `HIDDEN`. In ENC one technology is invisible (Future Technology).
+  - **In the game / Switched off** (`TechnologyDefinition.Visibility`). `Never` does more than hide a technology: the
+    game creates a technology for an empire only when its Visibility is not `Never`, so a `Never` technology is not
+    on the tech screen and cannot be researched, traded or granted, and a technology that names only it as a
+    prerequisite never unlocks (read from the game's code, not run in a game). Two buttons in the side strip switch
+    between the two states, staged and written to the definition on Save: **Switched off** writes `Never`; **In the
+    game** turns `Never` into `Always` and leaves any other value as it is. A note says what state the selected
+    technology is in, and for a switched-off one which technologies name it as a prerequisite. On the canvas a
+    switched-off technology's card and links are faint and the card says `OFF`; one that is in the game without a
+    card on the tech screen (no `TechnologyScreen` bit) says `HIDDEN`. In ENC one technology is switched off (Future
+    Technology).
+  - **Staged edits survive.** They are kept across a script reload (a recompile, entering Play mode) together with
+    the selection and the view, and across a reload of the tree that does not find their technology (the Save line
+    then says how many are waiting; Revert discards them). Save removes each part from the staged set when that
+    part is written, so an edit that could not be written stays and one that was written is not written again.
   - **Scroll bars** under and to the right of the canvas. They move the same pan as the middle-mouse drag; their range
     is the tree's extent, widened to wherever the view is, so a view panned past the tree is not pulled back.
   - **The canvas looks like the game's tech screen.** Cards have the game's proportions and spacing (measured from a

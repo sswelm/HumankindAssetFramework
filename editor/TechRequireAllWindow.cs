@@ -60,19 +60,26 @@ public class TechRequireAllWindow : EditorWindow
         status = verdict.Failed
             ? "The list can't be used as loaded (see the banner above); Save is refused until that is resolved (then Reload)."
             : $"{entries.Count} technolog{(entries.Count == 1 ? "y" : "ies")} loaded." + (notice != "" ? " " + notice : "");
+        TechTreeWindow.RepaintOpenWindows();   // an open viewer shows this list's rules: it re-reads on its next draw
     }
 
     bool Dirty => !TechRequireAllRegistry.Clean(entries).SequenceEqual(loadedEntries);
 
     /// <summary>
-    /// The Tech Tree viewer wrote the list (its OR / AND switch). An open window without unsaved changes shows the new
-    /// list at once. One WITH unsaved changes keeps them: its Save is then refused, because the list changed since it
-    /// loaded, and its status line says to reload and redo them.
+    /// The Tech Tree viewer saved: prerequisites, the list (its OR / AND switch), or both. Every open window reads the
+    /// tech tree again, because its rows judge an entry by its prerequisites ("one prerequisite, no effect") and the
+    /// picker offers by them (review 2026-11-21: the list was refreshed, the tree was not). A window without unsaved
+    /// changes also shows the new list at once. One WITH unsaved changes keeps them: its Save is then refused,
+    /// because the list changed since it loaded, and its status line says to reload and redo them.
     /// </summary>
     internal static void RefreshOpenWindows()
     {
         foreach (var w in Resources.FindObjectsOfTypeAll<TechRequireAllWindow>())
-            if (!w.Dirty) { w.Reload(); w.Repaint(); }
+        {
+            w.LoadTree();
+            if (!w.Dirty) w.Reload();
+            w.Repaint();
+        }
     }
 
     string Title(string name) => byName.TryGetValue(name, out var n) ? n.Label : name;

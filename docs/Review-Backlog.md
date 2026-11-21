@@ -1859,6 +1859,37 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   `RemoveTechnologyAndChildrenFromQueueAt`. Documented in Editor-Tools and Capabilities; no fix is possible from a
   plugin that is not there.
 
+## Tech Tree viewer — left open by the review rounds of PR #301 (2026-11-21)
+
+- **A viewer reload can make the list window's Save refuse with the wrong reason.** The registry engine keeps
+  "the last load was corrupt" as shared state (`SingleSourceRegistry.ChangeCore` returns early on `LastLoadCorrupt`).
+  The viewer now loads the Tech Requires All list too, so: the list file is briefly broken (merge markers), the
+  viewer reloads, the file is put back unchanged, and the list window's Save says "the registry source was
+  unreadable — recover it first" although the file is fine and its version matches. A Reload in that window clears
+  it; nothing is lost. Executed by the round-1 reviewer. The fix belongs in the engine (let the write-time parse
+  decide, which already refuses a broken file) and touches every registry, so it is not in this PR. The viewer no
+  longer reloads the list on undo, which was the commonest way into it.
+- **Opening the viewer runs the engine's write side of a load**: adopting a deployed copy when the project file is
+  missing, the one-time migration, finishing an owed deploy, creating a missing deployed file. Before, only the list
+  window did. The viewer now logs what happened (`[TechTree] reading the Tech Requires All list: ...`). A read
+  without side effects would be an engine change.
+- **In a project without the list file each read of it waits a quarter of a second** (the engine's re-check for a
+  save-by-rename). The viewer reads on open, on Reload / Apply, after a save with a rule switch, and when another
+  window changed the list; no longer on undo, Revert or a save without a rule switch.
+- **A rule switch is not under Undo.** Ctrl+Z after a Save reverts the position and the definition, not the list.
+  The Save line says so.
+- **The staged set survives a script reload, the Undo history of the viewer does not need to**; a technology that
+  no longer exists keeps its staged edits until Revert (the Save line counts them).
+- **What `Visibility = Never` does is read from the decompiled game, not run in a game**
+  (`DepartmentOfScience.CreateTechnologies`, `CheckTechnologyPrerequisite`). The viewer's wording rests on that.
+- **The Ref field applies its path on every keystroke** (older than this PR). A reload while it is half typed
+  builds without the reference-only technologies; their staged edits are now kept, their cards are gone until the
+  path is right.
+- **On this machine the viewer's reference folder is not set** (default `Assets/VanillaReference`, which ENC does
+  not have; ENC's reference copy is `Assets/~References`), so the viewer shows the Databases content only. Four
+  technologies (`Technology_Era1_01..04`) then have no mapper, sit at (0,0) and show no image. Found by the round-1
+  reviewer; a setting of the user's, not changed.
+
 ## Data contract — low (editor ⇄ plugin)
 
 - **`rotorSpinBones` / `rotorSpinSpeed`** are plugin-only fields with no editor `ModelDef` field. *Partly addressed

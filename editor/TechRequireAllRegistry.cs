@@ -46,6 +46,9 @@ public static class TechRequireAllRegistry
     /// <summary>The version of the list the last successful Load returned; null after a failed one (see Save).</summary>
     public static string LoadedVersion => Store.LoadedVersion;
 
+    /// <summary>The last Load, by whichever window, could not use the list (see RegistryLoadVerdict.Failed).</summary>
+    public static bool LastLoadFailed => Store.LastLoadFailed;
+
     /// <summary>Trimmed, without blanks or duplicates, sorted by name: the form the file is written in.</summary>
     public static List<string> Clean(IEnumerable<string> names)
     {

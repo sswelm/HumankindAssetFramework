@@ -59,8 +59,13 @@ public static class TechTreeData
         public string ArtGuid;    // that image as a Unity GUID text (null when none is named): the key into the game's own atlases
 
         // TechnologyDefinition.Visibility as its number (a flags enum: Always = -1, Never = 0, TechnologyScreen = 1,
-        // ControlBannerTechnologyPopup = 2). The game leaves a technology without the TechnologyScreen bit off its
-        // tech screen (TechnologyScreen's item loop). LOCAL CHANGE 2026-11-21.
+        // ControlBannerTechnologyPopup = 2). Two different things hang on it in the game (decompiled, not run):
+        //  - Never (0) switches the technology OFF. DepartmentOfScience.CreateTechnologies adds a definition to an
+        //    empire only when Visibility != 0, so a Never technology cannot be researched, traded or granted, and a
+        //    technology that names only it as a prerequisite never unlocks. Scenarios use Never to disable a
+        //    technology; the game's debug window lists such technologies as "obsolete".
+        //  - Without the TechnologyScreen bit (1) the technology gets no card on the tech screen.
+        // LOCAL CHANGE 2026-11-21.
         public int BaseVisibility = VisibilityAlways;
 
         // Convenience: the asset to ping/select (prefer the def).
@@ -307,7 +312,12 @@ public static class TechTreeData
             return null;
         }
         if (Under(active, DatabasesRoot)) return active;             // edit in place
-        return CopyReferenceIntoMod(active, modPath, isMapper);      // lift reference -> New Additions
+        var copy = CopyReferenceIntoMod(active, modPath, isMapper);  // lift reference -> New Additions
+        // The node now HAS a copy under Databases: a second ask must get this one. Without it, one Save that wrote two
+        // parts of a reference-only definition lifted it twice: two definitions of one name in the collection, or the
+        // second copy over the first (review 2026-11-21, executed by two reviewers).
+        if (copy != null) { if (isMapper) node.ModMapper = copy; else node.ModDef = copy; }
+        return copy;
     }
 
     // Collection types that host the elements. Defs have a dedicated collection;

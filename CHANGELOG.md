@@ -10,12 +10,37 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
-- **The Tech Tree viewer shows and switches a technology's visibility (2026-11-21).** Asked for by the user on
-  seeing Future Technology as an ordinary card: the game leaves it off its tech screen (`Visibility = Never` in its
-  definition; the tech screen skips a technology without the `TechnologyScreen` bit). The side strip now says so
-  and has a Visible / Invisible switch, staged and written to the definition on Save; the card and its links are
-  faint and the card says `HIDDEN`. Checked: 6 more drill checks (60). Not exercised: the write to a real
-  definition asset on Save.
+- **The Tech Tree viewer shows and switches whether a technology is in the game (2026-11-21).** Asked for by the
+  user on seeing Future Technology as an ordinary card. Its definition has `Visibility = Never`, and the first
+  version called that "invisible". The first review round read the game's code: `Never` switches a technology off
+  (the game creates a technology for an empire only when Visibility is not `Never`), so it cannot be researched,
+  traded or granted, and a technology that names only it never unlocks. The switch is now **In the game / Switched
+  off**, the note says exactly that and names the technologies that depend on a switched-off one, and the card says
+  `OFF`. Checked: 9 drill checks. Not exercised: the write to a real definition asset on Save in the repo's own
+  drill (two reviewers ran it in scratch projects with stand-in types). Not run in a game: what `Never` does.
+- **Tech Tree viewer, first review round (2026-11-21, three reviewers by slice, each with its own Unity drill).**
+  What it changed:
+  - One Save that wrote prerequisites AND visibility of a technology that exists only in the reference folder
+    copied its definition twice: two definitions of one name in the collection, or one edit lost. The copy is now
+    made once (`TechTreeData.EnsureWritable` remembers it on the node) and both parts go to it.
+  - **Frame All** stopped at zoom 0.05, the floor of the old geometry, and cut both ends off the ENC tree in any
+    window narrower than about 1,600 px. The floor is 0.01.
+  - Save now removes each written part from the staged set; before, a part that was written stayed staged when
+    another part of the same technology could not be written, and the next Save wrote it again.
+  - Staged edits are kept across a script reload (they were lost without a word, also on every update of the
+    editor scripts) and across a reload of the tree that does not find their technology.
+  - The Save line no longer calls a rule switch deployed when the list already held it, and says that a rule
+    switch is not part of Undo. The viewer logs what its read of the list did (an adopted copy, a finished deploy)
+    instead of leaving it to surface in the list's window later, re-reads the list when only its readability
+    changed, and no longer reads it on every undo in the editor.
+  - The list's window reads the tech tree again after a viewer save (it warned "one prerequisite, no effect" about
+    a technology that had just been given a second one).
+  - The game's images: a missing `Amplitude.UI.dll` is named as such, an atlas that does not load is said, a
+    texture destroyed by whoever holds the bundle is loaded again, and only textures out of a bundle the viewer
+    opened itself are unloaded.
+  - Left as they are, recorded in `docs/Review-Backlog.md`: the registry engine's "unreadable" latch that a
+    viewer reload can set for the list's window, and the viewer's read of the list running the engine's adoption
+    and migration.
 - **The Tech Tree viewer's canvas looks like the game's tech screen (2026-11-21).** Asked for by the user with a
   screenshot of the game. Cards now have the game's proportions and spacing, measured from that screenshot with six
   cards of known position (six columns = 720 px, 26 rows = 927 px, a card 502 x 187 px; the game keeps these sizes

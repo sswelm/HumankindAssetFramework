@@ -37,13 +37,26 @@ static class TechTreeVanillaArt
     internal const string AtlasFolder = "Assets/Data/[UI]/Atlases/UIAtlasBuilder.Generated/";
     internal const string AtlasPath = AtlasFolder + "UIAtlas.asset";
 
-    // Seam for a drill: the game's folder is found through the registry's config folder.
+    // Seam for a drill. The game's folder is two up from the registry's config folder (<game>/BepInEx/config); when
+    // that folder was overridden to somewhere else, the install the registry can detect by itself is tried next.
     internal static Func<string> BundlePathImpl = () =>
-        Path.Combine(Path.GetFullPath(Path.Combine(ModelRegistry.ConfigDir, "..", "..")), "AssetBundles", "Mercury.Data.UI", "mercury.data.ui.assetbundle");
+    {
+        string first = null;
+        foreach (string config in new[] { ModelRegistry.ConfigDir, ModelRegistry.AutoDetectConfigDir() })
+        {
+            if (string.IsNullOrEmpty(config)) continue;
+            string path = Path.Combine(Path.GetFullPath(Path.Combine(config, "..", "..")), "AssetBundles", "Mercury.Data.UI", "mercury.data.ui.assetbundle");
+            if (first == null) first = path;
+            if (File.Exists(path)) return path;
+        }
+        return first ?? "";
+    };
 
     static Dictionary<string, Region> regions;   // Unity GUID text of an image -> where it is; null until read
     static string problem;                       // why the game's images cannot be shown; null = not tried, "" = fine
     static readonly Dictionary<string, Texture2D> atlases = new Dictionary<string, Texture2D>(StringComparer.OrdinalIgnoreCase);
+    // the atlas textures this class took out of a bundle it opened ITSELF: only those are its own to unload
+    static readonly HashSet<Texture2D> ownTextures = new HashSet<Texture2D>();
     static bool cleanupHooked;
 
     /// <summary>Why the game's images are not shown ("" when they are, or when nothing asked for one yet).</summary>
@@ -65,9 +78,19 @@ static class TechTreeVanillaArt
     public static Texture2D Atlas(string output)
     {
         if (string.IsNullOrEmpty(output)) return null;
-        if (atlases.TryGetValue(output, out var tex)) return tex;
-        try { tex = WithBundle(b => b.LoadAsset<Texture2D>(AtlasFolder + output)); }
-        catch (Exception e) { Debug.LogWarning("[TechTree] the game's atlas '" + output + "' could not be loaded (its cards show without artwork): " + e.Message); }
+        if (atlases.TryGetValue(output, out var tex))
+        {
+            // A failed load is remembered as a true null and stays until Reload. A texture that WAS loaded and has been
+            // destroyed since (whoever holds the bundle unloaded it) is loaded again.
+            if (tex != null || ReferenceEquals(tex, null)) return tex;
+            atlases.Remove(output); ownTextures.Remove(tex);
+        }
+        tex = null; bool own = false; string why = null;
+        try { tex = WithBundle(b => b.LoadAsset<Texture2D>(AtlasFolder + output), out own); }
+        catch (Exception e) { why = e.Message; }
+        if (tex == null)
+            Debug.LogWarning("[TechTree] the game's atlas '" + output + "' could not be loaded (its cards show without artwork; Reload tries again): " + (why ?? "the bundle holds no such texture"));
+        else if (own) ownTextures.Add(tex);
         atlases[output] = tex;
         HookCleanup();
         return tex;
@@ -87,7 +110,14 @@ static class TechTreeVanillaArt
         if (regions != null || problem != null) return;
         try
         {
-            regions = WithBundle(b => ReadAtlas(b.LoadAsset(AtlasPath)));
+            regions = WithBundle(b =>
+            {
+                var atlas = b.LoadAsset(AtlasPath);
+                // in the bundle, yet nothing loaded: the index's script type is missing, not the asset
+                if (atlas == null && b.Contains(AtlasPath))
+                    throw new InvalidOperationException("the game's atlas index is in its UI bundle but did not load (is the game's Amplitude.UI.dll in this project, and did Unity load it?)");
+                return ReadAtlas(atlas);
+            }, out _);
             problem = "";
         }
         catch (Exception e)
@@ -97,8 +127,10 @@ static class TechTreeVanillaArt
         }
     }
 
-    static T WithBundle<T>(Func<AssetBundle, T> use)
+    // `own` = this call opened the bundle itself (and closed it again); false = something else had it mounted.
+    static T WithBundle<T>(Func<AssetBundle, T> use, out bool own)
     {
+        own = false;
         AssetBundle bundle = null; bool mine = false;
         foreach (var b in AssetBundle.GetAllLoadedAssetBundles())
             if (b != null && b.Contains(AtlasPath)) { bundle = b; break; }
@@ -110,6 +142,7 @@ static class TechTreeVanillaArt
             if (bundle == null) throw new InvalidOperationException("Unity could not open the game's UI bundle '" + path + "'");
             mine = true;
         }
+        own = mine;
         try { return use(bundle); }
         finally { if (mine) bundle.Unload(false); }
     }
@@ -158,15 +191,16 @@ static class TechTreeVanillaArt
         return map;
     }
 
-    // The atlas textures outlive the closed bundle and belong to nobody: free them before the scripts reload.
+    // The textures out of a bundle this class opened and closed outlive it and belong to nobody: free them before the
+    // scripts reload. A texture out of a bundle something else has mounted is that holder's, and is left alone.
     static void HookCleanup()
     {
         if (cleanupHooked) return;
         cleanupHooked = true;
         AssemblyReloadEvents.beforeAssemblyReload += () =>
         {
-            foreach (var tex in atlases.Values) if (tex != null) Resources.UnloadAsset(tex);
-            atlases.Clear();
+            foreach (var tex in ownTextures) if (tex != null) Resources.UnloadAsset(tex);
+            ownTextures.Clear(); atlases.Clear();
         };
     }
 }
