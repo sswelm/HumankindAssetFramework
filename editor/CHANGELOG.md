@@ -5,6 +5,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **3ds Max files (`.max`) in the Model Cutter, Model Fuser, Vehicle Lab and Model Factory** (2026-11-21, user
+  request). Pick a `.max` in the file picker (or type its path and press **Convert .max**): it is converted to
+  `name_max.glb` beside the file — no 3ds Max and no Blender needed — and the tool works on that copy. A report says
+  what was read and what was not (modifiers, parametric objects, Editable Poly, maps in slots other than diffuse, parts
+  that may stand in the wrong place); the dialog shows it cut to a length, the Console holds it whole. Textures are
+  looked for beside the file, one folder down and one up; faces whose picture is missing keep their UVs; a picture's
+  alpha shows the material's colour. Picking the same `.max` again leaves an unchanged copy untouched. Animation and
+  opacity maps are not read. The copy needs a folder that can be written to. See *3ds Max files* in the Editor Tools
+  reference.
 - **Vehicle Lab: the preview plays again after Generate** (2026-11-14, user report). With the C# backend the
   preview's wheels, propellers and rotors stood still although Play was on: the skinned meshes were drawn in their
   first pose. Fixed in the in-process rig, which the Clip Range picker shares. Generate also starts the clip even

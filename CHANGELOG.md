@@ -47,6 +47,85 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   its highlight; the selection is now kept by name. Not checked by any test and not seen yet:
   a real click on the buttons or the bars, a rule switch saved from the viewer in a real project, and writing a
   position to an asset (the drill's nodes have none).
+- **3ds Max files are read natively (2026-11-21).** The Model Cutter, the Model Fuser, the Vehicle Lab and the Model
+  Factory take a `.max` in their file pickers: a C# reader (`editor/MaxDocument.cs` the compound-file container and chunk
+  tree, `MaxScene.cs` the objects and references, `MaxModel.cs` the model) converts it to `name_max.glb` beside the file
+  and the tool goes on with that copy, so every later step — and every Blender fallback — sees an ordinary GLB. Read:
+  parts that store their mesh (Editable Mesh, MeshObject) with smoothing groups, material ids and UVs; each part's
+  place, with the scale's axis system (mirrored parts re-wound); Standard and Multi/Sub-Object materials with the
+  diffuse picture and its alpha; decals (a Mask map, tiling off) composed onto a canvas of the plain colour. Not read,
+  and what the report says of it, is listed in `docs/Editor-Tools.md`; animation is neither read nor detected.
+  **Reviewed the same day in three rounds** (PR #299), each from another angle, each round's fixes reviewed by the
+  next; what each changed:
+  - **Round 1, three reviewers by slice with their own fuzzers and crafted files.**
+    - The scale chunk's axis system is now APPLIED. The first version left it out on evidence that could not tell the
+      readings apart; the measurement that can is in `docs/Testing.md`. Twelve parts change shape, eleven of them on
+      the torpedo boat; two of those sit further from the world's axes with it.
+    - A sheet with both its sides in one smoothing group keeps a normal per side; an empty Multi/Sub-Object slot no
+      longer moves the sub-materials after it.
+    - The report names what it was silent on: maps in the other slots (the Rolls-Royce has an opacity map on two
+      materials), a part under a node that could not be placed, a picture taken from another folder, parts without a
+      material, UVs that could not be read.
+    - Picking the same `.max` again leaves an unchanged copy untouched (the rewrite gave it a new write time, which
+      makes an open Model Cutter drop its unsaved marks).
+    - Hostile containers are refused early: an allocation table larger than the file (1,018 MB of memory from a 1 MB
+      file before; refused at once), streams that share their sectors.
+  - **Round 2, a reread of round 1's fixes, planted defects, and an audit of every number in the docs.**
+    - A fix of round 1 was itself a defect: the notes for parts under an unplaced node grew with the square of a
+      chain's length (the reviewer measured 340 s for 800 chained parts; its 200-part file takes 0.2 s now). One
+      reason per part now, the parts of one reason in one note.
+    - A picture's own alpha now shows the material's colour. The torpedo boat's hull picture is a render with
+      everything around the hull transparent and black, and 64 % of the surface using the material lands there: the
+      hull side came out black, and is now the superstructure's grey with the picture as a band. Not checked against
+      3ds Max; the report names each such picture.
+    - A sheet with several triangles a side keeps a normal per side too (the sum cancels to a rounding residue, not
+      to zero); the slot count of a Multi/Sub-Object is read in the paired form of the references as well.
+    - Packed streams: only the streams the reader reads are unpacked, and one may unpack to 200 times its packed
+      size past 64 MB.
+    - Planted defects: 141 rules changed one at a time against the 41 tests of round 1 - 82 caught by the tests, 1
+      by the drill alone, 58 by nothing, 11 of those changing the four models' output.
+  - **Round 3, the documented workflow driven through the tools in Unity, a blind reread, a second audit.**
+    - UVs are written on the faces that show a picture and on those whose picture is missing, and nowhere else. The
+      first version dropped them with a missing picture too (and reported 74 parts "with UVs" where it wrote 33);
+      round 1 kept them everywhere; the workflow showed what that costs - the Model Factory's converter shifts every
+      UV by one whole-tile offset taken from the whole model, and the stealth ship's went from 0.1..1.0 to -102..127.
+      Now 34 parts are written with UVs (the 33, and the one whose picture is missing), and the report names the
+      parts whose unused UVs are left out.
+    - Names are written without the spaces at their ends. Four parts of the samples have such names, and the tools
+      after the reader trim: a part marked Ignore in the Vehicle Lab stayed in the output, and a mark in the
+      Cutter's sidecar was lost.
+    - Seven more shapes of small file that cost minutes or gigabytes, each with the reviewer's measure before and
+      the same case after: smoothing sums worked out per corner (124 s from 7.7 KB; 0.1 s), a map table of 100,000
+      references under 40 materials (3.4 s and 527 MB; 0.1 s and 34 MB), 32,000 streams naming one chain (101 s;
+      0.03 s), a derived object of 500,000 references under 2,000 nodes (14 s; 0.2 s), 120,000 missing pictures
+      (42 s; 0.9 s), a mesh of a million faces under 20 nodes (1,659 MB; refused - the model stops at 10 million
+      triangles), a decal 65,535 pixels wide (3,426 MB; 731 MB).
+    - A file named like a picture that is none is no longer embedded as one; one far-away helper no longer costs the
+      whole file; a mesh under more than 16 modifier stacks, a controller that names nothing and an Editable Mesh
+      without its mesh are named; the Vehicle Lab's Generate refuses an unconverted `.max` by name.
+  - **A fourth review, by a second reviewer after the three rounds,** found two more:
+    - A small stream whose chain of mini sectors came back to a sector it had used was read with that sector's
+      bytes twice. The loop check counted steps against the whole allocation table, and a small stream ends
+      after at most 64 steps, so the check could never fire. A sector met twice is now refused, as for the large
+      streams.
+    - A BMP whose pixels were declared to start inside its header or palette was decoded from there, and a palette
+      size past 536 million wrapped the size check, which then let a pixel name a colour outside the file. Both
+      are refused by name now.
+  Checked on the committed tree of this entry:
+  - `tools/max_drill.sh`: the four models (257 parts, 244,337 triangles) equal to a second reader in Python per part
+    in area, bounds and winding.
+  - `tools/max_unity_drill.sh`: the conversion inside a Unity editor with Unity's own image decoder, bit-equal in
+    geometry and pixel-equal in its 16 composed pictures to the stand-alone one (61 checks).
+  - `Tests/MaxReaderTests.cs`: 97 tests (101 cases) on files built byte by byte (19 in the first version).
+  - The round-1 reviewer's 24 crafted files: 15 convert, 9 are refused by name, none takes more than 0.8 s; the most
+    memory, 345 MB, goes to a stream built to unpack to 1 GB, which is refused at 194 MB (20 million empty chunks:
+    1,761 MB before the review, 144 MB now; four unread packed streams of 149 KB: 1,193 MB after round 1 by the
+    second auditor's measure, 35 MB now; 400,000 references named by 20 nodes: 47 s before the review, 0.3 s now).
+  - In round 3 the tools after the reader on the four converted files, in a batch-mode Unity editor: every tool saw
+    the report's part count.
+  **Still not run:** the pickers on screen - the dialogs' text, the window layout, and the YES to overwriting a file
+  the reader did not write (batch mode answers every dialog No). Nothing was compared with 3ds Max itself. All four
+  sample files are of one 3ds Max generation.
 - **The tech screen marks a technology that needs ALL its prerequisites (2026-11-21).** A technology in the Tech
   Requires All list now carries a mark in front of its title on the tech screen, and its tooltip ends with a line that
   names the prerequisites it waits for, in italics behind the same mark: *Requires both Multimedia Computer and
