@@ -364,18 +364,19 @@ namespace HumankindAssetFramework
             public readonly FieldInfo Label, Target, Description;
             public UiBind(Type item)
             {
-                DefinitionName = P(item, "TechnologyDefinitionName");
-                Title = P(item, "Title");
-                Label = F(item, "title");
-                Text = P(Label.FieldType, "Text");
-                Target = F(item, "tooltipTarget");
-                Description = F(Target.FieldType, "Description");
+                DefinitionName = UiProperty(item, "TechnologyDefinitionName");
+                Title = UiProperty(item, "Title");
+                Label = UiField(item, "title");
+                Text = UiProperty(Label.FieldType, "Text");
+                Target = UiField(item, "tooltipTarget");
+                Description = UiField(Target.FieldType, "Description");
                 if (Text.PropertyType != typeof(string) || Description.FieldType != typeof(string) || Title.PropertyType != typeof(string))
                     throw new InvalidOperationException("the tech item's title, label text or tooltip description is no longer a string");
             }
-            static FieldInfo F(Type t, string name) =>
+            // names of their own: the binding gate follows a helper by NAME, and this file already has Bind.F
+            static FieldInfo UiField(Type t, string name) =>
                 AccessTools.Field(t, name) ?? throw new InvalidOperationException($"{t.Name}.{name} not found");
-            static PropertyInfo P(Type t, string name) =>
+            static PropertyInfo UiProperty(Type t, string name) =>
                 AccessTools.Property(t, name) ?? throw new InvalidOperationException($"{t.Name}.{name} not found");
         }
 
