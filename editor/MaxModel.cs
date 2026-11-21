@@ -147,19 +147,32 @@ public static class MaxModel
         }
 
         Directory.CreateDirectory(target.DirectoryName);
-        string temporary = full + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        string temporary = TemporaryBeside(full);
+        for (int tries = 0; tries < 16 && File.Exists(temporary); tries++) temporary = TemporaryBeside(full);
+        bool made = false;  // CreateNew refuses a name that is taken: a file this call did not make is never deleted
         try
         {
             using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16))
             {
+                made = true;
                 if (bytes == null) GlbWriter.Write(model, stream);
                 else stream.Write(bytes, 0, bytes.Length);
             }
             if (replace) File.Replace(temporary, full, null);
             else File.Move(temporary, full);  // Refuses a destination that appeared while the GLB was being written.
         }
-        finally { try { File.Delete(temporary); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+        finally { if (made) try { File.Delete(temporary); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
         return report;
+    }
+
+    /// <summary>The file a conversion is written to before it takes the target's place: beside the target (the move
+    /// stays on one volume) and with a name NO LONGER than the target's own. A longer name refuses targets Windows can
+    /// hold: with 37 characters added, every target of 224 to 259 characters failed where a plain write had worked
+    /// (measured 2026-11-21 on Unity's Mono and on .NET, a target of 235).</summary>
+    internal static string TemporaryBeside(string full)
+    {
+        int random = Math.Max(1, Math.Min(32, Path.GetFileName(full).Length - 4));
+        return Path.Combine(Path.GetDirectoryName(full), Guid.NewGuid().ToString("N").Substring(0, random) + ".tmp");
     }
 
     // ------------------------------------------------------------------------------------------ the conversion
