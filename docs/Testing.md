@@ -260,6 +260,102 @@ oracle comparisons; ordinary direct connection cycles retain ufbx's own fallback
 Sixteen planted deviations each changed a dump (the first layer blending instead of assigning: 10,022 real lines; the last value winning a shared property; constant-previous and -next swapped; a weight of exactly one third instead of ufbx's 0.333333f: 1,686 real lines; the Bezier solve stopped after three Newton steps; the mirror parity skipped; the packed weights swapped; the reference range ignored; a synthesised scale of zeros; a connection cycle left connected; the time code ignored; the auto tangent always time-independent; the additive rotation added instead of composed; a tangent's negative zero lost; the max of a tie taken from the last; the property flags never set). Two of them (the negative zero and the tie) changed nothing on the fixtures and 286 and 284 lines on the real
 files until a curve of signed zeros joined the scenes.
 
+**`tools/max_drill.sh`** (the native 3ds Max reader, 2026-11-21): compiles `editor/MaxDocument.cs`, `MaxScene.cs` and
+`MaxModel.cs` outside Unity and holds them to a second reader of the same files in Python
+(`tools/max-drill/max_world.py`). Per mesh part it compares the name and the triangle count, and — in world space —
+the area, the bounding box, and the two measures that change sign with the winding: the signed volume about the
+part's own centre (a closed part) and the vector area (an open sheet); per file, the number of parts whose file holds
+UVs. Each file is then converted and the written `.glb` is read back and held to the report (parts, triangles,
+pictures, the generator line). Run 2026-11-21: 4 files, 257 parts, 244,337 triangles, all equal within the tolerance
+(2e-4 of a part's size); the two winding measures of every one of the 257 parts lie far enough from zero that their
+sign is held by that tolerance (before the review those of 12 parts were not). **Not in the push gate**: the
+population is four files of one 3ds Max generation on the author's disk.
+
+- **Usage:** `tools/max_drill.sh [file.max ...]`. Without arguments it takes every `.max` under the folders of
+  `HAF_MAX_ROOTS` (separated by `;`, default `D:/3DModels;D:/3dmax`) and says so when a folder gave nothing.
+  `HAF_MAX_BUILD` is where the executable and `out/N.*` go (default `C:/tmp/haf-build/maxdrill`; `N` is the file's
+  place in the list, and the next run overwrites them); `HAF_UNITY_EDITOR` is Unity's `Editor/Data` folder.
+
+What this drill is not:
+
+- **Not an independent reading of the format.** The Python reader shares no code with the C# one and every reading of
+  the format with it (which chunk is what, the inverse quaternion, the scale's axis system, hidden faces, the re-wind of
+  a mirrored part). It catches a slip in one of the two implementations. The check of the reading itself is looking at
+  renders of the converted files (assembled, textured, faces outward); no picture of the models as 3ds Max shows them
+  was at hand to compare with.
+- **Not a check of UV values, normals, materials, pictures, pivots, parent links or the report's text:** none of those
+  is compared. Round 2 of the review changed eleven rules in the reader with this drill still passing and the four
+  models' output changed: ten of those kinds, and one in the transform arithmetic whose effect stayed inside the
+  tolerance. `Tests/MaxReaderTests.cs` holds each of them, on files built byte by byte.
+
+**`Tests/MaxReaderTests.cs` and what was planted against it** (95 tests). The review of 2026-11-21 planted defects
+in four passes:
+
+| Who, against which tests | Planted | Caught by a test | Not caught |
+|---|---|---|---|
+| Round 1's reviewer, the 19 tests of the first version | 13 | 0 | 13 |
+| Round 2's reviewer, the 41 tests after round 1 | 141 | 82 | 59 (the drill caught 1 of them) |
+| The author, round 2's own fixes against the tests written for them | 22 | 20, then 22 after two more fixtures | 0 |
+| The author, round 3's own fixes likewise | 23 | 22, then 23 after one more fixture | 0 |
+
+30 of the round-2 reviewer's 31 fixtures for its survivors are in the test file, two of them adapted. Its 141 plants
+were run again against the final tests: against the tests after round 2, 132 were caught, 3 survived and 6 no longer applied as written; those nine against the final tests: 7 are caught in their present form, 1 went with its rule (a list of names is no longer cut at twenty), 1 survives (the TGA size check below).
+
+Held by no test, each exercised once by a crafted file of the review: the early size check of a TGA (with and without
+it a cut file is refused in the same words; only the memory asked for first differs); the file's 1 GB limit; the
+64-megapixel limit of a TGA or BMP; the 200-times ratio of a packed stream past 64 MB (the test holds the 64 MB floor);
+the 67-megapixel bound of a decal's canvas as a whole.
+
+One rule was decided by measurement, and decided twice. A scale chunk carries a quaternion: the axis system the three
+factors apply in. The first version left it out (on the torpedo boat's anchor more right angles survive without it); the
+review showed that test cannot tell the readings apart, because a diagonal scale keeps the right angles of a part's own
+axes whatever the file means. The measurement that can: how far each part's stretch in the world sits from the world's
+axes (the largest off-diagonal of A·Aᵀ over its largest diagonal entry; 0 = on the axes). The rule changes twelve
+parts, eleven of them on the boat:
+
+| Parts | Left out | Applied | Applied the other way round |
+|---|---|---|---|
+| The boat's PIEZA CORAZA 01 and 02 | 0.075 | 0.004 | 0.107 |
+| PIEZA CORAZA 03 to 06 | 0.130 | 0.011 | 0.177 |
+| PIEZA-156 and 157 | 0.891 | 0.015 | 0.131 |
+| PIEZA-74 | 0.814 | 0.093 | 0.227 |
+| PIEZA-75 | 0.137 | 0.495 | 0.495 |
+| The anchor | 0.210 | 0.361 | 0.544 |
+| The armoured car's D9013Tp2 | 0.005 | 0.000 | 0.010 |
+
+It is applied, on the strength of the first three rows (eight parts, which are three distinct scale records of one
+file), of PIEZA-74's, and of one more observation: PIEZA-74 and PIEZA-75 are the same fitting on the boat's two sides,
+and with the axis applied their boxes are 30 x 167 x 54 and 35 x 163 x 54, without it 46 x 50 x 54 and 39 x 206 x 54.
+The armoured car's part lies on the axes under every reading and decides nothing. The anchor and PIEZA-75 sit further
+from the axes with it than without; nothing here says how 3ds Max itself shows them.
+
+**`tools/max_unity_drill.sh`** (the `.max` door inside Unity, 2026-11-21): builds a temporary Unity project, copies each
+sample file's folder beside it and runs `MaxImport.Picked` / `Convert` there in batch mode
+(`tools/max-drill/UnityMaxImportDrill.cs`), with Unity's own image decoder. Held to the `.glb` the stand-alone drill's
+executable writes from the same copy with System.Drawing's decoder: positions, normals and UVs bit for bit, every
+picture's size, and each composed picture's pixels within a mean difference of 2 in 255 (and never nearer to the
+reference turned upside down than to the reference). Also: a 5 x 3 picture through Unity's decoder byte for byte (row
+order and channel order); the same file converted again leaves the copy untouched; the Convert button's deferred half
+outside a GUI pass; a file cut to a third, a text file named `.max` and a missing file are refused without an exception
+and leave no `.glb`. Run 2026-11-21 on the committed tree of this entry: 4 files, 61 checks (the run prints the
+count), none failed; the 16 composed pictures equal the reference pixel for pixel (15 come from JPEGs through Unity's
+decoder, one from a TGA through the reader's own). **Not in the push gate** (same population).
+
+- **Usage:** `tools/max_unity_drill.sh [file.max ...]`, the same `HAF_MAX_ROOTS`. `UNITY` is Unity's `Editor/Data`
+  folder, `UNITY_EDITOR` the editor's executable. The temporary project is removed after a pass and kept after a
+  failure; its path is printed either way.
+- **Not covered:** in batch mode every dialog answers itself with No. So the dialogs' text, the window layout and the
+  keyboard focus were not seen, and the YES to "overwrite a file the reader did not write" never ran inside Unity (with
+  such a file in the way the conversion returns nothing and the file stays; the code after a yes ran outside Unity).
+  The pickers themselves, on screen, are still the user's to try.
+
+**The tools after the door, driven in a batch-mode Unity editor** (round 3 of the review, a harness of the reviewer's
+own, not kept in the repository): on copies of the four converted files, the Cutter's and Fuser's analysis, split and
+fuse, the Vehicle Lab's Probe and Generate on both routes, and the Factory's converter, object list, unit-fix guess and
+static build up to its atlas. Every tool saw the report's part count (62 / 28 / 152 / 15) and none threw. What it
+found is fixed in this entry (names ending in a space; UVs that no picture uses). Not driven: the Factory after the
+atlas (it needs the game's SDK), any window's on-screen drawing, the Animation Lab and the District Factory.
+
 **`tools/fbx_model_drill.sh`** (step 6a of the native FBX reader, 2026-11-01: the FBX path into the Factory): Blender imports
 every static FBX source and fixture with its FBX importer's defaults and exports a GLB (`tools/fbx-drill/fbx_to_glb.py`);
 `editor/FbxImport.cs` reads the same file as that importer builds it (the global matrix from the file's axes and unit, every

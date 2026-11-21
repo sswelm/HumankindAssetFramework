@@ -218,13 +218,17 @@ public abstract class ModelWorkshopWindow : EditorWindow
 
         using (new EditorGUILayout.HorizontalScope())
         {
-            srcFile = EditorGUILayout.TextField(new GUIContent("Source GLB", "The model to operate on. Never overwritten."), srcFile);
+            srcFile = EditorGUILayout.TextField(new GUIContent("Source GLB", "The model to operate on. Never overwritten. A 3ds Max file (.max) is converted to name_max.glb beside it first."), srcFile);
             if (GUILayout.Button("…", GUILayout.Width(28)))
             {
-                string p = EditorUtility.OpenFilePanel("Choose the source GLB", string.IsNullOrEmpty(srcFile) ? "D:/3DModels" : Path.GetDirectoryName(srcFile), "glb");
+                string p = EditorUtility.OpenFilePanel("Choose the source GLB (or a 3ds Max file)", string.IsNullOrEmpty(srcFile) ? "D:/3DModels" : Path.GetDirectoryName(srcFile), "glb,max");
+                p = MaxImport.Picked(p);   // a .max is converted to a .glb beside it; null = not converted (the user was told)
                 if (!string.IsNullOrEmpty(p)) { srcFile = p.Replace('\\', '/'); outGlbAuto = true; rows.Clear(); groupLabels.Clear(); DestroyPreview(); }
+                MaxImport.ExitGuiAfterDialogs();
             }
         }
+        // a typed .max path: a Convert button under the field
+        if (MaxModel.IsMax(srcFile)) MaxImport.TypedPathGui(srcFile, glb => { srcFile = glb; outGlbAuto = true; rows.Clear(); groupLabels.Clear(); DestroyPreview(); Repaint(); });
         // AUTO-DERIVED OUTPUT that TRACKS the source (external review of PR #22, 2026-09-07): the old
         // fill-when-empty derived exactly once — typing a source path derived from the FIRST keystroke's
         // fragment and then stuck (the reset below fires only while rows exist), so Split could write the

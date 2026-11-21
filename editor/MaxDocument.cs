@@ -1,0 +1,284 @@
+// MaxDocument.cs - the container layer of the native 3ds Max reader (2026-11-21): a .max file is a Microsoft compound
+// file (the format of old Office documents) holding a handful of streams - Scene, ClassDirectory (or ClassDirectory2 /
+// ClassDirectory3), DllDirectory, ... - and each stream is a tree of chunks: a 16-bit id and a 32-bit size whose top bit
+// says "this chunk holds chunks" (a size of 0 means a 64-bit size follows, with the same top bit). The size counts the
+// header. Newer 3ds Max versions gzip each stream; that is unpacked here.
+//
+// Pure C#: no Unity. Written from the files themselves (the user's four models, read byte by byte with a Python probe
+// first) and from the public descriptions of the format; two open-source readers (io_scene_max, Ryzom Core's
+// pipeline_max) served as references for the chunk ids, and no code of theirs is in here. What does not hold - a
+// file that is not a compound file, a sector chain that leaves the file or loops, a chunk that runs past its parent - is
+// refused by name with InvalidDataException. Two things are passed over, not refused: a second directory entry of a
+// name already read, and a directory entry whose name length is not one a name can have.
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
+using System.Text;
+
+public sealed class MaxChunk
+{
+    public ushort Id;
+    public byte[] Buf;                // the stream this chunk lives in (shared, never copied)
+    public int Start, Length;         // the chunk's DATA (after its header) for a leaf; unused for a container
+    public List<MaxChunk> Kids;       // null for a leaf
+    public bool IsContainer => Kids != null;
+
+    public MaxChunk First(int id)
+    {
+        if (Kids != null) foreach (var k in Kids) if (k.Id == id) return k;
+        return null;
+    }
+    public IEnumerable<MaxChunk> All(int id)
+    {
+        if (Kids != null) foreach (var k in Kids) if (k.Id == id) yield return k;
+    }
+    /// <summary>A leaf's value at a byte offset; a read past the chunk's data is refused by name.</summary>
+    public uint U32(int at) { Need(at, 4); return BitConverter.ToUInt32(Buf, Start + at); }
+    public int I32(int at) { Need(at, 4); return BitConverter.ToInt32(Buf, Start + at); }
+    public ushort U16(int at) { Need(at, 2); return BitConverter.ToUInt16(Buf, Start + at); }
+    public float F32(int at) { Need(at, 4); return BitConverter.ToSingle(Buf, Start + at); }
+    void Need(int at, int n)
+    {
+        if (Kids != null) throw new InvalidDataException($"chunk {Id:X4} holds chunks, not a value");
+        if (at < 0 || at > Length - n) throw new InvalidDataException($"chunk {Id:X4}: {n} bytes at {at} asked of {Length}");
+    }
+    /// <summary>A leaf's bytes as UTF-16 text, trailing NULs dropped (every name in the files read so far).</summary>
+    public string Text()
+    {
+        if (Kids != null) return "";
+        return Encoding.Unicode.GetString(Buf, Start, Length & ~1).TrimEnd('\0');
+    }
+}
+
+public sealed class MaxDocument
+{
+    /// <summary>Every stream of the file by name, unpacked.</summary>
+    public readonly Dictionary<string, byte[]> Streams = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+    /// <summary>True when at least one stream was gzip-packed (3ds Max 2010 and later write them so).</summary>
+    public bool Compressed;
+
+    const uint EndOfChain = 0xFFFFFFFE, FreeSect = 0xFFFFFFFF, MaxRegular = 0xFFFFFFFA;
+    public const long MaxFileBytes = 1L << 30;         // 1 GB: the container is held in one array
+    public const long MaxStreamBytes = 1L << 30;       // an unpacked stream stops here too
+    public const int MaxDepth = 64;                    // chunk nesting
+
+    public static MaxDocument Read(string path)
+    {
+        var fi = new FileInfo(path);
+        if (!fi.Exists) throw new FileNotFoundException("the .max file does not exist", path);
+        if (fi.Length > MaxFileBytes) throw new InvalidDataException("the .max file is " + (fi.Length / 1e9).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " GB; this reader stops at 1 GB");
+        return Read(File.ReadAllBytes(path));
+    }
+
+    public static MaxDocument Read(byte[] b)
+    {
+        if (b == null || b.Length < 512) throw new InvalidDataException("not a .max file: shorter than a compound-file header");
+        byte[] sig = { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 };
+        for (int i = 0; i < 8; i++) if (b[i] != sig[i]) throw new InvalidDataException("not a .max file: no compound-file signature (a .max is a compound file; this may be another format with a .max name)");
+        int major = BitConverter.ToUInt16(b, 0x1A);
+        int sectorShift = BitConverter.ToUInt16(b, 0x1E), miniShift = BitConverter.ToUInt16(b, 0x20);
+        if (sectorShift != 9 && sectorShift != 12) throw new InvalidDataException($"compound file: sector shift {sectorShift} (9 or 12 expected)");
+        if (miniShift != 6) throw new InvalidDataException($"compound file: mini sector shift {miniShift} (6 expected)");
+        int ss = 1 << sectorShift, mss = 1 << miniShift;
+        uint nFat = BitConverter.ToUInt32(b, 0x2C), dirStart = BitConverter.ToUInt32(b, 0x30), cutoff = BitConverter.ToUInt32(b, 0x38);
+        uint miniFatStart = BitConverter.ToUInt32(b, 0x3C), difat = BitConverter.ToUInt32(b, 0x44), nDifat = BitConverter.ToUInt32(b, 0x48);
+        long sectors = ((long)b.Length - ss) / ss;      // whole sectors after the header's
+        if (sectors <= 0) throw new InvalidDataException("compound file: no sectors after the header");
+
+        long Off(uint sect)
+        {
+            if (sect >= sectors) throw new InvalidDataException($"compound file: sector {sect} is outside the file ({sectors} sectors)");
+            return ((long)sect + 1) * ss;
+        }
+        // the sectors that hold the allocation table: 109 in the header, the rest through the DIFAT chain
+        // A file cannot hold more allocation sectors than it has sectors: without this bound a 1 MB file whose DIFAT
+        // names one sector over and over asked for 1,018 MB (review 2026-11-21).
+        if (nFat > sectors) throw new InvalidDataException($"compound file: {nFat} allocation sectors declared in a file of {sectors} sectors");
+        var fatSects = new List<uint>();
+        for (int i = 0; i < 109; i++) { uint s = BitConverter.ToUInt32(b, 0x4C + 4 * i); if (s < MaxRegular) fatSects.Add(s); }
+        int per = ss / 4;
+        for (uint guard = 0; difat < MaxRegular; guard++)
+        {
+            if (guard > nDifat || guard > sectors) throw new InvalidDataException("compound file: the DIFAT chain is longer than its count (a loop)");
+            long o = Off(difat);
+            for (int i = 0; i < per - 1; i++) { uint s = BitConverter.ToUInt32(b, (int)o + 4 * i); if (s < MaxRegular) fatSects.Add(s); }
+            if (fatSects.Count > sectors) throw new InvalidDataException($"compound file: more allocation sectors listed than the file has sectors ({sectors})");
+            difat = BitConverter.ToUInt32(b, (int)o + 4 * (per - 1));
+        }
+        if (nFat > fatSects.Count) throw new InvalidDataException($"compound file: {nFat} allocation sectors declared, {fatSects.Count} listed");
+        var fat = new uint[(long)nFat * per > int.MaxValue ? throw new InvalidDataException("compound file: allocation table too large") : (int)nFat * per];
+        for (int f = 0; f < nFat; f++) Buffer.BlockCopy(b, (int)Off(fatSects[f]), fat, f * ss, ss);
+
+        // a sector met twice in ONE walk is a loop, also a short one inside a stream's declared size (the walk stops at
+        // that size, so counting steps against the file's sector count would no longer see it)
+        var walkOf = new int[sectors]; int walk = 0;
+        byte[] Chain(uint start, long size, string what)
+        {
+            walk++;
+            // size < 0 = the whole chain (the directory, the mini FAT). A stream's chain is walked only as far as the
+            // stream's declared size: walked to its end every time, 32,000 one-byte streams that all name one long
+            // chain took 100 s from a 4 MB file (review round 3) - the streams' sizes together are held under the
+            // file's length below, a chain's length was not.
+            using (var ms = new MemoryStream())
+            {
+                uint s = start; long n = 0;
+                while (s < MaxRegular && (size < 0 || ms.Length < size))
+                {
+                    if (++n > sectors) throw new InvalidDataException($"compound file: the sector chain of {what} loops");
+                    long at = Off(s);                             // refuses a sector outside the file before it is marked
+                    if (walkOf[s] == walk) throw new InvalidDataException($"compound file: the sector chain of {what} loops");
+                    walkOf[s] = walk;
+                    ms.Write(b, (int)at, ss);
+                    if (s >= fat.Length) throw new InvalidDataException($"compound file: sector {s} of {what} has no allocation entry");
+                    s = fat[s];
+                }
+                if (size < 0 && s != EndOfChain) throw new InvalidDataException($"compound file: the sector chain of {what} ends in {s:X8}, not in the end mark");
+                if (size >= 0 && ms.Length < size) throw new InvalidDataException(s == EndOfChain ? $"compound file: {what} declares {size} bytes, its chain holds {ms.Length}" : $"compound file: the sector chain of {what} ends in {s:X8}, not in the end mark");
+                var all = ms.ToArray();
+                if (size < 0 || size == all.Length) return all;
+                var cut = new byte[size]; Buffer.BlockCopy(all, 0, cut, 0, (int)size); return cut;
+            }
+        }
+
+        byte[] dir = Chain(dirStart, -1, "the directory");
+        var entries = new List<(string name, int type, uint start, long size)>();
+        for (int i = 0; i + 128 <= dir.Length; i += 128)
+        {
+            int nameLen = BitConverter.ToUInt16(dir, i + 0x40), type = dir[i + 0x42];
+            if (type == 0 || nameLen < 2 || nameLen > 64) continue;
+            string name = Encoding.Unicode.GetString(dir, i, nameLen - 2);
+            uint start = BitConverter.ToUInt32(dir, i + 0x74);
+            long size = major >= 4 ? BitConverter.ToInt64(dir, i + 0x78) : BitConverter.ToUInt32(dir, i + 0x78);
+            if (size < 0 || size > MaxStreamBytes) throw new InvalidDataException($"compound file: stream '{name}' declares {size} bytes");
+            entries.Add((name, type, start, size));
+        }
+        int root = entries.FindIndex(e => e.type == 5);
+        if (root < 0) throw new InvalidDataException("compound file: no root entry");
+        byte[] mini = entries[root].size > 0 && entries[root].start < MaxRegular ? Chain(entries[root].start, entries[root].size, "the mini stream") : new byte[0];
+        uint[] miniFat = new uint[0];
+        if (miniFatStart < MaxRegular) { var mf = Chain(miniFatStart, -1, "the mini allocation table"); miniFat = new uint[mf.Length / 4]; Buffer.BlockCopy(mf, 0, miniFat, 0, miniFat.Length * 4); }
+        var miniWalkOf = new int[Math.Min(miniFat.Length, (mini.Length + mss - 1) / mss)];
+
+        var doc = new MaxDocument();
+        long claimed = 0;
+        foreach (var e in entries)
+        {
+            if (e.type != 2) continue;
+            // two entries of one name: the first wins (no file read so far has it), and the second is not even walked
+            if (doc.Streams.ContainsKey(e.name)) continue;
+            // Streams do not share sectors, so together they cannot hold more bytes than the file: without this bound
+            // 4,095 entries naming one chain cost 2.5 GB from a 529 KB file (review 2026-11-21).
+            if (e.size > 0 && e.size < cutoff && e.size > mini.Length) throw new InvalidDataException($"compound file: stream '{e.name}' declares {e.size} bytes, the mini stream holds {mini.Length}");
+            claimed += e.size;
+            if (claimed > b.Length) throw new InvalidDataException($"compound file: its streams declare more bytes together than the file holds ({b.Length}) - sectors named by more than one stream");
+            byte[] raw;
+            if (e.size == 0) raw = new byte[0];
+            else if (e.size < cutoff)
+            {
+                walk++;
+                raw = new byte[e.size];
+                uint s = e.start; long done = 0;
+                while (done < e.size)
+                {
+                    if (s >= MaxRegular) throw new InvalidDataException($"compound file: stream '{e.name}' declares {e.size} bytes, its mini chain holds {done}");
+                    long from = (long)s * mss;
+                    int take = (int)Math.Min(mss, e.size - done);
+                    if (from + take > mini.Length) throw new InvalidDataException($"compound file: mini sector {s} of '{e.name}' is outside the mini stream");
+                    if (s >= miniFat.Length) throw new InvalidDataException($"compound file: mini sector {s} of '{e.name}' has no allocation entry");
+                    if (miniWalkOf[s] == walk) throw new InvalidDataException($"compound file: the mini chain of '{e.name}' loops");
+                    miniWalkOf[s] = walk;
+                    Buffer.BlockCopy(mini, (int)from, raw, (int)done, take);
+                    done += take;
+                    s = miniFat[s];
+                }
+            }
+            else raw = Chain(e.start, e.size, "stream '" + e.name + "'");
+            // Unpacked only when it is one of the streams this reader READS: unpacking every stream on sight let four
+            // unread streams of 149 KB cost 1,590 MB (review round 2). Any other packed stream stays as the file has it.
+            if (raw.Length >= 2 && raw[0] == 0x1F && raw[1] == 0x8B)
+            {
+                doc.Compressed = true;
+                if (Array.IndexOf(ReadStreams, e.name) >= 0) raw = Gunzip(raw, e.name);
+            }
+            doc.Streams[e.name] = raw;
+        }
+        return doc;
+    }
+
+    /// <summary>The streams the reader parses; a packed stream of another name is kept packed.</summary>
+    public static readonly string[] ReadStreams = { "Scene", "ClassDirectory", "ClassDirectory2", "ClassDirectory3" };
+    /// <summary>A packed stream may unpack to this many times its packed size (and always to 64 MB). Scene data packs a
+    /// few times over; a stream built to unpack a thousand times over is refused when it passes the bound, not at 1 GB.</summary>
+    public const int MaxUnpackRatio = 200;
+    public const long UnpackFloor = 64L << 20;
+
+    static byte[] Gunzip(byte[] raw, string name)
+    {
+        long limit = Math.Min(MaxStreamBytes, Math.Max(UnpackFloor, (long)raw.Length * MaxUnpackRatio));
+        try
+        {
+            using (var src = new MemoryStream(raw))
+            using (var gz = new GZipStream(src, CompressionMode.Decompress))
+            using (var outp = new MemoryStream())
+            {
+                var buf = new byte[1 << 16];
+                for (;;)
+                {
+                    int n = gz.Read(buf, 0, buf.Length);
+                    if (n <= 0) break;
+                    if (outp.Length + n > limit) throw new InvalidDataException($"stream '{name}' is {raw.Length} bytes packed and unpacks to more than {limit >> 20} MB; this reader stops there");
+                    outp.Write(buf, 0, n);
+                }
+                return outp.ToArray();
+            }
+        }
+        catch (InvalidDataException) { throw; }
+        catch (Exception e) { throw new InvalidDataException($"stream '{name}' is gzip-packed and does not unpack: {e.Message}"); }
+    }
+
+    /// <summary>The chunk tree of a stream; an absent stream gives null.</summary>
+    public List<MaxChunk> Chunks(string stream)
+    {
+        if (!Streams.TryGetValue(stream, out var buf)) return null;
+        int count = 0;
+        return ParseChunks(buf, 0, buf.Length, 0, stream, ref count);
+    }
+
+    public static List<MaxChunk> ParseChunks(byte[] buf) { int count = 0; return ParseChunks(buf, 0, buf.Length, 0, "the stream", ref count); }
+
+    /// <summary>A stream's chunk tree stops here: the tree is built whole, and a packed stream of 20 million empty
+    /// chunks (175 KB packed) cost 1,761 MB before the review. This bound brought that to 407 MB; the bound on what
+    /// a stream may unpack to (below) now stops that file first, and this one holds for a stream that is not packed.
+    /// The largest sample Scene stream holds 11,876 chunks for its 152 parts - about 80 a part, so the bound leaves
+    /// room for a scene of some 25,000 parts.</summary>
+    public const int MaxChunks = 2000000;
+
+    static List<MaxChunk> ParseChunks(byte[] buf, int lo, int hi, int depth, string where, ref int count)
+    {
+        if (depth > MaxDepth) throw new InvalidDataException($"{where}: chunks nested deeper than {MaxDepth}");
+        var list = new List<MaxChunk>();
+        while (lo < hi)
+        {
+            if (++count > MaxChunks) throw new InvalidDataException($"{where}: more than {MaxChunks} chunks; this reader stops there");
+            if (hi - lo < 6) throw new InvalidDataException($"{where}: {hi - lo} stray byte(s) at {lo} where a chunk header belongs");
+            ushort id = BitConverter.ToUInt16(buf, lo);
+            uint s32 = BitConverter.ToUInt32(buf, lo + 2);
+            int head = 6; long size; bool container;
+            if (s32 == 0)
+            {
+                if (hi - lo < 14) throw new InvalidDataException($"{where}: chunk {id:X4} at {lo} has a 64-bit size that runs past its parent");
+                ulong s64 = BitConverter.ToUInt64(buf, lo + 6);
+                head = 14; container = (s64 >> 63) != 0; size = (long)(s64 & 0x7FFFFFFFFFFFFFFFUL);
+            }
+            else { container = (s32 >> 31) != 0; size = s32 & 0x7FFFFFFF; }
+            if (size < head || size > hi - lo) throw new InvalidDataException($"{where}: chunk {id:X4} at {lo} declares {size} bytes, {hi - lo} remain in its parent");
+            var c = new MaxChunk { Id = id, Buf = buf };
+            if (container) c.Kids = ParseChunks(buf, lo + head, lo + (int)size, depth + 1, where, ref count);
+            else { c.Start = lo + head; c.Length = (int)size - head; }
+            list.Add(c);
+            lo += (int)size;
+        }
+        return list;
+    }
+}

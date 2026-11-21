@@ -587,10 +587,11 @@ public class VehicleLabWindow : EditorWindow
 
         using (new EditorGUILayout.HorizontalScope())
         {
-            srcFile = EditorGUILayout.TextField(new GUIContent("Raw model", "The static source model (glb/gltf/fbx/obj/blend)."), srcFile);
+            srcFile = EditorGUILayout.TextField(new GUIContent("Raw model", "The static source model (glb/gltf/fbx/obj/blend). A 3ds Max file (.max) is converted to name_max.glb beside it first."), srcFile);
             if (GUILayout.Button("Browse…", GUILayout.Width(70)))
             {
-                var p = EditorUtility.OpenFilePanel("Pick the static vehicle model", Path.GetDirectoryName(string.IsNullOrEmpty(srcFile) ? "D:/3DModels" : srcFile), "glb,gltf,fbx,obj,blend");
+                var p = EditorUtility.OpenFilePanel("Pick the static vehicle model", Path.GetDirectoryName(string.IsNullOrEmpty(srcFile) ? "D:/3DModels" : srcFile), "glb,gltf,fbx,obj,blend,max");
+                p = MaxImport.Picked(p);   // a .max is converted to a .glb beside it; null = not converted (the user was told)
                 if (!string.IsNullOrEmpty(p))
                 {
                     // KEEP the marked roles (2026-09-06, "I had to redo everything again"): re-pointing a recipe at a
@@ -602,8 +603,19 @@ public class VehicleLabWindow : EditorWindow
                     status = parts.Count > 0 ? $"Source changed; {parts.Count} marked part(s) KEPT — press Probe parts to re-list against the new file (roles re-apply by name)." : "";
                     outGlb = Path.Combine(Path.GetDirectoryName(p), Path.GetFileNameWithoutExtension(p) + "_Spin.glb").Replace('\\', '/');   // suggestion only — fully editable below
                 }
+                MaxImport.ExitGuiAfterDialogs();
             }
         }
+        // a typed .max path: a Convert button under the field
+        if (MaxModel.IsMax(srcFile)) MaxImport.TypedPathGui(srcFile, glb =>
+        {
+            srcFile = glb;
+            status = parts.Count > 0 ? $"Source converted; {parts.Count} marked part(s) KEPT — press Probe parts to re-list against the new file." : "3ds Max file converted — press Probe parts.";
+            // as a picked file does: suggest the output beside the new source (fully editable below), so the field does
+            // not keep the name a previous model left in it
+            outGlb = Path.Combine(Path.GetDirectoryName(glb), Path.GetFileNameWithoutExtension(glb) + "_Spin.glb").Replace('\\', '/');
+            Repaint();
+        });
         using (new EditorGUILayout.HorizontalScope())
         {
             outGlb = EditorGUILayout.TextField(new GUIContent("Output GLB", "Where the rigged Spin GLB is written. Defaults to <source>_Spin.glb next to the source, but fully yours — an existing file asks before being overwritten (protect hand-made rigs!)."), outGlb);
@@ -634,12 +646,21 @@ public class VehicleLabWindow : EditorWindow
                 if (GUILayout.Button("Browse…", GUILayout.Width(70)))
                 {
                     var p2 = EditorUtility.OpenFilePanel("Pick the second model",
-                        Path.GetDirectoryName(string.IsNullOrEmpty(srcFile2) ? (string.IsNullOrEmpty(srcFile) ? "D:/3DModels" : srcFile) : srcFile2), "glb,gltf,fbx,obj");
+                        Path.GetDirectoryName(string.IsNullOrEmpty(srcFile2) ? (string.IsNullOrEmpty(srcFile) ? "D:/3DModels" : srcFile) : srcFile2), "glb,gltf,fbx,obj,max");
+                    p2 = MaxImport.Picked(p2);   // a .max is converted to a .glb beside it
                     if (!string.IsNullOrEmpty(p2)) { srcFile2 = p2.Replace('\\', '/'); status = "Second model set — press Probe parts to list the merged pair (B_ prefix)."; }
+                    MaxImport.ExitGuiAfterDialogs();
                 }
                 if (!string.IsNullOrWhiteSpace(srcFile2) && GUILayout.Button("Clear", GUILayout.Width(50)))
                 { srcFile2 = ""; status = "Second model cleared — press Probe parts to re-list; its B_ parts drop out on their own."; }
             }
+            // a typed .max path: a Convert button under this field too
+            if (MaxModel.IsMax(srcFile2)) MaxImport.TypedPathGui(srcFile2, glb =>
+            {
+                srcFile2 = glb;
+                status = "Second model converted — press Probe parts to list the merged pair (B_ prefix).";
+                Repaint();
+            });
             using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(srcFile2)))
             {
                 model2Off = EditorGUILayout.Vector3Field(new GUIContent("Offset (X, Y, Z)",
@@ -1589,6 +1610,16 @@ public class VehicleLabWindow : EditorWindow
 
     void Probe()
     {
+        // A typed or recipe-loaded .max that was never converted: no probe (ours or Blender's) can open one, and the
+        // Blender one answered with an import error that does not name the way out.
+        if (MaxModel.IsMax(srcFile) || MaxModel.IsMax(srcFile2))
+        {
+            bool first = MaxModel.IsMax(srcFile); string max = (first ? srcFile : srcFile2).Trim();
+            // the Convert button is drawn only for a file that exists: name the missing file instead of a button that is not there
+            status = !File.Exists(max) ? "The 3ds Max file in the " + (first ? "Raw model" : "Second model") + " field does not exist: " + max
+                : "A 3ds Max file must be converted first: press 'Convert .max' under the " + (first ? "Raw model" : "Second model (in 'Second model — merge another source')") + " field, then Probe parts.";
+            return;
+        }
         // Re-probing MERGES, never wipes: roles already assigned (by hand or a loaded recipe) are re-applied by
         // part name. This is also how a minimal recipe expands for review — Load recipe, then Probe to surface
         // every unmarked part around the kept markings.
@@ -2325,6 +2356,13 @@ public class VehicleLabWindow : EditorWindow
     void Vehicleize()
     {
         lastStdout = ""; lastGenerateRoute = ""; lastGenerateFallback = "";
+        // as Probe: an unconverted .max (typed over a session that still has probed parts) went to Blender and came back
+        // as "unsupported extension .max", which does not name the way out
+        if (MaxModel.IsMax(srcFile) || MaxModel.IsMax(srcFile2))
+        {
+            status = "A 3ds Max file must be converted first: press 'Convert .max' under the " + (MaxModel.IsMax(srcFile) ? "Raw model" : "Second model") + " field, Probe parts, then Generate.";
+            return;
+        }
         string twoSidedRefusal = VehicleLabRules.TwoSidedFastPathRefusal(FastPath, ActiveParts.Any(p => p.role == Role.TwoSided));
         if (twoSidedRefusal != null) { status = twoSidedRefusal; return; }
         if (FastPath && ActiveParts.Any(p => p.role == Role.Oar))
