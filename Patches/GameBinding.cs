@@ -143,6 +143,13 @@ namespace HumankindAssetFramework
         internal static Type GameObjectPoolController        => Cached("PresentationGameObjectPoolController");
         // ---- world state ----
         internal static Type Sandbox             => Cached("Amplitude.Mercury.Sandbox.Sandbox");
+        // ---- technologies (Patches/TechRequireAllPatch.cs: listed technologies need ALL their prerequisites) ----
+        internal static Type SimulationTechnology       => Cached("Amplitude.Mercury.Simulation.Technology");                   // one technology of one empire (state, queued)
+        internal static Type TechnologyQueue            => Cached("Amplitude.Mercury.Simulation.TechnologyQueue");
+        internal static Type QueuedTechnologyConstraint => Cached("Amplitude.Mercury.Simulation.QueuedTechnologyConstraint");   // "parent before child" in the research queue
+        internal static Type TechnologyDefinition       => Cached("Amplitude.Mercury.Data.Simulation.TechnologyDefinition");
+        internal static Type TechnologyPrerequisite     => Cached("Amplitude.Mercury.Data.Simulation.TechnologyPrerequisite");
+        internal static Type ArrayWithFrame             => Cached("Amplitude.Mercury.Interop.ArrayWithFrame`1");               // DepartmentOfScience.Technologies: the array sits in its Data field
 
         // ---- A5, the STRUCT BATCH (2026-08-19): game structs HAF reaches STRUCTURALLY — as array elements and
         // field values off the types above — so their NAMES never appear in code and a name-based catalog entry
@@ -553,6 +560,13 @@ namespace HumankindAssetFramework
             new Dep(GameObjectPoolController, nameof(GameObjectPoolController), "DoStart"),
             // world
             new Dep(Sandbox, nameof(Sandbox), "MajorEmpires", "NumberOfMajorEmpires", "Timeline"),
+            // technologies that need ALL prerequisites (TechRequireAllPatch.cs) - every member its Bind resolves (DepartmentOfScience's own row is further down, with the era reads)
+            new Dep(SimulationTechnology, nameof(SimulationTechnology), "TechnologyDefinition", "TechnologyState", "IsInQueue"),
+            new Dep(TechnologyQueue, nameof(TechnologyQueue), "QueuedTechnologyConstraints"),
+            new Dep(QueuedTechnologyConstraint, nameof(QueuedTechnologyConstraint), "ParentTechnologyIndex", "ChildTechnologyIndex"),
+            new Dep(TechnologyDefinition, nameof(TechnologyDefinition), "TechnologyPrerequisite", "Name"),
+            new Dep(TechnologyPrerequisite, nameof(TechnologyPrerequisite), "TechnologyNames"),
+            new Dep(ArrayWithFrame, nameof(ArrayWithFrame), "Data"),
             // runtime module order — the ordered active-mod list HAF sorts packs by (docs/Multi-Mod.md). First reflection
             // site migrated onto the catalog (was a raw Type.GetType in GetRuntimeModulesRaw); a rename now shows here.
             new Dep(FrameworkServices, nameof(FrameworkServices), "GetService"),
@@ -608,7 +622,9 @@ namespace HumankindAssetFramework
             new Dep(PresentationAirFormation, nameof(PresentationAirFormation), "airFormationUnits"),
             new Dep(PresentationAirUnit, nameof(PresentationAirUnit), "PresentationUnit", "MainPawn"),
             new Dep(MajorEmpire, nameof(MajorEmpire), "DepartmentOfScience", "Armies", "Squadrons"),   // Armies/Squadrons: CurrentEra's built-unit walk (ScaleEra.cs), read through a name loop
-            new Dep(DepartmentOfScience, nameof(DepartmentOfScience), "GetTechnologicalEra", "CurrentTechnologicalEraIndex"),
+            new Dep(DepartmentOfScience, nameof(DepartmentOfScience), "GetTechnologicalEra", "CurrentTechnologicalEraIndex",
+                "UpdateTechnologiesState", "CheckTechnologyPrerequisite", "AddLockedTechnologyToQueue", "RemoveTechnologyFromQueueAt",   // TechRequireAllPatch.cs: hook targets and the prerequisite call
+                "Technologies", "TechnologyQueue", "GetTechnologyIndex", "FindTechnologyIndexInQueue", "AddTechnologyToQueue", "MoveTechnologyInQueue"),   // ...and what its Bind resolves
             new Dep(Timeline, nameof(Timeline), "GetGlobalEraIndex"),
             new Dep(PresentationLevelBuildComponent, nameof(PresentationLevelBuildComponent), "channels", "RefreshChannel"),
             new Dep(LevelBuildChannel, nameof(LevelBuildChannel), "evolverMaterial", "EvolverMaterialGuid"),

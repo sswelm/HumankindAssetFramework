@@ -1800,6 +1800,39 @@ dismissed.
 - **`BoneRotation` slot clobber** (`UniversalInject.Pose.cs`): on the `useDonorClip` path `ApplyRotorSpin` /
   `ApplyRotorTrim` / `ApplyGunElevation` write overlapping low slots — a rotor-spin + trim combo can clobber.
 
+## Tech Requires All — open after PR #298 (2026-11-20)
+
+Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`). Nothing here was seen in a game.
+
+- **Never run in a game session.** The tech screen, a real research queue, the AI and multiplayer are unexercised; the
+  drills call the game's methods on objects built without their constructors. First thing to do before relying on it.
+- **Dragging in the research queue is not run against the game's code.** `tools/tech_requires_all_game_drill.sh`
+  replaces `MoveTechnologyInQueue` with a list operation. A hand port of the game's move, fuzzed over 40,000 random
+  queues with several parents per technology, always ended and kept parents in front — a port, not the method. The
+  drill could run the real method with only the `SetSynchronizationDirty` call stripped, as it does for the removal.
+- **The AI gives a listed technology's second prerequisite no extra weight** (read in
+  `ResearchTechnologyPrerequisites.GenerateDesires`, not run): the pass walks the prerequisite names in order and stops
+  at the first one that is not available, so with the first one completed it creates no task for the second. Read the
+  same day: no hang follows — the AI queues only available technologies, every loop over prerequisites is a bounded
+  `for`, and a refused order marks the task failed. The second prerequisite is still reached by the AI's own goal for it.
+- **No warning for a prerequisite that can stop being researchable.** A listed technology that needs an
+  `IsExclusiveToEra` technology locks for good once that era passes (the game's ANY rule hides this). The window does
+  not warn. ENC on 2026-11-20: two era-exclusive technologies, neither a prerequisite of a two-prerequisite technology.
+- **A technology already queued behind one prerequisite keeps its place** when the list is added mid-game: the queue is
+  only planned when something is added, and research is paid into the queue without looking at the lock.
+- **The tech screen gives no hint** that a technology needs all its prerequisites.
+- **The planner walks up to 32 levels where the game stops at 5** (`TryFillParentTechnologiesToCompleteBefore`), in a
+  tree that holds a listed technology. Deliberate; noted because it is a difference from the game.
+- **The new window depends on a local change to the Tech Tree viewer.** `TechRequireAllWindow` reuses the viewer's
+  `TechPickerDropdown` (`editor/TechTreeWindow.cs`) and passes a heading as a fourth constructor argument; the picker's
+  heading was a fixed text before. The viewer came from another modder's tool (the user, 2026-11-20; the file has no
+  credit line and its history here starts at 2026-08-24, the move into this repo). Replacing the file with a newer
+  copy of that tool drops the `title` parameter and the new window stops compiling. Fine for now (the user, same day);
+  the clean cut is to give the new window its own picker so the viewer file is untouched.
+- **A save with a planned queue, loaded with the plugin uninstalled, is not guarded** against the double visit in
+  `RemoveTechnologyAndChildrenFromQueueAt`. Documented in Editor-Tools and Capabilities; no fix is possible from a
+  plugin that is not there.
+
 ## Data contract — low (editor ⇄ plugin)
 
 - **`rotorSpinBones` / `rotorSpinSpeed`** are plugin-only fields with no editor `ModelDef` field. *Partly addressed

@@ -153,6 +153,7 @@ namespace HumankindAssetFramework
 
         internal static ConfigEntry<bool>   FormationOverrideOn;  // FORMATION axis: haf_formations.json (Formation Override window) — inject custom formations + repoint units (pawn count per unit)
         internal static ConfigEntry<bool>   FormationReinstantiateOn; // FORMATION axis: after apply, re-instantiate already-spawned units of a repointed type so they reach the new pawn count (fixes the load-race undercount)
+        internal static ConfigEntry<bool>   TechRequireAllOn;     // TECHNOLOGIES: haf_tech_requires_all.json (Tech Requires All window) — listed technologies unlock only when ALL their prerequisites are completed
 
         private bool show;
         private Rect winRect = new Rect(60, 60, 520, 420);
@@ -217,6 +218,9 @@ namespace HumankindAssetFramework
                 typeof(Hk_BattleTurnStep),    // BATTLE TURN forensics (diag=1): log StepTurning route (animated vs unanimated) + start/end angles (2026-08-05)
                 typeof(Hk_PivotMoveHold),     // PIVOT IN PLACE: defer a pawn's vanilla move start while its eased yaw turns to the new facing (2026-08-22, docs/Turn-Ease.md)
                 typeof(Hk_MouseCoverExtend),  // F8 window click-through fix: hovering our window counts as the game's own mouse-covered (map stops panning under it) (2026-08-17)
+                typeof(Hk_TechRequireAllCheck),  // TECHNOLOGIES: a listed technology stays locked until ALL its prerequisites are completed (vanilla: any one) (2026-11-20)
+                typeof(Hk_TechRequireAllQueue),  // TECHNOLOGIES: queueing a locked technology puts EVERY missing prerequisite of a listed one in front (vanilla: one chain) (2026-11-20)
+                typeof(Hk_TechRequireAllRemove), // TECHNOLOGIES: the game's removal cascade survives a technology queued behind two prerequisites; NOT gated on the list, the constraints are in the save (2026-11-20)
         };
 
         private void Awake()
@@ -472,6 +476,16 @@ namespace HumankindAssetFramework
                                   "units) that spawned DURING load, before the override + Formation3D-prefab growth landed, so they were stuck at " +
                                   "the vanilla count. Costs a one-time visible pawn 're-form' pop on those units. Turn off to keep the count units " +
                                   "had when they first rendered.");
+
+            // --- TECHNOLOGIES that need ALL prerequisites (Patches/TechRequireAllPatch.cs). List-driven and inert
+            //     without haf_tech_requires_all.json, so it defaults ON like FormationOverride. ---
+            TechRequireAllOn = Config.Bind("Technologies", "TechRequireAll", true,
+                                  "List-driven prerequisite rule (the Tech Requires All editor window): reads haf_tech_requires_all.json. " +
+                                  "A technology named there becomes available only when ALL its prerequisites are completed (the game's own " +
+                                  "rule is ANY ONE), and queueing it while locked queues every missing prerequisite in front of it. Changes " +
+                                  "the simulation: in multiplayer every player needs the same list. No baked assets, nothing in the save: " +
+                                  "remove a name and that technology is vanilla on the next launch. Inert when the file is absent or empty. " +
+                                  "false = ignore the file.");
 
             // Patch each hook independently so a single missing Amplitude target (a game update renaming one type) only
             // disables THAT hook -- instead of a null TargetMethod throwing out of PatchAll and failing the whole plugin.
