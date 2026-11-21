@@ -8,7 +8,8 @@
 // first) and from the public descriptions of the format; two open-source readers (io_scene_max, Ryzom Core's
 // pipeline_max) served as references for the chunk ids, and no code of theirs is in here. What does not hold - a
 // file that is not a compound file, a sector chain that leaves the file or loops, a chunk that runs past its parent - is
-// refused by name with InvalidDataException, never read around.
+// refused by name with InvalidDataException. Two things are passed over, not refused: a second directory entry of a
+// name already read, and a directory entry whose name length is not one a name can have.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -66,7 +67,7 @@ public sealed class MaxDocument
     {
         var fi = new FileInfo(path);
         if (!fi.Exists) throw new FileNotFoundException("the .max file does not exist", path);
-        if (fi.Length > MaxFileBytes) throw new InvalidDataException($"the .max file is {fi.Length / 1e9:0.0} GB; this reader stops at 1 GB");
+        if (fi.Length > MaxFileBytes) throw new InvalidDataException("the .max file is " + (fi.Length / 1e9).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " GB; this reader stops at 1 GB");
         return Read(File.ReadAllBytes(path));
     }
 
@@ -109,21 +110,31 @@ public sealed class MaxDocument
         var fat = new uint[(long)nFat * per > int.MaxValue ? throw new InvalidDataException("compound file: allocation table too large") : (int)nFat * per];
         for (int f = 0; f < nFat; f++) Buffer.BlockCopy(b, (int)Off(fatSects[f]), fat, f * ss, ss);
 
+        // a sector met twice in ONE walk is a loop, also a short one inside a stream's declared size (the walk stops at
+        // that size, so counting steps against the file's sector count would no longer see it)
+        var walkOf = new int[sectors]; int walk = 0;
         byte[] Chain(uint start, long size, string what)
         {
-            // size < 0 = the whole chain (the directory, the mini FAT)
+            walk++;
+            // size < 0 = the whole chain (the directory, the mini FAT). A stream's chain is walked only as far as the
+            // stream's declared size: walked to its end every time, 32,000 one-byte streams that all name one long
+            // chain took 100 s from a 4 MB file (review round 3) - the streams' sizes together are held under the
+            // file's length below, a chain's length was not.
             using (var ms = new MemoryStream())
             {
                 uint s = start; long n = 0;
-                while (s < MaxRegular)
+                while (s < MaxRegular && (size < 0 || ms.Length < size))
                 {
                     if (++n > sectors) throw new InvalidDataException($"compound file: the sector chain of {what} loops");
-                    ms.Write(b, (int)Off(s), ss);
+                    long at = Off(s);                             // refuses a sector outside the file before it is marked
+                    if (walkOf[s] == walk) throw new InvalidDataException($"compound file: the sector chain of {what} loops");
+                    walkOf[s] = walk;
+                    ms.Write(b, (int)at, ss);
                     if (s >= fat.Length) throw new InvalidDataException($"compound file: sector {s} of {what} has no allocation entry");
                     s = fat[s];
                 }
-                if (s != EndOfChain) throw new InvalidDataException($"compound file: the sector chain of {what} ends in {s:X8}, not in the end mark");
-                if (size >= 0 && ms.Length < size) throw new InvalidDataException($"compound file: {what} declares {size} bytes, its chain holds {ms.Length}");
+                if (size < 0 && s != EndOfChain) throw new InvalidDataException($"compound file: the sector chain of {what} ends in {s:X8}, not in the end mark");
+                if (size >= 0 && ms.Length < size) throw new InvalidDataException(s == EndOfChain ? $"compound file: {what} declares {size} bytes, its chain holds {ms.Length}" : $"compound file: the sector chain of {what} ends in {s:X8}, not in the end mark");
                 var all = ms.ToArray();
                 if (size < 0 || size == all.Length) return all;
                 var cut = new byte[size]; Buffer.BlockCopy(all, 0, cut, 0, (int)size); return cut;
@@ -233,10 +244,11 @@ public sealed class MaxDocument
 
     public static List<MaxChunk> ParseChunks(byte[] buf) { int count = 0; return ParseChunks(buf, 0, buf.Length, 0, "the stream", ref count); }
 
-    /// <summary>A stream's chunk tree stops here: the tree is built whole, and a gzip-packed stream of empty chunks
-    /// (179 KB packed, 20 million chunks) cost 1,761 MB before this bound (review 2026-11-21). The largest of the four
-    /// sample scenes holds 11,981 chunks for its 152 parts - about 80 a part, so the bound leaves room for a scene of
-    /// some 25,000 parts.</summary>
+    /// <summary>A stream's chunk tree stops here: the tree is built whole, and a packed stream of 20 million empty
+    /// chunks (175 KB packed) cost 1,761 MB before the review. This bound brought that to 407 MB; the bound on what
+    /// a stream may unpack to (below) now stops that file first, and this one holds for a stream that is not packed.
+    /// The largest sample Scene stream holds 11,876 chunks for its 152 parts - about 80 a part, so the bound leaves
+    /// room for a scene of some 25,000 parts.</summary>
     public const int MaxChunks = 2000000;
 
     static List<MaxChunk> ParseChunks(byte[] buf, int lo, int hi, int depth, string where, ref int count)

@@ -35,6 +35,9 @@ public static class MaxImport
     {
         if (!dialogShown) return;
         dialogShown = false;
+        // the path field may hold the keyboard (a typed path, then Browse): a field shows its own edit buffer while
+        // it does, and the next keystroke would write the old text back over the picked file
+        GUIUtility.keyboardControl = 0;
         GUIUtility.ExitGUI();
     }
 
@@ -99,8 +102,10 @@ public static class MaxImport
                 EditorUtility.DisplayDialog("3ds Max file not read", Path.GetFileName(maxPath) + " could not be converted - the reader failed in a way it does not name (" + e.GetType().Name + "):\n\n" + e.Message + "\n\nThe Console holds the details.", "OK");
                 return null;
             }
-            Debug.LogError("[HAF] the .max file could not be converted: " + maxPath + "\n" + e);
-            EditorUtility.DisplayDialog("3ds Max file not read", Path.GetFileName(maxPath) + " could not be converted:\n\n" + e.Message, "OK");
+            Debug.LogError("[HAF] the .max file could not be converted: " + maxPath + " (its copy goes to " + target + ")\n" + e);
+            // a failure to WRITE the copy says "access denied" without a path: the dialog names where the copy goes
+            EditorUtility.DisplayDialog("3ds Max file not read", Path.GetFileName(maxPath) + " could not be converted:\n\n" + e.Message
+                + (e is IOException || e is UnauthorizedAccessException ? "\n\nThe copy is written beside the .max, as\n" + target + "\n(a folder that cannot be written to cannot hold it)." : ""), "OK");
             return null;
         }
         finally { EditorUtility.ClearProgressBar(); }

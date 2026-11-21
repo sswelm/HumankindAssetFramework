@@ -8,14 +8,14 @@
 // - the Scene stream holds ONE container whose children are the scene's objects; a child's chunk id is its class's
 //   index in the directory, except 0x2032 / 0x2033 = a derived object (an object with modifiers on it);
 // - an object names others by INDEX in that list: chunk 0x2034 is a plain array of indices (0xFFFFFFFF = none),
-//   chunk 0x2035 a count followed by (slot, index) pairs;
+//   chunk 0x2035 the object's slot count followed by (slot, index) pairs;
 // - a node's references are 0 = its transform controller, 1 = its object, 3 = its material.
 //
 // WHAT IS READ: Editable Mesh and the older MeshObject (vertices, faces with smoothing group and material id, one UV
 // channel); the Position/Rotation/Scale controller with Bezier position, TCB rotation, Bezier scale and list controllers
 // (their first entry); the object offset; Standard materials (diffuse colour, opacity, two-sided, the diffuse slot's
 // Bitmap or Mask-of-two-Bitmaps with its amount, offset, tiling and the tile switches); Multi/Sub-Object.
-// WHAT IS NOT, said by name in the notes and never guessed: modifiers (a .max stores the base object and the list of
+// WHAT IS NOT, said in the notes wherever the reader can tell it is there: modifiers (a .max stores the base object and the list of
 // modifiers, not the result - only 3ds Max can evaluate them; a Skin is one of them and is counted with them),
 // parametric primitives (stored as their parameters), Editable Poly (no sample file yet to hold a reader to),
 // controllers of other classes, procedural maps, every map slot but diffuse (named by slot), a map's angle and mirror
@@ -158,6 +158,9 @@ public sealed class MaxScene
         if (refsOf.TryGetValue(c, out var have)) return have;
         var r = new SortedDictionary<int, int>(); int slots = 0;
         var a = c.First(0x2034);
+        var listed = a != null && !a.IsContainer ? a : c.First(0x2035);
+        if (listed != null && !listed.IsContainer && listed.Length / 4 > MaxReferences)
+            throw new InvalidDataException($"an object of the scene ({ClassName(c)}) lists {listed.Length / 4} references; this reader stops at {MaxReferences}");
         if (a != null && !a.IsContainer)
         {
             slots = a.Length / 4;
@@ -185,8 +188,18 @@ public sealed class MaxScene
                 }
         }
         refsOf[c] = r; slotsOf[c] = slots;
+        int last = -1; foreach (var kv in r) last = kv.Value;       // ascending by slot: the last one stays
+        lastOf[c] = last;
         return r;
     }
+    /// <summary>One object's references stop here (the samples' longest list is a map table's 22 slots). The list is
+    /// kept as a sorted table, and what the model says about it is built from it: 16 million references in a 5 KB
+    /// file cost gigabytes (review round 3).</summary>
+    public const int MaxReferences = 1000000;
+    readonly Dictionary<MaxChunk, int> lastOf = new Dictionary<MaxChunk, int>();
+    /// <summary>The object in the highest filled slot (a derived object's base object), or -1. Kept with the references:
+    /// found by a walk of the list for every node, one object with 500,000 references under 2,000 nodes took 14 s.</summary>
+    public int LastRef(MaxChunk c) { Refs(c); return c != null && lastOf.TryGetValue(c, out int i) ? i : -1; }
     /// <summary>How many reference slots an object has, the empty ones included (a Multi/Sub-Object's material ids
     /// count its slots, not its filled slots).</summary>
     public int RefSlots(MaxChunk c) { Refs(c); return c != null && slotsOf.TryGetValue(c, out int n) ? n : 0; }
@@ -238,14 +251,15 @@ public sealed class MaxScene
     /// that quaternion's rotation read like every other one in the file.
     /// Measured 2026-11-21 on the twelve parts of the four models where the rule changes anything (factors that
     /// differ, a turned axis): how far the part's stretch in the world sits from the world's axes (the largest
-    /// off-diagonal of A*A-transposed over its largest diagonal entry). With the axis applied this way nine of them
-    /// lie on the world's axes (0.015 or less; the torpedo boat's PIEZA-156 goes from 0.891 to 0.015) and a tenth
-    /// close to them (0.093 from 0.814); with it left out, or applied the other way round, none of the boat's eleven
-    /// does. Two (its anchor and PIEZA-75) lie on them under no reading, and further from them with the axis than
-    /// without (0.21 to 0.36, 0.14 to 0.50): the rule stands on the other ten. PIEZA-74 and PIEZA-75 are the same fitting on
+    /// off-diagonal of A*A-transposed over its largest diagonal entry). With the axis applied this way eight of the
+    /// torpedo boat's eleven lie on the world's axes (0.015 or less; PIEZA-156 goes from 0.891 to 0.015) and a ninth
+    /// close to them (PIEZA-74: 0.093 from 0.814); with it left out, or applied the other way round, none of the
+    /// eleven does. The armoured car's one part lies on them under every reading and decides nothing. Two of the
+    /// boat's (its anchor and PIEZA-75) lie on them under no reading, and further from them with the axis than
+    /// without (0.21 to 0.36, 0.14 to 0.50): the rule stands on the eight and on PIEZA-74. PIEZA-74 and PIEZA-75 are the same fitting on
     /// the boat's two sides: with the axis applied their boxes are 30 x 167 x 54 and 35 x 163 x 54, without it
     /// 46 x 50 x 54 and 39 x 206 x 54 - two different things where the boat has a pair.
-    /// Why nine land on the axes: a part turned by R and then scaled along its PARENT's axes has the matrix
+    /// Why those parts land on the axes: a part turned by R and then scaled along its PARENT's axes has the matrix
     /// K*R = R*(R-transposed*K*R), so its stored axis system is the inverse of its rotation - which, up to a quarter
     /// or half turn and a degree or two, is what the file holds for those parts (their parents are not turned, so
     /// parent and world are one here), and what only this reading turns back into a stretch along those axes.
@@ -291,8 +305,13 @@ public sealed class MaxScene
         return null;
     }
 
+    /// <summary>How many derived objects (modifier stacks on modifier stacks) are followed down to a base object.</summary>
+    public const int MaxDerived = 16;
+    static bool IsStoredMesh(MaxClass c) => c != null && (c.Is(0xE44F10B3, 0, SuperGeom) || c.Is(0x9, 0, SuperGeom));   // Editable Mesh, MeshObject
+
     void ReadNodes()
     {
+        var meshOf = new Dictionary<MaxChunk, (MaxMeshData mesh, string left)>();
         var nodeOf = new Dictionary<int, int>();      // object index -> Nodes index
         for (int i = 0; i < Objects.Count; i++)
             if (IsNode(ClassOf(Objects[i]))) { nodeOf[i] = Nodes.Count; Nodes.Add(new MaxNode { Object = i }); }
@@ -300,7 +319,10 @@ public sealed class MaxScene
         {
             var c = Objects[n.Object];
             var nm = c.First(0x0962);
-            n.Name = nm == null ? "" : nm.Text();
+            // a name is written without the spaces some files have at its ends ('PALO POPA ' on the torpedo boat): the
+            // tools after the reader key their marks on names and trim them, so a name that ends in a space lost its
+            // marks without a word (review round 3: a part marked Ignore in the Vehicle Lab stayed in the output)
+            n.Name = nm == null ? "" : nm.Text().Trim();
             var pk = c.First(0x0960);
             if (pk != null && !pk.IsContainer && pk.Length >= 4 && nodeOf.TryGetValue((int)Math.Min(pk.U32(0), int.MaxValue), out int pi) && pi != nodeOf[n.Object]) n.Parent = pi;
             var refs = Refs(c);
@@ -314,6 +336,10 @@ public sealed class MaxScene
                 if (IsPrs(ClassOf(ctrl)))
                 {
                     var cr = Refs(ctrl);
+                    // a part of the controller that names nothing leaves its value at rest (0, no turn, 1) - and that is said
+                    if (!cr.ContainsKey(0)) note = "its position has no controller";
+                    else if (!cr.ContainsKey(1)) note = "its rotation has no controller";
+                    else if (!cr.ContainsKey(2)) note = "its scale has no controller";
                     var p = ControllerValue(cr.TryGetValue(0, out int a) ? Objects[a] : null, 0x2503, 3, ref note) ?? new double[] { 0, 0, 0 };
                     var q = ControllerValue(cr.TryGetValue(1, out int b) ? Objects[b] : null, 0x2504, 4, ref note) ?? new double[] { 0, 0, 0, 1 };
                     var sc = ScaleValue(cr.TryGetValue(2, out int d) ? Objects[d] : null, ref note) ?? new double[] { 1, 1, 1 };
@@ -321,6 +347,7 @@ public sealed class MaxScene
                 }
                 else note = "its transform controller '" + ClassName(ctrl) + "' is not read";
             }
+            else note = "it has no transform controller";
             n.TransformNote = note;
             var op = Floats(c, 0x096A, 3) ?? new double[] { 0, 0, 0 };
             var oq = Floats(c, 0x096B, 4) ?? new double[] { 0, 0, 0, 1 };
@@ -329,23 +356,32 @@ public sealed class MaxScene
 
             // the object: walk past the modifiers to the base object (a derived object's LAST reference)
             var o = refs.TryGetValue(1, out int oi) ? Objects[oi] : null;
-            for (int depth = 0; o != null && (o.Id == DerivedObject || o.Id == WsmDerivedObject) && depth < 16; depth++)
+            for (int depth = 0; o != null && (o.Id == DerivedObject || o.Id == WsmDerivedObject) && depth < MaxDerived; depth++)
             {
                 var rr = Refs(o);
                 if (rr.Count == 0) { o = null; break; }
-                int last = -1, lastKey = -1;
-                foreach (var kv in rr) if (kv.Key > lastKey) { lastKey = kv.Key; last = kv.Value; }
                 n.Modifiers += rr.Count - 1;
-                o = Objects[last];
+                o = Objects[LastRef(o)];
             }
             n.BaseClass = o == null ? "" : ClassName(o);
             var cls = ClassOf(o);
-            if (o != null && o.IsContainer && o.First(0x08FE) != null)
+            if (o != null && (o.Id == DerivedObject || o.Id == WsmDerivedObject))
+                // still a derived object after the walk: a stack deeper than the reader follows, or one that names itself
+                n.MeshLeft = "its object lies under more than " + MaxDerived + " derived objects (or under one that names itself)";
+            else if (o != null && o.IsContainer && o.First(0x08FE) != null)
             {
-                try { n.Mesh = ReadMesh(o.First(0x08FE)); }
-                catch (InvalidDataException e) { n.MeshLeft = e.Message + (IsEditablePoly(cls) ? " (an Editable Poly object is not read yet: no sample file to hold the reader to)" : ""); }
+                // one mesh named by many nodes (instances) is read once
+                if (!meshOf.TryGetValue(o, out var got))
+                {
+                    got = (null, null);
+                    try { got.mesh = ReadMesh(o.First(0x08FE)); }
+                    catch (InvalidDataException e) { got.left = e.Message + (IsEditablePoly(cls) ? " (an Editable Poly object is not read yet: no sample file to hold the reader to)" : ""); }
+                    meshOf[o] = got;
+                }
+                n.Mesh = got.mesh; n.MeshLeft = got.left;
             }
             else if (IsEditablePoly(cls)) n.MeshLeft = "an Editable Poly object is not read yet (no sample file to hold the reader to)";
+            else if (IsStoredMesh(cls)) n.MeshLeft = "'" + cls.Name + "' holds no stored mesh in this file";
             else if (cls != null && cls.Super == SuperGeom && !IsTargetLike(cls)) n.MeshLeft = "'" + cls.Name + "' is stored as its parameters, not as a mesh (only 3ds Max can build it)";
             if (refs.TryGetValue(3, out int mi)) n.MaterialObject = mi;
         }
@@ -439,6 +475,7 @@ public sealed class MaxScene
         if (uv)
             for (int i = 0; i < m.TVerts.Length; i++)
             {
+                if (i % 3 == 2) continue;                 // the third coordinate (w) is not written: only u and v are judged
                 double t = m.TVerts[i];
                 if (!double.IsNaN(t) && Math.Abs(t) <= MaxUv) continue;
                 m.TVerts = null; m.TFaces = null;
@@ -478,11 +515,15 @@ public sealed class MaxScene
     static string MaterialName(MaxChunk m)
     {
         var nc = m.First(0x4000);
-        return nc != null && nc.First(0x4001) != null ? nc.First(0x4001).Text() : "Material";
+        string name = nc != null && nc.First(0x4001) != null ? nc.First(0x4001).Text().Trim() : "";       // trimmed like a node's name
+        return name == "" ? "Material" : name;
     }
 
     // the Standard material's map slots in the order of its map table (3ds Max 2 and 3; the diffuse slot is 1)
     static readonly string[] SlotNames = { "ambient", "diffuse", "specular", "shininess", "shininess strength", "self-illumination", "opacity", "filter colour", "bump", "reflection", "refraction", "displacement" };
+
+    /// <summary>The map table's slots that are looked at (the samples' tables have 11; later versions have more).</summary>
+    public const int MaxMapSlots = 64;
 
     MaxMaterial Standard(int index)
     {
@@ -525,6 +566,7 @@ public sealed class MaxScene
         // faces are written whole)
         foreach (var kv in tr)
         {
+            if (kv.Key >= 2 * MaxMapSlots) break;          // ascending: a table of 16 million references is not 16 million maps
             if (kv.Key % 2 == 0 || kv.Key == 3) continue;
             int slot = kv.Key / 2;
             var other = Objects[kv.Value];

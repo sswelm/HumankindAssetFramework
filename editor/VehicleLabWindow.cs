@@ -2356,6 +2356,13 @@ public class VehicleLabWindow : EditorWindow
     void Vehicleize()
     {
         lastStdout = ""; lastGenerateRoute = ""; lastGenerateFallback = "";
+        // as Probe: an unconverted .max (typed over a session that still has probed parts) went to Blender and came back
+        // as "unsupported extension .max", which does not name the way out
+        if (MaxModel.IsMax(srcFile) || MaxModel.IsMax(srcFile2))
+        {
+            status = "A 3ds Max file must be converted first: press 'Convert .max' under the " + (MaxModel.IsMax(srcFile) ? "Raw model" : "Second model") + " field, Probe parts, then Generate.";
+            return;
+        }
         string twoSidedRefusal = VehicleLabRules.TwoSidedFastPathRefusal(FastPath, ActiveParts.Any(p => p.role == Role.TwoSided));
         if (twoSidedRefusal != null) { status = twoSidedRefusal; return; }
         if (FastPath && ActiveParts.Any(p => p.role == Role.Oar))

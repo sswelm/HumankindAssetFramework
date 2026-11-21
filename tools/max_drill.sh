@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # max_drill.sh - the native 3ds Max reader (editor/MaxDocument.cs, MaxScene.cs, MaxModel.cs) outside Unity, held to a
-# second reader of the same files in Python (tools/max-drill/max_world.py): per mesh part the same name, triangle
-# count and UV presence, and the same area, signed volume, vector area and bounding box in world space. Then each file
+# second reader of the same files in Python (tools/max-drill/max_world.py): per mesh part the same name and triangle
+# count, and the same area, signed volume, vector area and bounding box in world space (within 2e-4 of the part's
+# size); per file the same number of parts whose file holds UVs. Then each file
 # is converted and the written .glb is read back and held to the report (parts, triangles, pictures, generator).
 # The second reader shares no code with the first and EVERY reading of the format: this catches a slip in one of the two
 # implementations, not a misreading both make. NOT compared at all: UV values, normals, materials, pivots, parent links
 # (Tests/MaxReaderTests.cs holds those on built files). The door inside Unity: tools/max_unity_drill.sh.
-#   usage: tools/max_drill.sh [file.max ...]      (no arguments: every .max under $HAF_MAX_ROOTS, default D:/3DModels D:/3dmax)
+#   usage: tools/max_drill.sh [file.max ...]      (no arguments: every .max under the folders of $HAF_MAX_ROOTS,
+#                                                  separated by ';' - default "D:/3DModels;D:/3dmax")
+#   also read: HAF_MAX_BUILD (where the executable and out/N.* go; default C:/tmp/haf-build/maxdrill - out/N.* are numbered
+#   in the order of the files and are overwritten by the next run), HAF_UNITY_EDITOR (Unity's Editor/Data folder).
 # NOT in the push gate (2026-11-21): the population is four files of one 3ds Max generation on the author's disk.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -32,7 +36,13 @@ if [ "$rc" -ne 0 ] || [ ! -s "$BUILD/maxdrill.exe" ]; then echo "$OUT" | grep -E
 
 files=()
 if [ "$#" -gt 0 ]; then files=("$@"); else
-  while IFS= read -r f; do files+=("$f"); done < <(for r in ${HAF_MAX_ROOTS:-D:/3DModels D:/3dmax}; do [ -d "$r" ] && find "$r" -iname "*.max" 2>/dev/null; done | sort)
+  IFS=';' read -r -a roots <<< "${HAF_MAX_ROOTS:-D:/3DModels;D:/3dmax}"
+  for r in "${roots[@]}"; do
+    [ -n "$r" ] || continue
+    found=0
+    while IFS= read -r f; do files+=("$f"); found=$((found + 1)); done < <([ -d "$r" ] && find "$r" -iname "*.max" 2>/dev/null | sort)
+    [ "$found" -gt 0 ] || echo "NOTE - no .max under '$r' (a folder of HAF_MAX_ROOTS that gave nothing)"
+  done
 fi
 [ "${#files[@]}" -gt 0 ] || { echo "FAIL - no .max file to drill (give paths, or set HAF_MAX_ROOTS; the .max reader was NOT drilled)"; exit 2; }
 fail=0; n=0
@@ -40,7 +50,7 @@ for f in "${files[@]}"; do
   n=$((n + 1)); tag="$BUILD/out/$n"
   "$BUILD/maxdrill.exe" stats "$(W "$f")" > "$tag.cs.txt" 2>"$tag.cs.err"; crc=$?
   python -I "$ROOT/tools/max-drill/max_world.py" "$f" > "$tag.py.txt" 2>"$tag.py.err"; prc=$?
-  if [ "$crc" -ne 0 ] || [ "$prc" -ne 0 ]; then echo "FAIL $(basename "$f"): reader exit C# $crc / Python $prc"; head -3 "$tag.cs.txt" "$tag.cs.err" "$tag.py.err" 2>/dev/null; fail=1; continue; fi
+  if [ "$crc" -ne 0 ] || [ "$prc" -ne 0 ]; then echo "FAIL $(basename "$f"): reader exit C# $crc / Python $prc"; head -3 "$tag.cs.txt" "$tag.cs.err" 2>/dev/null; tail -2 "$tag.py.err" 2>/dev/null; fail=1; continue; fi
   res=$(python -I "$ROOT/tools/max-drill/compare_parts.py" "$tag.cs.txt" "$tag.py.txt"); vrc=$?
   echo "$(basename "$f"): $res"
   [ "$vrc" -eq 0 ] || fail=1

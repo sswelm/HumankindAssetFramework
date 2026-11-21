@@ -4,7 +4,9 @@
 // contracts (Picked, ExitGuiAfterDialogs, a failed conversion). The geometry is held to the reference .glb that the
 // stand-alone drill's executable wrote from the same file with another decoder (System.Drawing).
 //   -hafMaxOutput <result.txt>  -hafMaxList <list.txt>   (list lines: <copy of file.max>|<reference .glb>)
-// A modal dialog answers itself in batch mode, so the dialogs' TEXT and the IMGUI layout are NOT covered here.
+// In batch mode every dialog answers itself with NO / Cancel (measured in review round 3). So the dialogs' text and
+// the IMGUI layout are NOT covered here, and neither is the YES to "overwrite a file the reader did not write":
+// with such a file in the way, Convert returns null here and the file stays.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -17,8 +19,8 @@ public static class UnityMaxImportDrill
 {
     public static void Run()
     {
-        var log = new System.Text.StringBuilder(); int failed = 0;
-        void Check(string name, bool ok) { log.AppendLine((ok ? "PASS " : "FAIL ") + name); if (!ok) failed++; }
+        var log = new System.Text.StringBuilder(); int failed = 0, checks = 0;
+        void Check(string name, bool ok) { checks++; log.AppendLine((ok ? "PASS " : "FAIL ") + name); if (!ok) failed++; }
         var args = Environment.GetCommandLineArgs();
         string Arg(string key) { int at = Array.IndexOf(args, key); return at >= 0 && at + 1 < args.Length ? args[at + 1] : null; }
         try
@@ -172,6 +174,7 @@ public static class UnityMaxImportDrill
             }
         }
         catch (Exception ex) { failed++; log.AppendLine("FAIL " + ex); }
+        log.AppendLine("TOTAL checks " + checks);
         log.AppendLine("TOTAL failed " + failed);
         string output = Arg("-hafMaxOutput");
         if (output != null) File.WriteAllText(output, log.ToString());

@@ -408,15 +408,19 @@ public class MaxReaderTests : IDisposable
         s.Node("P", root, s.Prs(Id, NoRot, One), s.Mesh(Tri, Face(0, 1, 2, mat: 0).Concat(Face(0, 1, 2, mat: 1)).Concat(Face(0, 1, 2, mat: 2)).ToArray(), new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 }, new[] { 0, 1, 2, 0, 1, 2, 0, 1, 2 }), multi);
         var m = Build(s, out var rep);
         Assert.Empty(m.Images);
-        // no picture is shown, and the UVs the file holds are still written (3 primitives: the missing picture, the
-        // unread map, no map at all), V turned upside down - the picture can be put on later without converting again
+        // no picture is shown. Three primitives: the faces whose picture is MISSING keep the UVs the file holds (V turned
+        // upside down), so the picture can be put on later without converting again; the faces of an unread map and of
+        // a material without a map show no picture and are written without UVs, by name
         Assert.Equal(3, m.Meshes[0].Primitives.Count);
-        Assert.All(m.Meshes[0].Primitives, p => { Assert.Equal(-1, m.Materials[p.Material].BaseColorTexture); Near(p.Uv0, 0, 1, 1, 1, 0, 0); });
-        Assert.Equal(1, rep.PartsWithUv);
+        Assert.All(m.Meshes[0].Primitives, p => Assert.Equal(-1, m.Materials[p.Material].BaseColorTexture));
+        Assert.Equal(new[] { "Gone:uv", "Cloud:-", "Glass:-" }, m.Meshes[0].Primitives.Select(p => m.Materials[p.Material].Name + (p.Uv0 != null ? ":uv" : ":-")).ToArray());
+        Near(m.Meshes[0].Primitives[0].Uv0, 0, 1, 1, 1, 0, 0);
+        Assert.Equal(1, rep.PartsWithUv); Assert.Equal(1, rep.PartsWithFileUv);
+        Assert.Contains(rep.Notes, n => n.StartsWith("1 part(s) have UVs in the file on faces that show no picture") && n.EndsWith(": 'P'"));
         Assert.Equal(new[] { "nowhere.jpg" }, rep.MissingTextures.ToArray());
         Assert.Contains(rep.Notes, n => n.Contains("'Cloud'") && n.Contains("'Noise' map is not read"));
         Assert.Contains(rep.Notes, n => n.Contains("'Glass' is 40 % opaque"));
-        Assert.Contains("Textures not found beside the file", rep.Summary()); Assert.Contains("a part that has UVs keeps them", rep.Summary()); Assert.EndsWith(": nowhere.jpg", rep.Summary().Split('\n').First(l => l.StartsWith("Textures not found")));
+        Assert.Contains("Textures not found beside the file, one folder down or one up (faces that have UVs keep them", rep.Summary()); Assert.EndsWith(": nowhere.jpg (material 'Gone')", rep.Summary().Split('\n').First(l => l.StartsWith("Textures not found")));
     }
 
     [Fact]
@@ -434,7 +438,7 @@ public class MaxReaderTests : IDisposable
         Assert.Equal(2, prims.Count);
         Assert.Equal("Flag", m.Materials[prims[0].Material].Name); Assert.Equal("Flag_plain", m.Materials[prims[1].Material].Name);
         Assert.Equal(-1, m.Materials[prims[1].Material].BaseColorTexture);         // the face wholly beside the decal: colour only,
-        Near(prims[1].Uv0, 2, 1, 3, 1, 2, 0);                                      // with its UVs as the file has them (V upside down), not the canvas's
+        Assert.Null(prims[1].Uv0);                                                 // and no UVs - no picture is on it, and far-away UVs of one face move every other one's in the Factory's converter
         Near(MaxModel.Linear(1), m.Materials[prims[1].Material].BaseColorFactor[2], 1e-9);
         // the face on the decal reaches half a picture outside: one picture is added to each side (3 x 3)
         Near(prims[0].Uv0, 0.5 / 3, 2.5 / 3, 2.5 / 3, 2.5 / 3, 0.5 / 3, 0.5 / 3);
@@ -445,7 +449,7 @@ public class MaxReaderTests : IDisposable
         Assert.Equal(new byte[] { 255, 0, 0 }, At(2, 2)); Assert.Equal(new byte[] { 255, 0, 0 }, At(3, 2));   // the map where the mask is white
         Assert.Equal(new byte[] { 0, 0, 255 }, At(2, 3));                                                    // the colour where it is black
         Assert.Equal(new byte[] { 0, 0, 255 }, At(0, 0)); Assert.Equal(new byte[] { 0, 0, 255 }, At(5, 5)); Assert.Equal(new byte[] { 0, 0, 255 }, At(4, 2));   // and around the decal
-        Assert.Empty(rep.Notes);
+        Assert.Contains("faces that show no picture", rep.Notes.Single());      // the one thing said: the face beside the decal is written without its UVs
     }
 
     [Fact]
@@ -496,10 +500,11 @@ public class MaxReaderTests : IDisposable
         var tga = Cat(new byte[] { 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, U16(2), U16(1), new byte[] { 24, 0 }, new byte[] { 3, 2, 1, 6, 5, 4 });
         Assert.True(MaxImages.Tga(tga, out int w, out int h, out var px, out _));
         Assert.Equal((2, 1), (w, h)); Assert.Equal(new byte[] { 1, 2, 3, 255, 4, 5, 6, 255 }, px);
-        // TGA, run-length packed 32 bit, 2 x 2, rows top-down: a run of three pixels, then one raw pixel
+        // TGA, run-length packed 32 bit, 2 x 2, rows top-down: a run of three pixels, then one raw pixel. Its alpha is zero
+        // everywhere, which counts as no alpha at all (a declared alpha that is not zero everywhere is kept: see below)
         var rle = Cat(new byte[] { 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, U16(2), U16(2), new byte[] { 32, 0x28 }, new byte[] { 0x82, 30, 20, 10, 0, 0x00, 60, 50, 40, 0 });
         Assert.True(MaxImages.Tga(rle, out w, out h, out px, out _));
-        Assert.Equal(new byte[] { 10, 20, 30, 255, 10, 20, 30, 255, 10, 20, 30, 255, 40, 50, 60, 255 }, px);   // alpha dropped: 3ds Max does not use it for a diffuse map
+        Assert.Equal(new byte[] { 10, 20, 30, 255, 10, 20, 30, 255, 10, 20, 30, 255, 40, 50, 60, 255 }, px);
         Assert.False(MaxImages.Tga(rle.Take(20).ToArray(), out _, out _, out px, out string why)); Assert.Null(px); Assert.Contains("run past", why);
         // BMP, 24 bit, 2 x 2, rows bottom-up, each row padded to four bytes
         var bmp = Cat(new byte[] { (byte)'B', (byte)'M' }, U32(70), U32(0), U32(54), U32(40), U32(2), U32(2), U16(1), U16(24), U32(0), U32(16), U32(0), U32(0), U32(0), U32(0),
@@ -605,7 +610,7 @@ public class MaxReaderTests : IDisposable
     {
         // mirrored in X the face is re-wound to corners 2, 1, 0 - and each corner still carries ITS UV: C, B, A
         var s = new Sc(); int root = s.Root();
-        s.Node("Mirror", root, s.Prs(Id, NoRot, new float[] { -1, 1, 1 }), s.Mesh(Tri, Face(0, 1, 2), Uv3, new[] { 0, 1, 2 }));
+        s.Node("Mirror", root, s.Prs(Id, NoRot, new float[] { -1, 1, 1 }), s.Mesh(Tri, Face(0, 1, 2), Uv3, new[] { 0, 1, 2 }), s.Std("M", new[] { 1f, 1f, 1f }, s.Bitmap("gone.png")));
         var p = Build(s, out _).Meshes[0].Primitives[0];
         Near(p.Positions, 0, 0, -1, -1, 0, 0, 0, 0, 0);            // corners 2, 1, 0 in the world
         Near(p.Uv0, 0, 0, 1, 1, 0, 1);                             // C (0,1) -> (0, 0); B (1,0) -> (1, 1); A (0,0) -> (0, 1): V upside down
@@ -618,7 +623,7 @@ public class MaxReaderTests : IDisposable
         // not the first one because it is the first face kept
         float[] tv = { 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5f, 0.5f, 0, 0.75f, 0.5f, 0, 0.5f, 0.25f, 0 };
         var s = new Sc(); int root = s.Root();
-        s.Node("P", root, s.Prs(Id, NoRot, One), s.Mesh(Tri, Face(0, 1, 2, flags: 7 | 8).Concat(Face(0, 1, 2)).ToArray(), tv, new[] { 0, 1, 2, 3, 4, 5 }));
+        s.Node("P", root, s.Prs(Id, NoRot, One), s.Mesh(Tri, Face(0, 1, 2, flags: 7 | 8).Concat(Face(0, 1, 2)).ToArray(), tv, new[] { 0, 1, 2, 3, 4, 5 }), s.Std("M", new[] { 1f, 1f, 1f }, s.Bitmap("gone.png")));
         var m = Build(s, out var rep);
         Assert.Equal(1, rep.HiddenFaces);
         Near(m.Meshes[0].Primitives.Single().Uv0, 0.5, 0.5, 0.75, 0.5, 0.5, 0.75);
@@ -992,7 +997,7 @@ public class MaxReaderTests : IDisposable
         s.Node("Good", root, s.Prs(Id, NoRot, One), s.Mesh(Tri, Face(0, 1, 2)));
         Build(s, out var rep);
         Assert.Equal(1, rep.Parts); Assert.Equal(0, rep.PartsUnplaced); Assert.DoesNotContain("WARNING", rep.Summary());
-        Assert.Equal(2, rep.PartsLeft.Count(l => l.Contains("its place does not fit a 32-bit float")));
+        Assert.Equal(2, rep.PartsLeft.Count(l => l.Contains("its place, or that of a node above it, does not fit a 32-bit float")));
         Assert.DoesNotContain(rep.Notes, n => n.Contains("misplaced"));
     }
 
@@ -1144,8 +1149,9 @@ public class MaxReaderTests : IDisposable
 
     // =================================================================================================================
     // Fixtures from round 2's planting reviewer: 141 rules of the reader were changed one at a time against the tests
-    // as they stood after round 1, and 58 changes passed all of them. Each fixture below holds one or more of those
-    // rules; its expectation is worked out from the rule's statement, in the comment beside it.
+    // as they stood after round 1, and 59 changes passed all of them (the drill caught one of the 59). Each fixture
+    // below holds one or more of those rules; its expectation is worked out from the rule's statement, in the comment
+    // beside it. 30 of the reviewer's 31 fixtures are here, two of them adapted to what round 2 changed.
     // =================================================================================================================
     static byte[] RefsOf(params long[] r) => Leaf(0x2034, r.Select(U32).ToArray());
     string Raw(string rel, byte r, byte g, byte b)
@@ -1594,5 +1600,211 @@ public class MaxReaderTests : IDisposable
         s.Node("P", root, s.Prs(Id, NoRot, One), s.Mesh(verts, Face(0, 1, 2, mat: 0).Concat(Face(1, 3, 2, mat: 1)).Concat(Face(0, 1, 3, mat: 2)).Concat(Face(0, 3, 2, mat: 3)).ToArray()), multi);
         var m = Build(s, out _);
         Assert.Equal(new[] { "Red:2", "NoMaterial:1", "Blue:1" }, m.Meshes[0].Primitives.Select(p => m.Materials[p.Material].Name + ":" + p.Indices.Length / 3).ToArray());
+        // and a list that declares FEWER slots than it names (two, with slot 2 named) still has the slot it names
+        var t = new Sc(); int troot = t.Root();
+        int tred = t.Std("Red", new[] { 1f, 0, 0 }), tblue = t.Std("Blue", new[] { 0, 0, 1f });
+        int tmulti = t.Add("Multi/Sub-Object", 0x200, 0, 0xC00, Leaf(0x2035, U32(2), U32(0), U32(tred), U32(2), U32(tblue)));
+        t.Node("P", troot, t.Prs(Id, NoRot, One), t.Mesh(verts, Face(0, 1, 2, mat: 0).Concat(Face(1, 3, 2, mat: 1)).Concat(Face(0, 1, 3, mat: 2)).Concat(Face(0, 3, 2, mat: 3)).ToArray()), tmulti);
+        var tm = Build(t, out _, "t2.max");
+        Assert.Equal(new[] { "Red:2", "NoMaterial:1", "Blue:1" }, tm.Meshes[0].Primitives.Select(p => tm.Materials[p.Material].Name + ":" + p.Indices.Length / 3).ToArray());
+    }
+
+    // =================================================================================================================
+    // Added in round 3 of the review: what the documented workflow showed (the tools after the reader), and what a
+    // reader who had seen none of the earlier rounds found.
+    // =================================================================================================================
+    [Fact]
+    public void Names_are_written_without_the_spaces_at_their_ends()
+    {
+        // the tools after the reader key their marks on names and trim them: 'PALO POPA ' must arrive as 'PALO POPA'
+        var s = new Sc(); int root = s.Root();
+        s.Node(" PALO POPA ", root, s.Prs(Id, NoRot, One), s.Mesh(Tri, Face(0, 1, 2)), s.Std(" Paint ", new[] { 1f, 0, 0 }));
+        var m = Build(s, out _);
+        Assert.Equal("PALO POPA", m.Nodes[0].Name); Assert.Equal("PALO POPA", m.Meshes[0].Name); Assert.Equal("Paint", m.Materials[0].Name);
+    }
+
+    [Fact]
+    public void UVs_are_written_where_a_picture_is_shown_or_missing_and_nowhere_else()
+    {
+        // four materials on one part: a picture that is there, one that is missing, a procedural map, no map. And a
+        // second part with UVs and no material at all. The model's UVs stay within what the pictures use: the far-away
+        // UVs of the faces without a picture (u = 500 here) are not written.
+        Png("tex.png", 1, 1, 10, 20, 30);
+        var s = new Sc(); int root = s.Root();
+        int multi = s.Multi(s.Std("Shown", new[] { 1f, 1f, 1f }, s.Bitmap("tex.png")), s.Std("Missing", new[] { 1f, 1f, 1f }, s.Bitmap("gone.png")),
+            s.Std("Cloud", new[] { 1f, 1f, 1f }, s.Noise()), s.Std("Plain", new[] { 1f, 1f, 1f }));
+        float[] tv = { 0, 0, 0, 1, 0, 0, 0, 1, 0, 500, 0, 0, 501, 0, 0, 500, 1, 0 };
+        var faces = Face(0, 1, 2, mat: 0).Concat(Face(0, 1, 2, mat: 1)).Concat(Face(0, 1, 2, mat: 2)).Concat(Face(0, 1, 2, mat: 3)).ToArray();
+        s.Node("Four", root, s.Prs(Id, NoRot, One), s.Mesh(Tri, faces, tv, new[] { 0, 1, 2, 0, 1, 2, 3, 4, 5, 3, 4, 5 }), multi);
+        s.Node("Bare", root, s.Prs(Id, NoRot, One), s.Mesh(Tri, Face(0, 1, 2), tv, new[] { 3, 4, 5 }));
+        var m = Build(s, out var rep);
+        Assert.Equal(new[] { "Shown:uv", "Missing:uv", "Cloud:-", "Plain:-" }, m.Meshes[0].Primitives.Select(p => m.Materials[p.Material].Name + (p.Uv0 != null ? ":uv" : ":-")).ToArray());
+        Assert.Null(m.Meshes[1].Primitives.Single().Uv0);
+        Assert.True(m.Meshes.SelectMany(x => x.Primitives).Where(p => p.Uv0 != null).All(p => p.Uv0.All(v => v >= 0 && v <= 1)));
+        Assert.Equal(1, rep.PartsWithUv); Assert.Equal(2, rep.PartsWithFileUv);
+        Assert.Contains(rep.Notes, n => n.StartsWith("2 part(s) have UVs in the file on faces that show no picture") && n.EndsWith(": 'Four', 'Bare'"));
+    }
+
+    [Fact]
+    public void A_file_named_like_a_picture_that_is_none_is_not_embedded_as_one()
+    {
+        // an empty file named .png, a web page named .jpeg, a GIF named .png: none of them is a picture this reader
+        // knows by its bytes - the plain colour, by name; and a real JPEG under a .png name is still a JPEG
+        System.IO.File.WriteAllBytes(Path.Combine(dir, "empty.png"), new byte[0]);
+        System.IO.File.WriteAllText(Path.Combine(dir, "page.jpeg"), "<html>404</html>");
+        System.IO.File.WriteAllBytes(Path.Combine(dir, "gif.png"), Encoding.ASCII.GetBytes("GIF89a\u0001\u0000\u0001\u0000"));
+        System.IO.File.WriteAllBytes(Path.Combine(dir, "real.png"), new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3 });
+        var s = new Sc(); int root = s.Root();
+        int multi = s.Multi(s.Std("E", new[] { 1f, 1f, 1f }, s.Bitmap("empty.png")), s.Std("P", new[] { 1f, 1f, 1f }, s.Bitmap("page.jpeg")),
+            s.Std("G", new[] { 1f, 1f, 1f }, s.Bitmap("gif.png")), s.Std("R", new[] { 1f, 1f, 1f }, s.Bitmap("real.png")));
+        var faces = Face(0, 1, 2, mat: 0).Concat(Face(0, 1, 2, mat: 1)).Concat(Face(0, 1, 2, mat: 2)).Concat(Face(0, 1, 2, mat: 3)).ToArray();
+        s.Node("P", root, s.Prs(Id, NoRot, One), s.Mesh(Tri, faces, Uv3, new[] { 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2 }), multi);
+        var m = Build(s, out var rep);
+        Assert.Equal("image/jpeg", m.Images.Single().MimeType); Assert.Equal("real", m.Images[0].Name);
+        foreach (string f in new[] { "empty.png", "page.jpeg", "gif.png" }) Assert.Contains(rep.Notes, n => n.Contains("texture '" + f + "' could not be decoded") && n.Contains("the plain colour is used"));
+        Assert.Equal(4, m.Meshes[0].Primitives.Count(p => p.Uv0 != null));       // their faces keep their UVs: the real picture can be put on later
+    }
+
+    [Fact]
+    public void A_part_under_a_node_that_stands_too_far_is_left_by_name_and_the_rest_is_read()
+    {
+        // B stands at 3e38 under a parent scaled by 2 (its place in the world is past a float); C under it comes back to
+        // x = 0, so its own place is fine - and B's is still in the model as C's parent. C is named; Hull is read.
+        var s = new Sc(); int root = s.Root();
+        int a = s.Node("A", root, s.Prs(Id, NoRot, new float[] { 2, 2, 2 }), -1);
+        int b = s.Node("B", a, s.Prs(new float[] { 3e38f, 0, 0 }, NoRot, One), -1);
+        s.Node("C", b, s.Prs(new float[] { -3e38f, 0, 0 }, NoRot, One), s.Mesh(Tri, Face(0, 1, 2)));
+        s.Node("Hull", root, s.Prs(Id, NoRot, One), s.Mesh(Tri, Face(0, 1, 2)));
+        var m = Build(s, out var rep);
+        Assert.Equal(1, rep.Parts); Assert.Equal("Hull", m.Nodes.Single().Name);
+        Assert.Contains(rep.PartsLeft, l => l.Contains("'C'") && l.Contains("that of a node above it, does not fit a 32-bit float"));
+        GlbWriter.Write(m);
+    }
+
+    [Fact]
+    public void A_mesh_under_too_many_derived_objects_or_one_without_a_stored_mesh_is_named_not_filed_with_the_lights()
+    {
+        var s = new Sc(); int root = s.Root();
+        int mod = s.Add("Bend", 0x10, 0x20, 0x810);
+        int Stack(int depth) { int o = s.Mesh(Tri, Face(0, 1, 2)); for (int i = 0; i < depth; i++) o = s.Derived(mod, o); return o; }
+        s.Node("Sixteen", root, s.Prs(Id, NoRot, One), Stack(MaxScene.MaxDerived));
+        s.Node("Seventeen", root, s.Prs(Id, NoRot, One), Stack(MaxScene.MaxDerived + 1));
+        s.Node("Hollow", root, s.Prs(Id, NoRot, One), s.Add("Editable Mesh", 0xE44F10B3, 0, 0x10));
+        Build(s, out var rep);
+        Assert.Equal(1, rep.Parts); Assert.Equal(MaxScene.MaxDerived, rep.ModifiersSkipped);
+        Assert.Contains(rep.PartsLeft, l => l.Contains("'Seventeen'") && l.Contains("more than 16 derived objects"));
+        Assert.Contains(rep.PartsLeft, l => l.Contains("'Hollow'") && l.Contains("holds no stored mesh"));
+        Assert.Empty(rep.NotGeometry);
+    }
+
+    [Fact]
+    public void A_part_whose_controller_names_nothing_is_said_to_be_possibly_misplaced()
+    {
+        var s = new Sc(); int root = s.Root();
+        int noPos = s.Add("Position/Rotation/Scale", 0x2005, 0, 0x9008, Leaf(0x2034, U32(None), U32(s.Rot(NoRot)), U32(s.Scl(One))));
+        s.Node("NoPosition", root, noPos, s.Mesh(Tri, Face(0, 1, 2)));
+        s.Node("NoController", root, -1, s.Mesh(Tri, Face(0, 1, 2)));
+        s.Node("Fine", root, s.Prs(Id, NoRot, One), s.Mesh(Tri, Face(0, 1, 2)));
+        Build(s, out var rep);
+        Assert.Equal(2, rep.PartsUnplaced);
+        Assert.Contains(rep.Notes, n => n == "1 part(s) may be misplaced - its position has no controller: 'NoPosition'");
+        Assert.Contains(rep.Notes, n => n == "1 part(s) may be misplaced - it has no transform controller: 'NoController'");
+    }
+
+    [Fact]
+    public void The_third_UV_coordinate_is_not_judged()
+    {
+        // w (the third number of a UV vertex) is not written, so a w that is no number does not cost the part its UVs
+        var s = new Sc(); int root = s.Root();
+        s.Node("W", root, s.Prs(Id, NoRot, One), s.Mesh(Tri, Face(0, 1, 2), new float[] { 0, 0, float.NaN, 1, 0, 3e6f, 0, 1, 0 }, new[] { 0, 1, 2 }), s.Std("M", new[] { 1f, 1f, 1f }, s.Bitmap("gone.png")));
+        var m = Build(s, out var rep);
+        Near(m.Meshes[0].Primitives[0].Uv0, 0, 1, 1, 1, 0, 0); Assert.DoesNotContain(rep.Notes, n => n.Contains("without UVs"));
+    }
+
+    [Fact]
+    public void A_loop_inside_a_stream_s_declared_size_is_refused_and_a_chain_is_walked_no_further_than_that_size()
+    {
+        // a stream of 9,000 bytes (18 sectors) whose third sector points back at its second: the walk stops at the
+        // stream's size, so the loop must be seen by the sector it meets twice
+        var file = Cfb(("B", new byte[9000]));
+        int fatAt = file.Length - 512;
+        U32(1).CopyTo(file, fatAt + 8);                                           // sector 2 -> 1
+        Assert.Contains("loops", Assert.Throws<InvalidDataException>(() => MaxDocument.Read(file)).Message);
+        // a stream is walked no further than its declared size: here the stream declares one sector of an 18-sector chain
+        // whose 17th entry is broken (it points outside the file) - the 512 bytes are read and nobody trips over the tail
+        var data = Enumerable.Range(0, 9000).Select(i => (byte)(i + 1)).ToArray();
+        file = Cfb(("Big", data));
+        int big = -1; var nb = Txt("Big ");
+        for (int i = 512; i + 128 <= file.Length; i += 128) if (file.Skip(i).Take(nb.Length).SequenceEqual(nb)) big = i;
+        uint start = BitConverter.ToUInt32(file, big + 0x74);
+        U32(0).CopyTo(file, 0x38);                                                // no mini stream: every stream lies in sectors
+        U32(512).CopyTo(file, big + 0x78);
+        U32(0x00FFFFF0).CopyTo(file, file.Length - 512 + 4 * ((int)start + 16));
+        Assert.Equal(data.Take(512).ToArray(), MaxDocument.Read(file).Streams["Big"]);
+        U32(9000).CopyTo(file, big + 0x78);                                       // declared whole again: the broken tail is met, and named
+        Assert.Contains("is outside the file", Assert.Throws<InvalidDataException>(() => MaxDocument.Read(file)).Message);
+    }
+
+    [Fact]
+    public void A_vertex_has_a_bound_on_its_smoothing_sums_and_past_it_a_corner_takes_its_face_s_normal()
+    {
+        // a cone of 70 faces round its apex, every face in a group combination of its own, all sharing one bit: the sum
+        // at the apex is over all 70 faces whichever combination asks (the ring is closed, so it points straight up),
+        // and it is asked for under 70 different combinations. The first MaxSmoothingSums (64) are worked out; the
+        // corners of the six faces after them take their own face's normal, which leans outwards.
+        const int N = 70;
+        var verts = new List<float> { 0, 0, 1 };
+        for (int i = 0; i < N; i++) { double a = 2 * Math.PI * i / N; verts.Add((float)Math.Cos(a)); verts.Add((float)Math.Sin(a)); verts.Add(0); }
+        var faces = new List<int>();
+        for (int i = 0; i < N; i++) faces.AddRange(Face(0, 1 + i, 1 + (i + 1) % N, sg: 0x40000000 | (i + 1)));
+        var s = new Sc(); int root = s.Root();
+        s.Node("Cone", root, s.Prs(Id, NoRot, One), s.Mesh(verts.ToArray(), faces.ToArray()));
+        var p = Build(s, out _).Meshes[0].Primitives.Single();
+        Assert.Equal(N * 3, p.Indices.Length);
+        double Up(int face) => p.Normals[p.Indices[face * 3] * 3 + 1];             // the apex corner's normal, its up component (GLB: y)
+        for (int f = 0; f < MaxModel.MaxSmoothingSums; f++) Near(1, Up(f), 1e-4);     // the smooth sum: straight up
+        // a face's own normal: (sin b - sin a, cos a - cos b, sin(b - a)) with b - a = 2 pi / 70 - up by cos of the cone's
+        // half angle at the face, 0.707 for this cone of height 1 and radius 1 (a little more: the face is a chord)
+        for (int f = MaxModel.MaxSmoothingSums; f < N; f++) Assert.InRange(Up(f), 0.70, 0.72);
+    }
+
+    [Fact]
+    public void The_model_and_one_object_s_references_have_bounds_that_are_named()
+    {
+        // one mesh of 2,000 faces under 5,001 nodes: 10,002,000 triangles, past MaxTriangles - refused before they are made
+        var s = new Sc(); int root = s.Root();
+        var faces = new List<int>(); for (int i = 0; i < 2000; i++) faces.AddRange(Face(0, 1, 2));
+        int prs = s.Prs(Id, NoRot, One), mesh = s.Mesh(Tri, faces.ToArray());
+        for (int i = 0; i <= MaxModel.MaxTriangles / 2000; i++) s.Node("I" + i, root, prs, mesh);
+        Assert.Contains("more than 10,000,000 triangles", Assert.Throws<InvalidDataException>(() => Build(s, out _)).Message);
+        // an object that lists more references than the reader keeps a table of
+        var t = new Sc(); int troot = t.Root();
+        int huge = t.Add("Multi/Sub-Object", 0x200, 0, 0xC00, Leaf(0x2034, new byte[4 * (MaxScene.MaxReferences + 1)]));
+        t.Node("P", troot, t.Prs(Id, NoRot, One), t.Mesh(Tri, Face(0, 1, 2)), huge);
+        Assert.Contains("references; this reader stops at " + MaxScene.MaxReferences, Assert.Throws<InvalidDataException>(() => Build(t, out _, "t2.max")).Message);
+    }
+
+    [Fact]
+    public void The_map_table_is_read_as_far_as_its_slots_go()
+    {
+        // a map table names maps in slot 8 (bump) and in a "slot 70": a Standard material has no such slot (the samples'
+        // tables have 11), and a table of millions of references is not millions of maps - slots past MaxMapSlots are
+        // not looked at
+        var s = new Sc(); int root = s.Root();
+        s.Node("P", root, s.Prs(Id, NoRot, One), s.Mesh(Tri, Face(0, 1, 2)), s.Std("M", new[] { 1f, 1f, 1f }, otherSlots: new[] { (8, s.Noise()), (MaxScene.MaxMapSlots + 6, s.Noise()) }));
+        Build(s, out var rep);
+        Assert.Contains(rep.Notes, n => n.StartsWith("a bump map is not read on 1 material(s)"));
+        Assert.DoesNotContain(rep.Notes, n => n.Contains("slot " + (MaxScene.MaxMapSlots + 6)));
+        Assert.Single(rep.Notes.Where(n => n.Contains("map is not read")));
+    }
+
+    [Fact]
+    public void A_BMP_whose_header_claims_an_absurd_size_is_refused_not_thrown_on()
+    {
+        // an 8-bit BMP whose info header says it is int.MaxValue bytes long: the palette's place overflowed, and the
+        // decoder threw where it answers false with the reason
+        var bmp = Cat(new byte[] { (byte)'B', (byte)'M' }, U32(66), U32(0), U32(62), BitConverter.GetBytes(int.MaxValue), U32(1), U32(1), U16(1), U16(8), U32(0), U32(4), U32(0), U32(0), U32(2), U32(0),
+            new byte[] { 3, 2, 1, 0, 9, 9, 9, 0 }, new byte[] { 0, 0, 0, 0 });
+        Assert.False(MaxImages.Bmp(bmp, out _, out _, out var px, out string why)); Assert.Null(px); Assert.Contains("BMP header of", why);
     }
 }

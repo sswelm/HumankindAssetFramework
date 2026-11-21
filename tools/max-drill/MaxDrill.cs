@@ -90,7 +90,7 @@ static class MaxDrill
         }
         lines.Sort(StringComparer.Ordinal);
         foreach (var l in lines) Console.WriteLine(l);
-        Console.WriteLine("TOTAL parts=" + rep.Parts + " tris=" + rep.Triangles + " uvparts=" + rep.PartsWithUv + " hidden=" + rep.HiddenFaces);
+        Console.WriteLine("TOTAL parts=" + rep.Parts + " tris=" + rep.Triangles + " uvparts=" + rep.PartsWithFileUv + " hidden=" + rep.HiddenFaces);
         return 0;
     }
 

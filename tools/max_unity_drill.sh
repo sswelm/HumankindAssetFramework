@@ -2,7 +2,11 @@
 # max_unity_drill.sh - the .max door INSIDE a Unity editor: MaxImport.Picked / Convert on copies of real .max files in an
 # isolated temporary project, with Unity's own image decoder, held to the .glb the stand-alone drill's executable writes
 # from the same copy with System.Drawing's decoder (geometry bit for bit, pictures within a decoder's rounding).
-#   usage: tools/max_unity_drill.sh [file.max ...]   (no arguments: every .max under $HAF_MAX_ROOTS, default D:/3DModels D:/3dmax)
+#   usage: tools/max_unity_drill.sh [file.max ...]   (no arguments: every .max under the folders of $HAF_MAX_ROOTS,
+#                                                     separated by ';' - default "D:/3DModels;D:/3dmax")
+#   also read: UNITY (Unity's Editor/Data folder), UNITY_EDITOR (Unity.exe), HAF_MAX_UNITY_REF (where the reference
+#   executable is built; default C:/tmp/haf-build/maxunity-ref).
+# The temporary project is removed after a pass and kept after a failure (its path is printed either way).
 # The originals are never written to: each file's folder is copied into the temporary directory first.
 # NOT in the push gate (the population lives on the author's disk). NOT covered: the dialogs' text and the IMGUI layout
 # (a modal dialog answers itself in batch mode).
@@ -28,17 +32,25 @@ cleanup() {
   esac
 }
 trap cleanup EXIT
-echo "EVIDENCE $TMPD"
+echo "EVIDENCE $TMPD (removed after a pass, kept after a failure)"
 
 files=()
 if [ "$#" -gt 0 ]; then files=("$@"); else
-  while IFS= read -r f; do files+=("$f"); done < <(for r in ${HAF_MAX_ROOTS:-D:/3DModels D:/3dmax}; do [ -d "$r" ] && find "$r" -iname "*.max" 2>/dev/null; done | sort)
+  IFS=';' read -r -a roots <<< "${HAF_MAX_ROOTS:-D:/3DModels;D:/3dmax}"
+  for r in "${roots[@]}"; do
+    [ -n "$r" ] || continue
+    found=0
+    while IFS= read -r f; do files+=("$f"); found=$((found + 1)); done < <([ -d "$r" ] && find "$r" -iname "*.max" 2>/dev/null | sort)
+    [ "$found" -gt 0 ] || echo "NOTE - no .max under '$r' (a folder of HAF_MAX_ROOTS that gave nothing)"
+  done
 fi
 [ "${#files[@]}" -gt 0 ] || { echo "FAIL - no .max file to drill (give paths, or set HAF_MAX_ROOTS; the .max door was NOT drilled in Unity)"; exit 2; }
 
-# the reference: the stand-alone drill's executable (another image decoder), built into this run's own folder
-HAF_MAX_BUILD="$TMPD/ref" bash "$ROOT/tools/max_drill.sh" "${files[@]}" > "$TMPD/ref.log" 2>&1
-[ -s "$TMPD/ref/maxdrill.exe" ] || { tail -5 "$TMPD/ref.log"; echo 'FAIL - the reference executable did not build'; exit 1; }
+# the reference: the stand-alone drill's executable (another image decoder). Built under C:/tmp/haf-build, not in the
+# temporary directory: on the author's machine an executable compiled anywhere else can be taken away by the antivirus.
+REF="${HAF_MAX_UNITY_REF:-C:/tmp/haf-build/maxunity-ref}"
+HAF_UNITY_EDITOR="$UNITY" HAF_MAX_BUILD="$REF" bash "$ROOT/tools/max_drill.sh" "${files[@]}" > "$TMPD/ref.log" 2>&1
+[ -s "$REF/maxdrill.exe" ] || { tail -5 "$TMPD/ref.log"; echo 'FAIL - the reference executable did not build'; exit 1; }
 
 WROOT="$(cygpath -m "$ROOT")"; WTMP="$(cygpath -m "$TMPD")"; WUNITY="$(cygpath -m "$UNITY")"
 mkdir -p "$TMPD/work" "$TMPD/project/Assets/Editor" "$TMPD/project/Assets/Plugins" "$TMPD/project/Packages" "$TMPD/project/ProjectSettings"
@@ -51,7 +63,7 @@ for f in "${files[@]}"; do
   [ -n "$mb" ] && [ "$mb" -le 500 ] || { echo "FAIL - the folder of $(basename "$f") holds ${mb:-?} MB; give a .max that sits in its own folder (the .max door was NOT drilled in Unity)"; exit 2; }
   cp -r "$(dirname "$f")/." "$TMPD/work/$n/" || { echo "FAIL - could not copy $(dirname "$f")"; exit 2; }
   copy="$TMPD/work/$n/$(basename "$f")"
-  "$TMPD/ref/maxdrill.exe" convert "$(cygpath -w "$copy")" "$(cygpath -w "$TMPD/work/$n.reference.glb")" > "$TMPD/work/$n.reference.txt" 2>&1 \
+  "$REF/maxdrill.exe" convert "$(cygpath -w "$copy")" "$(cygpath -w "$TMPD/work/$n.reference.glb")" > "$TMPD/work/$n.reference.txt" 2>&1 \
     || { head -5 "$TMPD/work/$n.reference.txt"; echo "FAIL - the reference conversion of $(basename "$f")"; exit 1; }
   printf '%s|%s\n' "$(cygpath -m "$copy")" "$WTMP/work/$n.reference.glb" >> "$TMPD/list.txt"
 done
