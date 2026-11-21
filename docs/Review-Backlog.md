@@ -1842,7 +1842,7 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   copy of that tool drops the `title` parameter and the new window stops compiling. Fine for now (the user, same day);
   the clean cut is to give the new window its own picker so the viewer file is untouched.
   **More local changes since 2026-11-21 (asked for by the user):** the OR / AND heading and switch, the `AND` corner
-  mark, the `X` / `Y` position fields, the scroll bars, and a seam for the drill (`BuildTreeImpl`). They are listed in
+  mark, the `X` / `Y` position fields, the scroll bars, the selection kept by name across a reload, and a seam for the drill (`BuildTreeImpl`). They are listed in
   the file's header comment. A newer copy of the other tool would now drop all of them, so the "own picker" cut no
   longer makes the file untouched. **Not seen in Unity by any test:** the layout of the side strip and the bars, a
   click on either, and a typed position written to a real asset.

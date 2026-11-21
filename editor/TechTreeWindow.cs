@@ -19,6 +19,7 @@ using UnityEngine;
 ///    edit and written to that list on Save. A node under the AND rule carries "AND" in its lower left corner.
 ///  - Scroll bars under and beside the canvas. They move the same pan as the middle-mouse drag.
 ///  - X and Y fields in the side strip: the selected node's position as numbers, staged like a drag.
+///  - The selection is kept by name across a reload (it was the node object from before it).
 /// </summary>
 public class TechTreeWindow : EditorWindow
 {
@@ -117,6 +118,10 @@ public class TechTreeWindow : EditorWindow
         _byName = _nodes.GroupBy(n => n.Name).ToDictionary(g => g.Key, g => g.First());
         // keep pending across reload only for names that still exist
         foreach (var k in _pending.Keys.Where(k => !_byName.ContainsKey(k)).ToList()) _pending.Remove(k);
+        // The nodes are new objects: keep the selection by NAME. The old object holds the values from before this
+        // reload, so after a Save the side strip showed the previous position and prerequisites, the X / Y fields
+        // compared against them, and the node lost its highlight (local change 2026-11-21).
+        if (_selected != null && !_byName.TryGetValue(_selected.Name, out _selected)) _selected = null;
         LoadRules();
         if (!keepView) _framed = false;   // re-frame only on first load / explicit Frame All
         Repaint();

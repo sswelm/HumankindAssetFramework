@@ -24,7 +24,6 @@ public static class TechRequireAllWindowDrill
     static double deadline;
     static TechRequireAllWindow window;
     static TechTreeWindow viewer;
-    static List<TechTreeData.Node> tree;
     static Vector2 pan;
     static string goodSource;
 
@@ -39,7 +38,7 @@ public static class TechRequireAllWindowDrill
     static T VGet<T>(string field) => (T)typeof(TechTreeWindow).GetField(field, Private).GetValue(viewer);
     static void VSet(string field, object value) => typeof(TechTreeWindow).GetField(field, Private).SetValue(viewer, value);
     static object VCall(string method, params object[] args) => typeof(TechTreeWindow).GetMethod(method, Private).Invoke(viewer, args);
-    static TechTreeData.Node N(string name) => tree.First(n => n.Name == name);
+    static TechTreeData.Node N(string name) => VGet<List<TechTreeData.Node>>("_nodes").First(n => n.Name == name);   // the viewer's CURRENT node
     static bool All(string name) => (bool)VCall("EffRequireAll", N(name));
     static int Staged => ((System.Collections.IDictionary)typeof(TechTreeWindow).GetField("_pending", Private).GetValue(viewer)).Count;
     static string Deployed => File.Exists(Artifact) ? PluginReads(Artifact) : "no file";
@@ -63,13 +62,17 @@ public static class TechRequireAllWindowDrill
         Node("Technology_S", "Single Parent", "Technology_A"),
     };
 
-    // The viewer reads its tree through a seam (every save reloads it); the nodes have no assets behind them, so a
-    // position cannot be written here: the viewer must keep such an edit staged.
+    // The viewer reads its tree through a seam. Like the real builder it returns NEW node objects on every reload
+    // (every save reloads). The nodes have no assets behind them, so a position cannot be written here: the viewer
+    // must keep such an edit staged.
     static void OpenViewer()
     {
-        tree = Tree();
-        tree[1].BaseX = 8; tree[2].BaseX = 16; tree[2].BaseY = 4; tree[3].BaseX = 16; tree[3].BaseY = 9;
-        TechTreeWindow.BuildTreeImpl = _ => tree;
+        TechTreeWindow.BuildTreeImpl = _ =>
+        {
+            var tree = Tree();
+            tree[1].BaseX = 8; tree[2].BaseX = 16; tree[2].BaseY = 4; tree[3].BaseX = 16; tree[3].BaseY = 9;
+            return tree;
+        };
         viewer = ScriptableObject.CreateInstance<TechTreeWindow>();   // OnEnable: reads the tree and the list
         VSet("_editMode", true);
         VSet("_selected", N("Technology_T"));
@@ -190,6 +193,7 @@ public static class TechRequireAllWindowDrill
                     Check("viewer save: the plugin reads the deployed list as [Technology_T]", Deployed == "Technology_T", Deployed);
                     Check("viewer save: the rule now comes from the list", VGet<HashSet<string>>("_requireAll").SetEquals(new[] { "Technology_T" }) && All("Technology_T"));
                     Check("viewer save: the position, which has no asset to go to here, stays staged", Staged == 1 && (int)VCall("EffX", N("Technology_T")) == 7);
+                    Check("viewer save: the selection is the reloaded tree's own node, not the object from before the save", ReferenceEquals(VGet<TechTreeData.Node>("_selected"), N("Technology_T")));
                     Check("viewer save: the open list window (nothing unsaved) shows the new entry", Get<List<string>>("entries").SequenceEqual(new[] { "Technology_T" }) && !Dirty, string.Join(",", Get<List<string>>("entries")));
                     VCall("SetPosition", N("Technology_T"), 16, 4);   // its saved position again
                     Check("viewer: the position typed back is no change", Staged == 0);
