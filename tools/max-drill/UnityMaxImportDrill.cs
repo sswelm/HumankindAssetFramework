@@ -4,9 +4,8 @@
 // contracts (Picked, ExitGuiAfterDialogs, a failed conversion). The geometry is held to the reference .glb that the
 // stand-alone drill's executable wrote from the same file with another decoder (System.Drawing).
 //   -hafMaxOutput <result.txt>  -hafMaxList <list.txt>   (list lines: <copy of file.max>|<reference .glb>)
-// In batch mode every dialog answers itself with NO / Cancel (measured in review round 3). So the dialogs' text and
-// the IMGUI layout are NOT covered here, and neither is the YES to "overwrite a file the reader did not write":
-// with such a file in the way, Convert returns null here and the file stays.
+// Batch mode answers the replacement dialog with Cancel. The drill checks that Convert returns null and preserves an
+// edited GLB. MaxReaderTests covers approval, and the dialog and IMGUI layout require a live editor to inspect.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -145,6 +144,18 @@ public static class UnityMaxImportDrill
                 try { MaxImport.ConvertTyped(max, g => typed = g); } catch (Exception e) { typedFailed = e; }
                 Check(tag + ": the Convert button's deferred half hands the .glb to the field outside a GUI pass" + (typedFailed != null ? " (" + typedFailed.GetType().Name + ": " + typedFailed.Message + ")" : ""),
                     typedFailed == null && typed != null && Path.GetFullPath(typed) == Path.GetFullPath(expect));
+
+                if (n == 1)
+                {
+                    // A HAF rewrite keeps the generator even when the contents have been edited.
+                    mine.Nodes[0].Name += " (edited)";
+                    GlbWriter.Write(mine, expect);
+                    byte[] edited = File.ReadAllBytes(expect);
+                    File.SetLastWriteTimeUtc(expect, stamp);
+                    Check(tag + ": a derivative keeps the .max generator and has different contents", MaxModel.IsOurs(expect) && !Same(first, edited));
+                    string declined = MaxImport.Convert(max);  // Unity answers Cancel in batch mode
+                    Check(tag + ": cancelling replacement preserves the edited GLB", declined == null && Same(edited, File.ReadAllBytes(expect)) && File.GetLastWriteTimeUtc(expect) == stamp);
+                }
 
                 // 7. a cut-off copy fails with the user told, nothing thrown, and no file left behind.
                 string cut = Path.Combine(Path.GetDirectoryName(max), "cut" + n + ".max");

@@ -326,9 +326,8 @@ including the Blender fallbacks of the in-process routes — needs an ordinary G
   is left untouched and no report is shown. Another tool that has the copy open sees no change. The window you pick
   in treats it as a new pick: the Cutter and the Fuser clear their list (and their unsaved marks), the Vehicle Lab
   keeps its marked parts until the next Probe.
-- **An existing `name_max.glb`** is replaced without asking when its generator line names this reader. That is a file
-  the reader wrote — and also a file a HAF tool wrote from one, because the GLB writer keeps that line. Any other file
-  of that name asks first.
+- **An existing `name_max.glb`** asks before replacement whenever the conversion would change its bytes. Choose
+  **Cancel** to keep the existing file and its edits.
 - **A file with no part the reader can read** is refused with the reasons, and no copy is written.
 
 **What is read** (the four sample models — two armoured cars, a torpedo boat, a stealth ship: 257 parts, 244,337

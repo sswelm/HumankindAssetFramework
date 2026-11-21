@@ -821,6 +821,36 @@ public class MaxReaderTests : IDisposable
     }
 
     [Fact]
+    public void An_edited_conversion_requires_confirmation_even_with_the_original_generator()
+    {
+        var scene = new Sc(); int root = scene.Root();
+        scene.Node("Deck", root, scene.Prs(Id, NoRot, One), scene.Mesh(Tri, Face(0, 1, 2)));
+        string max = Path.Combine(dir, "Ship.max"), glb = MaxModel.DefaultGlbPath(max);
+        System.IO.File.WriteAllBytes(max, scene.File());
+
+        bool UnexpectedPrompt() => throw new InvalidOperationException("No replacement is needed.");
+        Assert.NotNull(MaxModel.ConvertToGlb(max, glb, null, out bool unchanged, UnexpectedPrompt));
+        Assert.False(unchanged);
+        byte[] original = System.IO.File.ReadAllBytes(glb);
+        Assert.NotNull(MaxModel.ConvertToGlb(max, glb, null, out unchanged, UnexpectedPrompt));
+        Assert.True(unchanged);
+
+        var derived = GlbReader.Read(glb);
+        derived.Nodes[0].Name = "Edited deck";
+        GlbWriter.Write(derived, glb);
+        Assert.True(MaxModel.IsOurs(glb));
+        byte[] edited = System.IO.File.ReadAllBytes(glb);
+        Assert.Null(MaxModel.ConvertToGlb(max, glb, null, out unchanged, () => false));
+        Assert.False(unchanged);
+        Assert.Equal(edited, System.IO.File.ReadAllBytes(glb));
+        Assert.Empty(Directory.GetFiles(dir, "*.tmp"));
+
+        Assert.NotNull(MaxModel.ConvertToGlb(max, glb, null, out unchanged, () => true));
+        Assert.False(unchanged);
+        Assert.Equal(original, System.IO.File.ReadAllBytes(glb));
+    }
+
+    [Fact]
     public void A_container_that_claims_more_than_the_file_holds_is_refused_before_it_is_paid_for()
     {
         // more allocation sectors declared than the file has sectors
