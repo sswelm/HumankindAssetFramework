@@ -20,6 +20,8 @@ using UnityEngine;
 ///  - Scroll bars under and beside the canvas. They move the same pan as the middle-mouse drag.
 ///  - X and Y fields in the side strip: the selected node's position as numbers, staged like a drag.
 ///  - The selection is kept by name across a reload (it was the node object from before it).
+///  - The canvas looks like the game's tech screen (asked for by the user, 2026-11-21): cards in the game's
+///    proportions and spacing, and links routed by the game's own rule. See the GEOMETRY block and LinkPath.
 /// </summary>
 public class TechTreeWindow : EditorWindow
 {
@@ -60,17 +62,35 @@ public class TechTreeWindow : EditorWindow
     Vector2 _pan;
     float   _zoom = 1f;
     bool    _framed, _panning;
+    bool    _fitWholeTree;   // the next framing shows the whole tree (the Frame All button); otherwise its height, as the game does
 
-    const float CELL = 26f;
-    const float NODE_W = 150f, NODE_H = 34f;
-    const float LABEL_MIN_ZOOM = 0.45f;
+    // ── GEOMETRY of the game's tech screen ────────────────────────────────────
+    // The game puts a card at (TechTreeX * columnsSize, TechTreeY * rowsSize) (TechnologyScreen) and routes the links
+    // between the cards' rectangles (TechnologyScreen_Links). The two sizes and the card's own size are serialized in
+    // the game's prefabs, not in its code, so they are MEASURED: from a screenshot of the game's tech screen (ENC,
+    // 2026-11-21) with six cards whose TechTreeX / Y are known. Six columns were 720 px, 26 rows 927 px, a card
+    // 502 x 187 px. Brought to a card width of 251: only the ratios matter here.
+    const float COL = 60f, ROW = 17.8f;            // one step of TechTreeX / TechTreeY
+    const float NODE_W = 251f, NODE_H = 93.5f;     // a card: 4.18 columns wide, 5.25 rows high
+    const float LINK_CURVE = 12f;                  // radius of a link's elbow (the game's value is serialized too: a guess)
+    const int   CORNER_STEPS = 6;                  // line pieces an elbow is drawn with
+    const float LABEL_MIN_ZOOM = 0.3f;
     const float SIDE_W = 300f;
     const float BAR = 15f;             // thickness of the canvas scroll bars
     const float SCROLL_MARGIN = 60f;   // empty space the bars allow around the tree, in pixels
 
     static readonly Color EDIT_DOT = new Color(1f, 0.65f, 0.1f);     // amber: unsaved
     static readonly Color MOD_BADGE = new Color(0.4f, 0.7f, 1f);     // blue: modded on disk
-    static readonly Color AND_MARK = new Color(1f, 0.85f, 0.45f);    // the "AND" in a node's corner
+    static readonly Color AND_MARK = new Color(1f, 0.85f, 0.45f);    // the "AND" on a card
+    // The game's look for a technology that is not researched yet: a dark card with a thin gold edge on dark indigo.
+    // The colours are read off the same screenshot; GOLD is the game's own "available" link colour
+    // (TechnologyScreen_Links.availableColor).
+    static readonly Color CANVAS = new Color(0.075f, 0.065f, 0.19f);
+    static readonly Color CARD = new Color(0.25f, 0.24f, 0.38f);
+    static readonly Color CARD_SELECTED = new Color(0.36f, 0.35f, 0.52f);
+    static readonly Color CARD_EDGE = new Color(0.72f, 0.62f, 0.42f);
+    static readonly Color GOLD = new Color(1f, 0.87f, 0.58f);
+    static readonly Color LINK = new Color(1f, 0.87f, 0.58f, 0.8f);
 
     static readonly GUIContent[] RuleChoices =
     {
@@ -172,17 +192,35 @@ public class TechTreeWindow : EditorWindow
         if (_pending.TryGetValue(n.Name, out var p) && p.IsEmpty) _pending.Remove(n.Name);
     }
 
-    Vector2 W2S(float cx, float cy) => new Vector2(cx * CELL * _zoom + _pan.x, cy * CELL * _zoom + _pan.y);
+    Vector2 W2S(float cx, float cy) => new Vector2(cx * COL * _zoom + _pan.x, cy * ROW * _zoom + _pan.y);
+    // a card's rectangle on screen
+    Rect NodeRect(TechTreeData.Node n)
+    {
+        Vector2 p = W2S(EffX(n), EffY(n));
+        return new Rect(p.x, p.y, NODE_W * _zoom, NODE_H * _zoom);
+    }
 
+    // The tech tree is far wider than high. Like the game, the view opens on the tree's full HEIGHT at its left end;
+    // the Frame All button shows the whole tree.
     void FrameAll(Rect canvas)
     {
         if (_nodes == null || _nodes.Count == 0) return;
-        float maxX = _nodes.Max(EffX) + 2;
-        float maxY = _nodes.Max(EffY) + 2;
-        float zx = canvas.width / (maxX * CELL), zy = canvas.height / (maxY * CELL);
-        _zoom = Mathf.Clamp(Mathf.Min(zx, zy), 0.05f, 2f);
-        _pan = new Vector2(canvas.x + (canvas.width - maxX * CELL * _zoom) * 0.5f,
-                           canvas.y + (canvas.height - maxY * CELL * _zoom) * 0.5f);
+        const float margin = 30f;
+        float w = _nodes.Max(EffX) * COL + NODE_W + 2 * margin;
+        float h = _nodes.Max(EffY) * ROW + NODE_H + 2 * margin;
+        float zx = canvas.width / w, zy = canvas.height / h;
+        if (_fitWholeTree)
+        {
+            _zoom = Mathf.Clamp(Mathf.Min(zx, zy), 0.05f, 2f);
+            _pan = new Vector2(canvas.x + (canvas.width - w * _zoom) * 0.5f + margin * _zoom,
+                               canvas.y + (canvas.height - h * _zoom) * 0.5f + margin * _zoom);
+        }
+        else
+        {
+            _zoom = Mathf.Clamp(zy, 0.05f, 1f);
+            _pan = new Vector2(canvas.x + margin * _zoom, canvas.y + (canvas.height - h * _zoom) * 0.5f + margin * _zoom);
+        }
+        _fitWholeTree = false;
         _framed = true;
     }
 
@@ -196,7 +234,7 @@ public class TechTreeWindow : EditorWindow
         EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
         _editMode = GUILayout.Toggle(_editMode, _editMode ? "● Edit" : "View", EditorStyles.toolbarButton, GUILayout.Width(70));
         if (GUILayout.Button("Reload", EditorStyles.toolbarButton, GUILayout.Width(60))) Reload(keepView: true);
-        if (GUILayout.Button("Frame All", EditorStyles.toolbarButton, GUILayout.Width(70))) _framed = false;
+        if (GUILayout.Button("Frame All", EditorStyles.toolbarButton, GUILayout.Width(70))) { _framed = false; _fitWholeTree = true; }
 
         using (new EditorGUI.DisabledScope(!Dirty))
         {
@@ -264,9 +302,9 @@ public class TechTreeWindow : EditorWindow
         if (_nodes == null || _nodes.Count == 0 || canvas.width <= 0 || canvas.height <= 0) return;
         // The view's top-left corner and the tree's extent, both in the tree's own pixels at this zoom.
         float viewX = canvas.x - _pan.x, viewY = canvas.y - _pan.y;
-        ScrollRange(Mathf.Min(0, _nodes.Min(EffX)) * CELL * _zoom - SCROLL_MARGIN, (_nodes.Max(EffX) * CELL + NODE_W) * _zoom + SCROLL_MARGIN,
+        ScrollRange(Mathf.Min(0, _nodes.Min(EffX)) * COL * _zoom - SCROLL_MARGIN, (_nodes.Max(EffX) * COL + NODE_W) * _zoom + SCROLL_MARGIN,
                     viewX, canvas.width, out float loX, out float hiX);
-        ScrollRange(Mathf.Min(0, _nodes.Min(EffY)) * CELL * _zoom - SCROLL_MARGIN, (_nodes.Max(EffY) * CELL + NODE_H) * _zoom + SCROLL_MARGIN,
+        ScrollRange(Mathf.Min(0, _nodes.Min(EffY)) * ROW * _zoom - SCROLL_MARGIN, (_nodes.Max(EffY) * ROW + NODE_H) * _zoom + SCROLL_MARGIN,
                     viewY, canvas.height, out float loY, out float hiY);
         float newX = GUI.HorizontalScrollbar(new Rect(canvas.x, canvas.yMax, canvas.width, BAR), viewX, canvas.width, loX, hiX);
         float newY = GUI.VerticalScrollbar(new Rect(canvas.xMax, canvas.y, BAR, canvas.height), viewY, canvas.height, loY, hiY);
@@ -325,9 +363,8 @@ public class TechTreeWindow : EditorWindow
         }
         else if (e.type == EventType.MouseDrag && _dragNode != null)
         {
-            float inv = 1f / (CELL * _zoom);
-            int dx = Mathf.RoundToInt((e.mousePosition.x - _dragStartMouse.x) * inv);
-            int dy = Mathf.RoundToInt((e.mousePosition.y - _dragStartMouse.y) * inv);
+            int dx = Mathf.RoundToInt((e.mousePosition.x - _dragStartMouse.x) / (COL * _zoom));
+            int dy = Mathf.RoundToInt((e.mousePosition.y - _dragStartMouse.y) / (ROW * _zoom));
             int nx = Mathf.Max(0, _dragStartX + dx);
             int ny = Mathf.Max(0, _dragStartY + dy);
             var p = Stage(_dragNode);
@@ -345,98 +382,147 @@ public class TechTreeWindow : EditorWindow
 
     TechTreeData.Node NodeAt(Vector2 screen)
     {
-        foreach (var n in _nodes)
-        {
-            Vector2 p = W2S(EffX(n), EffY(n));
-            if (new Rect(p.x, p.y, NODE_W * _zoom, NODE_H * _zoom).Contains(screen)) return n;
-        }
+        // cards can overlap (two rows apart is closer than a card is high): the one drawn last is on top
+        for (int i = _nodes.Count - 1; i >= 0; i--)
+            if (NodeRect(_nodes[i]).Contains(screen)) return _nodes[i];
         return null;
     }
 
     // ── Canvas ────────────────────────────────────────────────────────────────
     void DrawCanvas(Rect canvas)
     {
-        EditorGUI.DrawRect(canvas, new Color(0.16f, 0.16f, 0.17f));
+        EditorGUI.DrawRect(canvas, CANVAS);
         GUI.BeginClip(canvas);
         Rect local = new Rect(0, 0, canvas.width, canvas.height);
         Vector2 panSave = _pan; _pan -= new Vector2(canvas.x, canvas.y);
 
         bool showLabels = _zoom >= LABEL_MIN_ZOOM;
 
-        // edges (from effective prereqs)
-        foreach (var n in _nodes)
+        // links, routed as the game routes them (from the effective prerequisites)
+        if (Event.current.type == EventType.Repaint)
         {
-            Vector2 to = W2S(EffX(n), EffY(n)) + new Vector2(0, NODE_H * _zoom * 0.5f);
-            foreach (var pr in EffPrereqs(n))
+            Handles.color = LINK;
+            float width = Mathf.Clamp(1.5f * _zoom, 1f, 2.5f);
+            foreach (var n in _nodes)
             {
-                if (!_byName.TryGetValue(pr, out var src)) continue;
-                Vector2 from = W2S(EffX(src), EffY(src)) + new Vector2(NODE_W * _zoom, NODE_H * _zoom * 0.5f);
-                if (!local.Contains(from) && !local.Contains(to) && !LineCrossesRect(from, to, local)) continue;
-                Handles.DrawBezier(from, to, from + Vector2.right * 40f * _zoom, to - Vector2.right * 40f * _zoom,
-                    new Color(0.5f, 0.6f, 0.7f, 0.7f), null, 2f);
-            }
-        }
-
-        // nodes
-        foreach (var n in _nodes)
-        {
-            Vector2 p = W2S(EffX(n), EffY(n));
-            var r = new Rect(p.x, p.y, NODE_W * _zoom, NODE_H * _zoom);
-            if (!r.Overlaps(local)) continue;
-
-            Color tint = EraColor(n.Era);
-            if (n == _selected) tint = Color.Lerp(tint, Color.white, 0.4f);
-            EditorGUI.DrawRect(r, tint);
-            EditorGUI.DrawRect(new Rect(r.x, r.y, r.width, 1), new Color(0, 0, 0, 0.4f));
-
-            // markers: modded badge (left stripe, scales with zoom) + edited dot (top-right)
-            if (n.AnyModded)
-            {
-                float bw = Mathf.Max(3f, 4f * _zoom);
-                EditorGUI.DrawRect(new Rect(r.x, r.y, bw, r.height), MOD_BADGE);
-            }
-            if (IsEdited(n))
-            {
-                float d = Mathf.Max(5f, 7f * _zoom);
-                EditorGUI.DrawRect(new Rect(r.xMax - d - 2, r.y + 2, d, d), EDIT_DOT);
-            }
-
-            if (showLabels)
-            {
-                int fs = Mathf.Clamp(Mathf.RoundToInt(11f * Mathf.Min(_zoom, 1.3f)), 7, 14);
-                var style = new GUIStyle(EditorStyles.label)
+                Rect to = NodeRect(n);
+                foreach (var pr in EffPrereqs(n))
                 {
-                    alignment = TextAnchor.MiddleCenter,
-                    fontSize = fs,
-                    fontStyle = FontStyle.Bold,
-                    wordWrap = true,
-                    normal = { textColor = Color.white }
-                };
-                GUI.Label(r, n.Label, style);
-
-                if (_zoom >= LABEL_MIN_ZOOM)
-                {
-                    int cfs = Mathf.Clamp(Mathf.RoundToInt(9f * Mathf.Min(_zoom, 1.3f)), 7, 12);
-                    var corner = new GUIStyle(EditorStyles.miniLabel)
-                    { fontSize = cfs, fontStyle = FontStyle.Bold, normal = { textColor = new Color(1, 1, 1, 0.75f) } };
-                    float ch = cfs + 4f;
-                    corner.alignment = TextAnchor.UpperLeft;
-                    GUI.Label(new Rect(r.x + 5, r.y + 1, r.width - 8, ch), ShortEra(n.Era), corner);
-                    corner.alignment = TextAnchor.UpperRight;
-                    GUI.Label(new Rect(r.x + 2, r.y + 1, r.width - 12, ch), ShortTier(n.Tier), corner);
-                    // the AND rule, where it has an effect (two or more prerequisites): lower left, where the edges arrive
-                    if (!_rulesUnreadable && EffRequireAll(n) && EffPrereqs(n).Count >= 2)
-                    {
-                        corner.alignment = TextAnchor.LowerLeft;
-                        corner.normal.textColor = AND_MARK;
-                        GUI.Label(new Rect(r.x + 5, r.yMax - ch - 1, r.width - 8, ch), "AND", corner);
-                    }
+                    if (!_byName.TryGetValue(pr, out var src)) continue;
+                    Rect from = NodeRect(src);
+                    // a link stays inside the box around its two cards
+                    if (!Rect.MinMaxRect(Mathf.Min(from.xMin, to.xMin), Mathf.Min(from.yMin, to.yMin), Mathf.Max(from.xMax, to.xMax), Mathf.Max(from.yMax, to.yMax)).Overlaps(local)) continue;
+                    LinkPath(from, to, LINK_CURVE * _zoom, _linkPath);
+                    if (_linkPoints.Length < _linkPath.Count) _linkPoints = new Vector3[_linkPath.Count];
+                    for (int i = 0; i < _linkPath.Count; i++) _linkPoints[i] = _linkPath[i];
+                    Handles.DrawAAPolyLine(width, _linkPath.Count, _linkPoints);
                 }
             }
+            Handles.color = Color.white;
+        }
+
+        // cards
+        float z = Mathf.Min(_zoom, 1.6f);
+        var titleStyle = new GUIStyle(EditorStyles.label)
+        {
+            alignment = TextAnchor.MiddleLeft, fontSize = Mathf.Clamp(Mathf.RoundToInt(12f * z), 6, 19),
+            wordWrap = false, clipping = TextClipping.Clip, normal = { textColor = GOLD }
+        };
+        var infoStyle = new GUIStyle(EditorStyles.miniLabel)
+        {
+            alignment = TextAnchor.MiddleLeft, fontSize = Mathf.Clamp(Mathf.RoundToInt(9f * z), 6, 14),
+            wordWrap = false, clipping = TextClipping.Clip, normal = { textColor = new Color(1, 1, 1, 0.7f) }
+        };
+        var nameStyle = new GUIStyle(infoStyle) { normal = { textColor = new Color(1, 1, 1, 0.38f) } };
+        var andStyle = new GUIStyle(infoStyle) { alignment = TextAnchor.MiddleRight, fontStyle = FontStyle.Bold, normal = { textColor = AND_MARK } };
+
+        foreach (var n in _nodes)
+        {
+            Rect r = NodeRect(n);
+            if (!r.Overlaps(local)) continue;
+
+            bool selected = n == _selected;
+            float radius = 4f * _zoom;
+            // the card: fill, then the thin gold edge (brighter and thicker on the selected one)
+            GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, selected ? CARD_SELECTED : CARD, 0, radius);
+            GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, selected ? GOLD : CARD_EDGE, selected ? 2f : 1f, radius);
+
+            float pad = 8f * _zoom;
+            float titleH = 0.29f * r.height;   // the game's title band: the divider sits at 29% of the card's height
+
+            // markers: modded on disk (blue bar inside the left edge) + unsaved edit (amber dot, top right)
+            if (n.AnyModded)
+                EditorGUI.DrawRect(new Rect(r.x + 1, r.y + radius, Mathf.Max(2f, 3f * _zoom), r.height - 2 * radius), MOD_BADGE);
+            if (IsEdited(n))
+            {
+                float d = Mathf.Max(5f, 8f * _zoom);
+                GUI.DrawTexture(new Rect(r.xMax - d - pad * 0.5f, r.y + (titleH - d) * 0.5f, d, d), Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, EDIT_DOT, 0, d * 0.5f);
+            }
+
+            if (!showLabels) continue;
+
+            // title, upper case as in the game, over the divider
+            GUI.Label(new Rect(r.x + pad, r.y, r.width - 2 * pad - (IsEdited(n) ? 10f * _zoom : 0), titleH), (n.Label ?? n.Name ?? "").ToUpperInvariant(), titleStyle);
+            EditorGUI.DrawRect(new Rect(r.x + pad, r.y + titleH, r.width - 2 * pad, 1f), new Color(1f, 1f, 1f, 0.22f));
+
+            // under it, where the game shows the turns: era and tier, and the AND rule where it has an effect
+            float rowH = 0.24f * r.height;
+            var info = new Rect(r.x + pad, r.y + titleH + 2f * _zoom, r.width - 2 * pad, rowH);
+            string eraTier = ShortEra(n.Era) + (string.IsNullOrEmpty(n.Era) || string.IsNullOrEmpty(n.Tier) ? "" : " · ") + ShortTier(n.Tier);
+            GUI.Label(info, eraTier, infoStyle);
+            if (!_rulesUnreadable && EffRequireAll(n) && EffPrereqs(n).Count >= 2)
+                GUI.Label(info, "AND", andStyle);
+            // at the bottom, where the game shows what the technology unlocks: its internal name
+            GUI.Label(new Rect(r.x + pad, r.yMax - rowH - 3f * _zoom, r.width - 2 * pad, rowH), n.Name, nameStyle);
         }
 
         _pan = panSave;
         GUI.EndClip();
+    }
+
+    readonly List<Vector2> _linkPath = new List<Vector2>();
+    Vector3[] _linkPoints = new Vector3[16];
+
+    /// <summary>
+    /// The path of one link from the prerequisite's card to the technology's card: the game's own routing
+    /// (TechnologyScreen_Links.Link.RebuildCurve), with its Bezier elbow cut into line pieces.
+    ///  - The two cards share some height: one straight horizontal line, at the middle of the shared part, from the
+    ///    first card's right edge to the second card's left edge.
+    ///  - They share none: out of the first card's top or bottom edge at its middle (the edge that faces the second
+    ///    card), straight up or down to the height of the second card's middle, round the elbow, then horizontal to the
+    ///    second card's left edge. The elbow's radius is cut down to the room there is.
+    ///  - The second card does not start right of the first one's end: the game logs "right-to-left links are not
+    ///    handled" and draws centre to centre.
+    /// </summary>
+    internal static void LinkPath(Rect start, Rect end, float curve, List<Vector2> path)
+    {
+        path.Clear();
+        if (start.xMax > end.xMin)
+        {
+            path.Add(start.center); path.Add(end.center);
+            return;
+        }
+        if (end.yMax < start.yMin || start.yMax < end.yMin)
+        {
+            bool endAbove = end.yMax < start.yMin;
+            var from = new Vector2((start.xMin + start.xMax) * 0.5f, endAbove ? start.yMin : start.yMax);
+            var to = new Vector2(end.xMin, (end.yMin + end.yMax) * 0.5f);
+            var elbow = new Vector2(from.x, to.y);
+            float c = Mathf.Min(Mathf.Max(0f, curve), Mathf.Abs(from.y - elbow.y), Mathf.Abs(elbow.x - to.x));
+            var before = new Vector2(elbow.x, elbow.y + (endAbove ? c : -c));
+            var after = new Vector2(elbow.x + c, elbow.y);
+            path.Add(from); path.Add(before);
+            // the game's corner: a cubic Bezier from `before` to `after` with both control points on the elbow
+            for (int i = 1; i < CORNER_STEPS; i++)
+            {
+                float t = i / (float)CORNER_STEPS, u = 1f - t;
+                path.Add(u * u * u * before + 3f * u * t * elbow + t * t * t * after);
+            }
+            path.Add(after); path.Add(to);
+            return;
+        }
+        float y = (Mathf.Max(start.yMin, end.yMin) + Mathf.Min(start.yMax, end.yMax)) * 0.5f;
+        path.Add(new Vector2(start.xMax, y)); path.Add(new Vector2(end.xMin, y));
     }
 
     // ── Side strip ────────────────────────────────────────────────────────────
@@ -683,25 +769,8 @@ public class TechTreeWindow : EditorWindow
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
-    static Color EraColor(string era) => era switch
-    {
-        "Era1" => new Color(0.35f, 0.45f, 0.55f),
-        "Era2" => new Color(0.35f, 0.55f, 0.45f),
-        "Era3" => new Color(0.55f, 0.50f, 0.35f),
-        "Era4" => new Color(0.55f, 0.40f, 0.40f),
-        "Era5" => new Color(0.45f, 0.40f, 0.55f),
-        "Era6" => new Color(0.50f, 0.45f, 0.50f),
-        _      => new Color(0.40f, 0.40f, 0.42f),
-    };
     static string ShortEra(string era)  => string.IsNullOrEmpty(era) ? "" : era.Replace("Era", "E");
     static string ShortTier(string tier) => string.IsNullOrEmpty(tier) ? "" : tier.Replace("Tier", "T");
-
-    static bool LineCrossesRect(Vector2 a, Vector2 b, Rect r)
-    {
-        float minX = Mathf.Min(a.x, b.x), maxX = Mathf.Max(a.x, b.x);
-        float minY = Mathf.Min(a.y, b.y), maxY = Mathf.Max(a.y, b.y);
-        return !(maxX < r.xMin || minX > r.xMax || maxY < r.yMin || minY > r.yMax);
-    }
 }
 
 /// <summary>

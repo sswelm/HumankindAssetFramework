@@ -42,6 +42,8 @@ public static class TechRequireAllWindowDrill
     static bool All(string name) => (bool)VCall("EffRequireAll", N(name));
     static int Staged => ((System.Collections.IDictionary)typeof(TechTreeWindow).GetField("_pending", Private).GetValue(viewer)).Count;
     static string Deployed => File.Exists(Artifact) ? PluginReads(Artifact) : "no file";
+    static bool Near(Vector2 p, float x, float y) => Mathf.Abs(p.x - x) < 0.01f && Mathf.Abs(p.y - y) < 0.01f;
+    static string Points(List<Vector2> path) => string.Join(" ", path.Select(q => "(" + q.x.ToString("0.##") + "," + q.y.ToString("0.##") + ")"));
 
     // the plugin's reader, from the plugin DLL in Assets/Plugins: what the game will make of the deployed file
     static string PluginReads(string path)
@@ -238,6 +240,33 @@ public static class TechRequireAllWindowDrill
                     Check("scroll range: widened to a view panned past the left edge", lo == -500 && hi == 1000, lo + ".." + hi);
                     TechTreeWindow.ScrollRange(-60, 1000, 900, 300, out lo, out hi);
                     Check("scroll range: widened to a view panned past the right edge", lo == -60 && hi == 1200, lo + ".." + hi);
+                    // ---- the links, routed as the game routes them (TechnologyScreen_Links.Link.RebuildCurve). The
+                    // expected points are worked out by hand from that rule, for cards of 251 x 93.5.
+                    var path = new List<Vector2>();
+                    var card = new Rect(0, 0, 251, 93.5f);
+                    TechTreeWindow.LinkPath(card, new Rect(360, 71.2f, 251, 93.5f), 12, path);
+                    Check("link, cards share some height: one horizontal line at the middle of the shared part",
+                          path.Count == 2 && Near(path[0], 251, 82.35f) && Near(path[1], 360, 82.35f), Points(path));
+                    TechTreeWindow.LinkPath(card, new Rect(360, 200, 251, 93.5f), 12, path);
+                    Check("link, second card lower: out of the bottom edge's middle, down, round the elbow, to the left edge's middle",
+                          path.Count > 4 && Near(path[0], 125.5f, 93.5f) && Near(path[1], 125.5f, 234.75f) && Near(path[path.Count - 2], 137.5f, 246.75f) && Near(path[path.Count - 1], 360, 246.75f), Points(path));
+                    Check("    the elbow stays inside its corner", path.Skip(1).Take(path.Count - 2).All(q => q.x >= 125.5f - 0.01f && q.x <= 137.51f && q.y >= 234.74f && q.y <= 246.76f), Points(path));
+                    TechTreeWindow.LinkPath(new Rect(0, 300, 251, 93.5f), new Rect(360, 0, 251, 93.5f), 12, path);
+                    Check("link, second card higher: out of the TOP edge's middle, up to the second card's middle",
+                          Near(path[0], 125.5f, 300) && Near(path[1], 125.5f, 58.75f) && Near(path[path.Count - 2], 137.5f, 46.75f) && Near(path[path.Count - 1], 360, 46.75f), Points(path));
+                    TechTreeWindow.LinkPath(card, new Rect(260, 100, 251, 93.5f), 500, path);
+                    Check("link: an elbow radius larger than the room is cut down to it",
+                          Near(path[1], 125.5f, 93.5f) && Near(path[path.Count - 2], 125.5f + 53.25f, 146.75f), Points(path));
+                    TechTreeWindow.LinkPath(card, new Rect(100, 300, 251, 93.5f), 12, path);
+                    Check("link, second card not right of the first: centre to centre, as the game draws it",
+                          path.Count == 2 && Near(path[0], 125.5f, 46.75f) && Near(path[1], 225.5f, 346.75f), Points(path));
+                    // the canvas: a click in the middle of a card finds that card (cards sit on the game's grid)
+                    var rectT = (Rect)VCall("NodeRect", N("Technology_T"));
+                    Check("canvas: a card is 251 x 93.5 at zoom 1, in the game's proportions", Mathf.Abs(rectT.width / rectT.height - 251f / 93.5f) < 0.001f, rectT.ToString());
+                    Check("canvas: a click in the middle of a card finds it", ReferenceEquals(VCall("NodeAt", rectT.center), N("Technology_T")));
+                    var rectS = (Rect)VCall("NodeRect", N("Technology_S"));
+                    Check("canvas: five rows down is 89 px at zoom 1 (17.8 per row), the same column the same x",
+                          Mathf.Abs((rectS.y - rectT.y) / VGet<float>("_zoom") - 5 * 17.8f) < 0.01f && Mathf.Abs(rectS.x - rectT.x) < 0.01f, rectS + " vs " + rectT);
                     break;
                 default:
                     Check("no error or exception was logged while the windows drew", errors.Count == 0, string.Join(" | ", errors));
