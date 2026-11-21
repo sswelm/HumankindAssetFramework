@@ -1838,23 +1838,20 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   whose two prerequisites have no title in the editor's Tech Requires All window (the game's own titles are used here).
 - **The planner walks up to 32 levels where the game stops at 5** (`TryFillParentTechnologiesToCompleteBefore`), in a
   tree that holds a listed technology. Deliberate; noted because it is a difference from the game.
-- **The new window depends on a local change to the Tech Tree viewer.** `TechRequireAllWindow` reuses the viewer's
-  `TechPickerDropdown` (`editor/TechTreeWindow.cs`) and passes a heading as a fourth constructor argument; the picker's
-  heading was a fixed text before. The viewer came from another modder's tool (the user, 2026-11-20; the file has no
-  credit line and its history here starts at 2026-08-24, the move into this repo). Replacing the file with a newer
-  copy of that tool drops the `title` parameter and the new window stops compiling. Fine for now (the user, same day);
-  the clean cut is to give the new window its own picker so the viewer file is untouched.
-  **More local changes since 2026-11-21 (asked for by the user):** the OR / AND heading and switch, the `AND` corner
-  mark, the `X` / `Y` position fields, the scroll bars, the selection kept by name across a reload, the game's look of the canvas (card geometry measured from a screenshot, link routing ported from the game's code), and a seam for the drill (`BuildTreeImpl`). They are listed in
-  the file's header comment. A newer copy of the other tool would now drop all of them, so the "own picker" cut no
-  longer makes the file untouched. **Seen in Unity (the user's screenshot, 2026-11-21, ENC project,
-  view mode):** the heading `Prerequisites (AND)` on World-Wide Web, the two rule buttons, the `X` / `Y` fields, both
-  scroll bars and the `AND` corner mark. Later the same day, in three more screenshots: the game's look (cards,
-  links with an elbow, the amber `Edit: ON` button), the artwork of the project's own images, and the game's own
-  images out of the UI bundle (Rocket Science, Communication Satellites, Renewable Energy, Covert Ops, World-Wide
-  Web; the side strip named the atlas `UI_Technology_Era6_00.png`). That was the first run of the bundle reading
-  inside Unity; the modding tools had the game's bundles mounted. **Not seen yet, and held by no test:** a click on the buttons or the bars, a
-  rule switch saved from the viewer in a real project, and a typed position written to a real asset.
+- **The list's window and the Tech Tree viewer are one unit now.** `TechRequireAllWindow` reuses the viewer's
+  `TechPickerDropdown` and tree source (`editor/TechTreeWindow.cs`, `editor/TechTreeData.cs`), and the viewer writes
+  the list. The viewer came from another modder's tool (the user, 2026-11-20; the files have no credit line and
+  their history here starts at 2026-08-24, the move into this repo). Since PR #301 (2026-11-21, all asked for by the
+  user) most of the viewer is local work: the rule switch, positions as numbers, scroll bars, the game's look and
+  card images (`editor/TechTreeVanillaArt.cs` is new and HAF's own), the in-the-game switch, staged edits that
+  survive reloads, the Save rewritten part by part. The headers of the two files list what a maintainer meets; the
+  full set is their diff since 2026-08-24. A newer copy of the other tool can no longer replace these files.
+  **Seen in Unity (the user's screenshots, 2026-11-21, ENC project):** the rule heading and buttons, the position
+  fields, both scroll bars, the look with the first version's measured geometry, the project's card images and
+  the game's own. **Seen from outside while the user worked (round 3, read only):** ten Saves from the viewer in
+  the real project between 19:10 and 19:34, each logged, the asset text changed in position and prerequisite lines
+  only. **Not seen yet:** the prefab geometry, the In the game / Switched off switch with its notes and `OFF`
+  mark, and the Save button's count of missing technologies.
 - **A save with a planned queue, loaded with the plugin uninstalled, is not guarded** against the double visit in
   `RemoveTechnologyAndChildrenFromQueueAt`. Documented in Editor-Tools and Capabilities; no fix is possible from a
   plugin that is not there.
@@ -1864,32 +1861,44 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
 - **A viewer reload can make the list window's Save refuse with the wrong reason.** The registry engine keeps
   "the last load was corrupt" as shared state (`SingleSourceRegistry.ChangeCore` returns early on `LastLoadCorrupt`).
   The viewer now loads the Tech Requires All list too, so: the list file is briefly broken (merge markers), the
-  viewer reloads, the file is put back unchanged, and the list window's Save says "the registry source was
-  unreadable — recover it first" although the file is fine and its version matches. A Reload in that window clears
-  it; nothing is lost. Executed by the round-1 reviewer. The fix belongs in the engine (let the write-time parse
-  decide, which already refuses a broken file) and touches every registry, so it is not in this PR. The viewer no
-  longer reloads the list on undo, which was the commonest way into it.
+  viewer reloads, the file is put back unchanged, and the list window's Save is refused (the Console says "the
+  registry source was unreadable — recover it first") although the file is fine and its version matches. A Reload
+  in that window clears it; nothing is lost. Executed by a round-1 reviewer. The fix belongs in the engine (let the
+  write-time parse decide, which already refuses a broken file) and touches every registry, so it is not in this
+  PR. The viewer no longer reloads the list on undo, which was the commonest way into it.
 - **Opening the viewer runs the engine's write side of a load**: adopting a deployed copy when the project file is
   missing, the one-time migration, finishing an owed deploy, creating a missing deployed file. Before, only the list
-  window did. The viewer now logs what happened (`[TechTree] reading the Tech Requires All list: ...`). A read
-  without side effects would be an engine change.
+  window did. The viewer logs what happened (`[TechTree] reading the Tech Requires All list: ...`). A read without
+  side effects would be an engine change.
 - **In a project without the list file each read of it waits a quarter of a second** (the engine's re-check for a
-  save-by-rename). The viewer reads on open, on Reload / Apply, after a save with a rule switch, and when another
-  window changed the list; no longer on undo, Revert or a save without a rule switch.
-- **A rule switch is not under Undo.** Ctrl+Z after a Save reverts the position and the definition, not the list.
-  The Save line says so.
-- **The staged set survives a script reload, the Undo history of the viewer does not need to**; a technology that
-  no longer exists keeps its staged edits until Revert (the Save line counts them).
+  save-by-rename). The viewer reads on open, on Reload / Apply / a picked reference folder, after a save with a
+  rule switch, and when another window changed the list or its state; not on undo, Revert or a save without a
+  rule switch.
+- **Nothing takes a Save back from inside the viewer.** Save is not registered with Undo (round 3: it was, and a
+  Ctrl+Z took saved positions back in memory, silently, to be written over the saved ones by the next Save). Staged
+  edits are not under Undo either. Making staged edits undoable would be the proper way to give Ctrl+Z a meaning
+  here; not done.
+- **Undo entries of saves made by the older code stay in the editor's Undo stack until it restarts.** In such a
+  session a Ctrl+Z can still take a saved position back in memory; the viewer now shows and says it, and a Redo
+  takes it back.
 - **What `Visibility = Never` does is read from the decompiled game, not run in a game**
-  (`DepartmentOfScience.CreateTechnologies`, `CheckTechnologyPrerequisite`). The viewer's wording rests on that.
-- **The Ref field applies its path on every keystroke** (older than this PR). A reload while it is half typed
-  builds without the reference-only technologies; their staged edits are now kept, their cards are gone until the
-  path is right.
+  (`DepartmentOfScience.CreateTechnologies`, `CheckTechnologyPrerequisite`). The viewer's wording rests on that;
+  the game's debug window can still unlock such a technology by hand.
+- **Four ENC technologies have no mapper** (`Technology_Era1_01..04`): they sit at (0,0), show no image, and a
+  position staged on them cannot be saved ("no mapper to write"). With the reference folder set they take the
+  vanilla mappers, which a save copies into a collection under the mod path.
 - **On this machine the viewer's reference folder is not set** (default `Assets/VanillaReference`, which ENC does
-  not have; ENC's reference copy is `Assets/~References`), so the viewer shows the Databases content only. Four
-  technologies (`Technology_Era1_01..04`) then have no mapper, sit at (0,0) and show no image. Found by the round-1
-  reviewer; a setting of the user's, not changed.
-
+  not have; ENC's reference copy is `Assets/~References`) and the default mod path `Assets/Databases/New Additions`
+  does not exist in ENC, so a reference-only technology cannot be saved until both are set (round 3: with the mod
+  path at `Assets/Databases/Technologies` the copy goes into ENC's own collections as one new document). Settings
+  of the user's, not changed.
+- **The Ref field applies its path on every keystroke** (older than this PR). A reload while it is half typed
+  builds without the reference-only technologies; their staged edits are kept, their cards are gone until the path
+  is right.
+- **A standalone mapper and its definition cannot both be copied into one mod folder** (they share a file name).
+  The second copy is refused and stays staged. ENC keeps both in collections, where this does not arise.
+- **The registry's "unreadable" verdict when its config folder cannot be resolved** leaves a `.corrupt` copy beside
+  a healthy source (seen in passing by a round-2 reviewer; older than this PR, not looked into).
 ## Data contract — low (editor ⇄ plugin)
 
 - **`rotorSpinBones` / `rotorSpinSpeed`** are plugin-only fields with no editor `ModelDef` field. *Partly addressed

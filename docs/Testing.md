@@ -62,19 +62,33 @@ Set `HAF_DRILL_MONO` to run the checks under the Unity editor's Mono as well. Th
 script compares its exit code with a load-only control (139). On 2026-11-21, with the push gate and the game running
 beside it, one run of three exited 127 after `DRILL PASS` and was reported as a failure; two reruns exited 139. A
 failure of that shape (every check passed, only the exit code differs) is the runtime's exit, not the hooks: rerun.
-`bash tools/tech_requires_all_unity_drill.sh` drives the real window in a
-temporary Unity project (add, save, reopen, remove) and reads every deployed file back with the plugin's
-parser; the tech tree is injected, so the picker's list over a real modding project is not exercised. Since
-2026-11-21 the same run drives the Tech Tree viewer beside it (76 checks in all, 14 before): its OR / AND switch is
-staged and written to the list on Save, an open list window without unsaved changes follows, one with unsaved changes
-keeps them and has its save refused, the viewer picks up the list window's save on its next draw, and a save over a
-broken list writes nothing and keeps the switch staged. A typed position is staged with the drag's floor and stays
-staged when there is no asset to write it to (the drill's nodes have none, so writing a position to an asset is not
-exercised). After a save the selection is the reloaded tree's own node (the seam returns new node objects on every reload, as the real builder does). Five link paths are compared with points worked out by hand from the game's routing rule (shared height, lower, higher, an elbow radius larger than the room, a card that is not to the right), and three checks hold the card's proportions, the row step and a click in a card's middle. Three more hold the artwork: an image reference becomes the GUID string the game's own `Amplitude.Framework.Guid.ToString()` prints for it (three vectors taken from the game's DLL), where the artwork goes on a card, and the side strip's line for a card without one. Nine hold the in-the-game / switched-off switch: which values show on the tech screen, staging and switching back, what each button writes for each of the enum's values, the side strip's notes, and reading and writing the field on a stand-in definition with the game's enum values (writing it to a real definition asset on Save is not exercised). Thirteen hold the fixes of the first review round (2026-11-21): staged edits kept across a reload that does not find the technology and across a script reload (the window serialized and read back with Unity's own serializer), the written part of an entry leaving the staged set while the unwritten stay, the floor at 0 per axis, Frame All on a tree as wide as ENC's in a 485 px canvas, and the wording of the Save line per outcome. Two more hold the game's own images: an atlas rectangle, which the game measures from the texture's top, becomes Unity texture coordinates (the numbers are World-Wide Web's entry as read from the game's bundle), and an image is fitted into the artwork's square by its aspect. Reading the reference out of a real mapper asset, opening the game's UI bundle, reading its atlas index and drawing a texture are NOT exercised (the drill's project has no mapper and no Amplitude.UI). Three checks hold the scroll bars' range, and one that drawing them does not move the view. No button is
-clicked and no pixel is read: the viewer's staging and save methods are called and its `OnGUI` is drawn between the
-steps. Planted once (2026-11-21): without the refresh of open list windows, without the viewer's re-read after
-another window's save, without the guard that keeps staged switches when the list is unreadable, and without the selection kept by
-name, the checks for exactly those fail. Neither drill is in the push gate. In a game (2026-11-21, one session): the lock and the queue plan held for one listed technology on
+`bash tools/tech_requires_all_unity_drill.sh` drives the real Tech Requires All window and the Tech Tree viewer in one
+temporary Unity project and reads every deployed list back with the plugin's parser: 124 checks (14 before PR #301,
+which were the list window's own: add, save, reopen, remove). The viewer's part:
+- **The two windows on one list.** The OR / AND switch is staged and written on Save; an open list window without
+  unsaved changes follows, one with unsaved changes keeps them and has its save refused; the viewer picks up the list
+  window's save, an accepted empty list and a deployed stale one at its next draw; a save over a broken list writes
+  nothing and keeps the switch staged; a switch the list already holds is not called changed.
+- **Save into real assets** of stand-in types in the temporary project: a position goes into the mapper's two
+  fields, prerequisites and visibility into the definition, each written part leaves the staged set, the reload
+  reads them back, a reference-only definition is copied once for two parts, a standalone mapper is not copied over
+  its definition's file, and an Undo after a Save takes nothing of it back.
+- **Staged edits:** kept across a reload that does not find the technology, and across a round trip of the window
+  through Unity's own serializer with everything in memory wiped (all five kinds of edit, the selection, the view).
+- **Input through the real `OnGUI`:** a click that slips is no drag, a column of movement is a column, nothing moves
+  while a row is under two pixels.
+- **Geometry and links:** the card's size and the column and row steps against the game's prefab numbers, six
+  link paths against points worked out by hand from the game's routing rule, Frame All below the wheel's floor, the
+  opening view, a click on overlapping cards.
+- **Images and visibility:** three image references against what the game's `Amplitude.Framework.Guid.ToString()`
+  prints, the atlas rectangle's flip, the artwork's rectangle from the prefab, what each button writes for each
+  Visibility value, the notes, and the side strip's texts taken from the window's state.
+What it does not do: it uses stand-in types and standalone assets, not the game's types and the collection
+(sub-asset) shape of the real data; it does not open the game's bundle; no pixel is read. The third review round ran
+Save on copies of the real ENC assets with the game's types in a scratch project that is not in the repo (position,
+prerequisites, visibility, the rule, a real script reload, Undo). Planted (2026-11-21): a mutation run of 66
+defects during the second round found 22 the drill did not notice; 21 of them have a check now (not the artwork
+cache being cleared on reload), and nine defects planted after those checks were written were each caught. Neither drill is in the push gate. In a game (2026-11-21, one session): the lock and the queue plan held for one listed technology on
 a turn-180 save. Removing and dragging in the queue, the AI and multiplayer still need live game coverage
 (Review-Backlog, "Tech Requires All").
 

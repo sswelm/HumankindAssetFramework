@@ -10,68 +10,71 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
-- **The Tech Tree viewer shows and switches whether a technology is in the game (2026-11-21).** Asked for by the
-  user on seeing Future Technology as an ordinary card. Its definition has `Visibility = Never`, and the first
-  version called that "invisible". The first review round read the game's code: `Never` switches a technology off
-  (the game creates a technology for an empire only when Visibility is not `Never`), so it cannot be researched,
-  traded or granted, and a technology that names only it never unlocks. The switch is now **In the game / Switched
-  off**, the note says exactly that and names the technologies that depend on a switched-off one, and the card says
-  `OFF`. Checked: 9 drill checks. Not exercised: the write to a real definition asset on Save in the repo's own
-  drill (two reviewers ran it in scratch projects with stand-in types). Not run in a game: what `Never` does.
-- **Tech Tree viewer, first review round (2026-11-21, three reviewers by slice, each with its own Unity drill).**
-  What it changed:
-  - One Save that wrote prerequisites AND visibility of a technology that exists only in the reference folder
-    copied its definition twice: two definitions of one name in the collection, or one edit lost. The copy is now
-    made once (`TechTreeData.EnsureWritable` remembers it on the node) and both parts go to it.
-  - **Frame All** stopped at zoom 0.05, the floor of the old geometry, and cut both ends off the ENC tree in any
-    window narrower than about 1,600 px. The floor is 0.01.
-  - Save now removes each written part from the staged set; before, a part that was written stayed staged when
-    another part of the same technology could not be written, and the next Save wrote it again.
-  - Staged edits are kept across a script reload (they were lost without a word, also on every update of the
-    editor scripts) and across a reload of the tree that does not find their technology.
-  - The Save line no longer calls a rule switch deployed when the list already held it, and says that a rule
-    switch is not part of Undo. The viewer logs what its read of the list did (an adopted copy, a finished deploy)
-    instead of leaving it to surface in the list's window later, re-reads the list when only its readability
-    changed, and no longer reads it on every undo in the editor.
-  - The list's window reads the tech tree again after a viewer save (it warned "one prerequisite, no effect" about
-    a technology that had just been given a second one).
-  - The game's images: a missing `Amplitude.UI.dll` is named as such, an atlas that does not load is said, a
-    texture destroyed by whoever holds the bundle is loaded again, and only textures out of a bundle the viewer
-    opened itself are unloaded.
-  - Left as they are, recorded in `docs/Review-Backlog.md`: the registry engine's "unreadable" latch that a
-    viewer reload can set for the list's window, and the viewer's read of the list running the engine's adoption
-    and migration.
-- **The Tech Tree viewer's canvas looks like the game's tech screen (2026-11-21).** Asked for by the user with a
-  screenshot of the game. Cards now have the game's proportions and spacing, measured from that screenshot with six
-  cards of known position (six columns = 720 px, 26 rows = 927 px, a card 502 x 187 px; the game keeps these sizes
-  in prefabs, not in code). Links follow the game's own routing, read from
-  `TechnologyScreen_Links.Link.RebuildCurve`: one horizontal line between cards that share some height, otherwise
-  out of the top or bottom edge, one rounded elbow, into the left edge. Dark cards with a thin gold edge on dark
-  indigo, the title in upper case over a divider. The view opens on the tree's height, as the game does. Checked:
-  the Unity window drill, 52 checks (40 before), five link paths against hand-derived points. A card also shows
-  its artwork, standing out of its right end as in the game, when the image is in the project: the mapper's image
-  reference is an `Amplitude.Framework.Guid` of four ints, and the Unity asset GUID is what the game's own
-  `Guid.ToString()` prints for it (124 of ENC's 213 card images resolve). The other 89 are the game's own: they are taken from the game's UI
-  bundle, where `UIAtlas.asset` maps each reference to an atlas texture and a rectangle in it (measured from the
-  top; checked outside Unity by cropping World-Wide Web's entry out of `UI_Technology_Era6_00`). The bundle is
-  opened per read and closed again; nothing is copied into the project. Seen in the user's Unity the same day
-  (screenshots): the look, the project's images and the game's own. Not done: the unlock icons, the
-  researched / locked states, the era headers. The elbow's radius is a guess (no elbow is in the
-  screenshot). No test reads a pixel.
-- **The Tech Tree viewer shows and switches OR / AND, takes a typed position, and has scroll bars (2026-11-21).** The
-  side strip said `Prerequisites (OR)` for every technology, also for one in the Tech Requires All list. The heading
-  now names the rule the technology really has, and two buttons under it switch it in edit mode; Save adds or removes
-  that one name in the list (an operation on the list as it is at write time, `TechRequireAllRegistry.SetRules`), so
-  the list's own window and the viewer no longer contradict each other. A node under the AND rule carries `AND` in
-  its corner. Also asked for the same day: `X` / `Y` number fields for the selected node's position (staged like a
-  drag) and scroll bars under and beside the canvas. Checked: the Unity window drill drives both windows against
-  each other (40 checks, 14 before); four planted defects fail their checks. Seen in Unity the same day (the user's screenshot, view
-  mode): the AND heading, the buttons, the position fields, both bars and the corner mark. One older fault of the viewer is fixed
-  on the way, because the position fields would have built on it: after a Save the selection was still the node
-  object from before the reload, so the side strip showed the previous position and prerequisites and the node lost
-  its highlight; the selection is now kept by name. Not checked by any test and not seen yet:
-  a real click on the buttons or the bars, a rule switch saved from the viewer in a real project, and writing a
-  position to an asset (the drill's nodes have none).
+- **The Tech Tree viewer edits the tree (2026-11-21, PR #301).** Asked for by the user in one sitting, after the
+  Tech Requires All list went into the game. What the viewer does now:
+  - **OR / AND.** The side strip said `Prerequisites (OR)` for every technology, also for one in the Tech Requires
+    All list. The heading names the rule the technology has and two buttons switch it; Save adds or removes that one
+    name in the list (`TechRequireAllRegistry.SetRules`, an operation on the list as it is at write time). A card
+    under the AND rule with two or more prerequisites carries `AND` under its title.
+  - **Position X / Y** as number fields, staged like a drag, and **scroll bars** under and beside the canvas.
+  - **Editing is on when the window opens** (the switch was a button that read `View`); the choice is remembered.
+  - **The game's look.** Cards and spacing are the game's own numbers, read from its prefabs in the `UI_Textures`
+    bundle: a column step of 74, a row step of 22, a card of 310 x 116, a link elbow of radius 40, the link colour,
+    and the artwork's rectangle. A first version measured the ratios from a screenshot and was within 0.5 %; its
+    guessed elbow radius and artwork placement were not. Links follow the game's routing, ported from
+    `TechnologyScreen_Links.Link.RebuildCurve` (a reviewer compared 200,000 cases with a transliteration of the
+    decompiled method: none differ). The card's and the canvas's colours are read off a screenshot by eye.
+  - **Card images.** A mapper names its image as an `Amplitude.Framework.Guid`; the Unity asset GUID is what the
+    game's own `Guid.ToString()` prints for it. Of ENC's 216 technologies 124 show an image file of the project, 88
+    one of the game's own and 4 none (they have no mapper; ENC has 213 mappers, 124 + 89, one of them without a
+    definition). The game's own are taken from its UI bundle (`AssetBundles/Mercury.Data.UI`), where one index
+    asset maps a reference to an atlas texture and a rectangle in it; a bundle that is already mounted is used as
+    it is, otherwise the file is opened per read and closed again. Nothing is copied into the project.
+  - **In the game / Switched off** (`TechnologyDefinition.Visibility`). The first version called `Never`
+    "invisible". The game's code says more: a technology is created for an empire only when its Visibility is not
+    `Never`, so by the game's own rules a `Never` technology cannot be researched, traded or granted, and a
+    technology that names only it never unlocks (read from the decompiled game, not run in a game). The switch
+    writes `Never`, or turns `Never` into `Always` and leaves any other value alone; a note names the technologies
+    that depend on a switched-off one; the card says `OFF`.
+  - **Staged edits survive** a script reload, with the selection and the view (they were lost without a word, also
+    each time the editor scripts were updated: the user lost an evening's staged positions that way), and a reload
+    of the tree that does not find their technology. They are dropped, and that is said, after an editor restart.
+  - **A Save is not part of Undo.** See the third review round below.
+- **Tech Tree viewer, three review rounds before the push (2026-11-21).**
+  - **Round 1, three reviewers by slice, each with its own Unity drill.** One Save with prerequisites and
+    visibility staged on a technology that exists only in the reference folder copied its definition twice (two
+    definitions of one name, or one edit lost); the copy is now made once. **Frame All** stopped at the old
+    geometry's zoom floor and cut both ends off the ENC tree. A written part stayed staged beside one that could
+    not be written and was written again. The Save line called a rule switch deployed that the list already held.
+    The list's window warned "no effect" about a technology that had just been given a second prerequisite.
+  - **Round 2, the fixes re-run (7 Unity runs, two real script reloads), 66 planted defects, a docs audit.** A
+    standalone mapper and its definition share a name, so the second copy into the mod folder replaced the first
+    and the position was reported saved and was gone; a copy is never made over an existing asset now. The new
+    "the game reads an older list" warning never cleared. At the far zoom Frame All now reaches, one pixel of a
+    slipping click moved a card by rows; a drag starts after 4 px and not on a card under 2 px a row. 22 planted
+    defects went unnoticed by the drill, most because it never wrote an asset: it now saves into real assets in
+    its temporary project, round-trips the window through Unity's serializer with the in-memory state wiped, and
+    sends drags through the real `OnGUI`.
+  - **Round 3, Save on copies of the real ENC assets with the game's real types.** Save holds: one position is a
+    diff of exactly that sub-asset's `TechTreeX` and `TechTreeY`, ten positions are 40 lines, a prerequisite and a
+    visibility are 3 lines of the 1.5 MB definition file with no Odin block touched, and saving the old values back
+    gives a byte-identical file. While it ran, the user saved ten times from the viewer in the real project and the
+    asset text moved with each logged save. What it found: Save registered its writes with Undo, so a later Ctrl+Z
+    (pressed to take back a staged drag, which Undo never held) took the saved positions back in memory, silently,
+    and the next Save wrote the old values over them. Save no longer registers with Undo, and an undo from
+    elsewhere that changes a technology in memory is shown and said.
+  - **Checked:** `tools/tech_requires_all_unity_drill.sh`, 124 checks (14 before this PR), both windows in one
+    Unity run. Nine defects planted after the second round's checks were written: all caught.
+  - **Not exercised by the repo's drill:** the game's types and the collection (sub-asset) shape of the real data
+    (round 3 ran those in a scratch project that is not in the repo), reading the game's bundle, and drawing.
+    **Not run anywhere:** the game with a switched-off technology; physical Ctrl+Z / Ctrl+S; an editor restart
+    with edits staged. **Seen in Unity by the user (screenshots):** the rule heading and buttons, the position
+    fields, the scroll bars, the look with the first version's measured geometry, both kinds of card image.
+    **Not seen yet:** the prefab geometry, the In the game / Switched off switch with its notes and the `OFF`
+    mark, the Save button's count of missing technologies.
+  - **Left open,** in `docs/Review-Backlog.md`: the registry engine's "unreadable" latch that a viewer reload can
+    set for the list's window, the viewer's read of the list running the engine's adoption and migration, four ENC
+    technologies without a mapper, and the viewer's reference folder not being set on this machine.
 - **3ds Max files are read natively (2026-11-21).** The Model Cutter, the Model Fuser, the Vehicle Lab and the Model
   Factory take a `.max` in their file pickers: a C# reader (`editor/MaxDocument.cs` the compound-file container and chunk
   tree, `MaxScene.cs` the objects and references, `MaxModel.cs` the model) converts it to `name_max.glb` beside the file
