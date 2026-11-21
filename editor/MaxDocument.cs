@@ -158,6 +158,7 @@ public sealed class MaxDocument
         byte[] mini = entries[root].size > 0 && entries[root].start < MaxRegular ? Chain(entries[root].start, entries[root].size, "the mini stream") : new byte[0];
         uint[] miniFat = new uint[0];
         if (miniFatStart < MaxRegular) { var mf = Chain(miniFatStart, -1, "the mini allocation table"); miniFat = new uint[mf.Length / 4]; Buffer.BlockCopy(mf, 0, miniFat, 0, miniFat.Length * 4); }
+        var miniWalkOf = new int[Math.Min(miniFat.Length, (mini.Length + mss - 1) / mss)];
 
         var doc = new MaxDocument();
         long claimed = 0;
@@ -175,18 +176,20 @@ public sealed class MaxDocument
             if (e.size == 0) raw = new byte[0];
             else if (e.size < cutoff)
             {
+                walk++;
                 raw = new byte[e.size];
-                uint s = e.start; long done = 0, n = 0;
+                uint s = e.start; long done = 0;
                 while (done < e.size)
                 {
                     if (s >= MaxRegular) throw new InvalidDataException($"compound file: stream '{e.name}' declares {e.size} bytes, its mini chain holds {done}");
-                    if (++n > miniFat.Length + 1L) throw new InvalidDataException($"compound file: the mini chain of '{e.name}' loops");
                     long from = (long)s * mss;
                     int take = (int)Math.Min(mss, e.size - done);
                     if (from + take > mini.Length) throw new InvalidDataException($"compound file: mini sector {s} of '{e.name}' is outside the mini stream");
+                    if (s >= miniFat.Length) throw new InvalidDataException($"compound file: mini sector {s} of '{e.name}' has no allocation entry");
+                    if (miniWalkOf[s] == walk) throw new InvalidDataException($"compound file: the mini chain of '{e.name}' loops");
+                    miniWalkOf[s] = walk;
                     Buffer.BlockCopy(mini, (int)from, raw, (int)done, take);
                     done += take;
-                    if (s >= miniFat.Length) throw new InvalidDataException($"compound file: mini sector {s} of '{e.name}' has no allocation entry");
                     s = miniFat[s];
                 }
             }

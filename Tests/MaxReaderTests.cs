@@ -1745,6 +1745,20 @@ public class MaxReaderTests : IDisposable
         Assert.Contains("is outside the file", Assert.Throws<InvalidDataException>(() => MaxDocument.Read(file)).Message);
     }
 
+    [Theory]
+    [InlineData(65, 0)]
+    [InlineData(129, 1)]
+    public void A_mini_sector_visited_twice_within_a_stream_is_refused(int size, int loopFrom)
+    {
+        var data = Enumerable.Range(1, size).Select(i => (byte)i).ToArray();
+        var file = Cfb(("Small", data));
+        Assert.Equal(data, MaxDocument.Read(file).Streams["Small"]);
+
+        int miniFatAt = (BitConverter.ToInt32(file, 0x3C) + 1) * 512;
+        U32(0).CopyTo(file, miniFatAt + loopFrom * 4);
+        Assert.Contains("the mini chain of 'Small' loops", Assert.Throws<InvalidDataException>(() => MaxDocument.Read(file)).Message);
+    }
+
     [Fact]
     public void A_vertex_has_a_bound_on_its_smoothing_sums_and_past_it_a_corner_takes_its_face_s_normal()
     {
@@ -1796,6 +1810,26 @@ public class MaxReaderTests : IDisposable
         Assert.Contains(rep.Notes, n => n.StartsWith("a bump map is not read on 1 material(s)"));
         Assert.DoesNotContain(rep.Notes, n => n.Contains("slot " + (MaxScene.MaxMapSlots + 6)));
         Assert.Single(rep.Notes.Where(n => n.Contains("map is not read")));
+    }
+
+    [Theory]
+    [InlineData(53, 2, "header")]
+    [InlineData(58, 2, "palette")]
+    [InlineData(62, 257, "palette")]
+    [InlineData(62, int.MaxValue, "palette")]
+    public void A_BMP_refuses_invalid_pixel_offsets_and_palette_sizes(int offset, int colours, string diagnostic)
+    {
+        var bmp = Cat(new byte[] { (byte)'B', (byte)'M' }, U32(66), U32(0), U32(62), U32(40), U32(1), U32(1),
+            U16(1), U16(8), U32(0), U32(4), U32(0), U32(0), U32(2), U32(0),
+            new byte[] { 3, 2, 1, 0, 0, 5, 4, 0, 0, 0, 0, 0 });
+        Assert.True(MaxImages.Bmp(bmp, out _, out _, out var rgba, out _));
+        Assert.Equal(new byte[] { 1, 2, 3, 255 }, rgba);
+
+        U32(offset).CopyTo(bmp, 10);
+        U32(colours).CopyTo(bmp, 46);
+        Assert.False(MaxImages.Bmp(bmp, out _, out _, out rgba, out string why));
+        Assert.Null(rgba);
+        Assert.Contains(diagnostic, why);
     }
 
     [Fact]

@@ -889,8 +889,10 @@ public static class MaxImages
         int palAt = 14 + headSize, colours = BitConverter.ToInt32(b, 46);
         if (bpp == 8 && colours == 0) colours = 256;
         long stride = ((long)w * bpp + 31) / 32 * 4;
-        if (dataAt < 0 || dataAt + stride * h > b.Length) { why = "the BMP pixels run past the file"; return false; }
-        if (bpp == 8 && palAt + colours * 4 > b.Length) { why = "the BMP palette runs past the file"; return false; }
+        if (dataAt < palAt) { why = "the BMP pixels overlap the header"; return false; }
+        if (dataAt + stride * h > b.Length) { why = "the BMP pixels run past the file"; return false; }
+        if (bpp == 8 && (colours < 1 || colours > 256 || colours > (dataAt - palAt) / 4))
+        { why = "the BMP palette has an invalid size or overlaps the pixels"; return false; }
         rgba = new byte[(long)w * h * 4];
         for (int y = 0; y < h; y++)
         {
