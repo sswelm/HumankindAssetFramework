@@ -535,10 +535,12 @@ windows. **Deep dive:**
     edge, turns one rounded elbow and enters the second card's left edge. A card shows the title in upper case, then
     era, tier and `AND`, then the internal name. The view opens on the tree's full height at its left end;
     **Frame All** shows the whole tree. A card shows its **artwork** as the game does, standing out of its right
-    end, when the image is in the project (the mapper's `TechnologyScreenItemBackground` reference resolved to an
-    asset; in ENC 124 of 213 cards). A card whose image is one of the game's own shows none, and the side strip's
-    `Image:` line says which case it is. Not shown: the unlock icons, the researched / locked states and the era
-    headers.
+    end. A mod's own image is the project file the mapper's `TechnologyScreenItemBackground` reference resolves to
+    (in ENC 124 of 213 cards). One of the game's own is taken from the game's UI bundle
+    (`AssetBundles/Mercury.Data.UI`), where the images are packed into atlases with one index asset; the bundle is
+    opened for each read and closed again, and nothing is copied into the project. The side strip's `Image:` line
+    names the file or the atlas, or says why there is no image. **Reload** tries a failed read again. Not shown:
+    the unlock icons, the researched / locked states and the era headers.
 - **Tech Requires All** — `Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites`. A list of technologies, nothing else.
   The game unlocks a technology when **any one** of its prerequisites is researched, and its data has no field to say
   otherwise; a technology in this list unlocks only when **all** of them are. **+ Add technology** picks from the

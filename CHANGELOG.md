@@ -20,8 +20,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   the Unity window drill, 52 checks (40 before), five link paths against hand-derived points. A card also shows
   its artwork, standing out of its right end as in the game, when the image is in the project: the mapper's image
   reference is an `Amplitude.Framework.Guid` of four ints, and the Unity asset GUID is what the game's own
-  `Guid.ToString()` prints for it (124 of ENC's 213 card images resolve; the other 89 are the game's own and show
-  nothing). Not done: the game's own images, the unlock icons, the researched / locked states, the era headers. The elbow's radius is a guess (no elbow is in the
+  `Guid.ToString()` prints for it (124 of ENC's 213 card images resolve). The other 89 are the game's own: they are taken from the game's UI
+  bundle, where `UIAtlas.asset` maps each reference to an atlas texture and a rectangle in it (measured from the
+  top; checked outside Unity by cropping World-Wide Web's entry out of `UI_Technology_Era6_00`). The bundle is
+  opened per read and closed again; nothing is copied into the project. Not done: the unlock icons, the
+  researched / locked states, the era headers. The elbow's radius is a guess (no elbow is in the
   screenshot). No test reads a pixel.
 - **The Tech Tree viewer shows and switches OR / AND, takes a typed position, and has scroll bars (2026-11-21).** The
   side strip said `Prerequisites (OR)` for every technology, also for one in the Tech Requires All list. The heading

@@ -56,6 +56,7 @@ public static class TechTreeData
         // LOCAL CHANGE 2026-11-21, for the viewer's in-game look.
         public string ArtPath;
         public bool   ArtNamed;   // the mapper names an image for the card, found or not
+        public string ArtGuid;    // that image as a Unity GUID text (null when none is named): the key into the game's own atlases
 
         // Convenience: the asset to ping/select (prefer the def).
         public UnityEngine.Object Asset => ActiveDef ?? ActiveMapper;
@@ -134,7 +135,7 @@ public static class TechTreeData
                 node.BaseX    = GetInt(mapper, "TechTreeX");
                 node.BaseY    = GetInt(mapper, "TechTreeY");
                 node.TitleKey = GetString(mapper, "Title");
-                node.ArtPath  = ArtPathOf(mapper, out node.ArtNamed);
+                node.ArtPath  = ArtPathOf(mapper, out node.ArtNamed, out node.ArtGuid);
             }
             node.Label = !string.IsNullOrEmpty(node.TitleKey) && loc.TryGetValue(node.TitleKey, out var t)
                 ? t : (string.IsNullOrEmpty(node.TitleKey) ? name : node.TitleKey);
@@ -180,9 +181,9 @@ public static class TechTreeData
     static bool artReadWarned;
     // Read through the SERIALIZED form (Images[i].serializableKey / .Value.guid.a..d), which is what the asset file
     // holds: no dependence on the C# shape of the game's image list.
-    static string ArtPathOf(UnityEngine.Object mapper, out bool named)
+    static string ArtPathOf(UnityEngine.Object mapper, out bool named, out string guid)
     {
-        named = false;
+        named = false; guid = null;
         try
         {
             using (var so = new SerializedObject(mapper))
@@ -198,7 +199,8 @@ public static class TechTreeData
                     if (a == null || b == null || c == null || d == null) return null;
                     if (a.intValue == 0 && b.intValue == 0 && c.intValue == 0 && d.intValue == 0) return null;   // no image set
                     named = true;
-                    string path = AssetDatabase.GUIDToAssetPath(AmplitudeGuidToUnity(a.intValue, b.intValue, c.intValue, d.intValue));
+                    guid = AmplitudeGuidToUnity(a.intValue, b.intValue, c.intValue, d.intValue);
+                    string path = AssetDatabase.GUIDToAssetPath(guid);
                     return string.IsNullOrEmpty(path) ? null : path;
                 }
             }

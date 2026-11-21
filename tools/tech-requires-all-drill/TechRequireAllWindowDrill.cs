@@ -271,9 +271,19 @@ public static class TechRequireAllWindowDrill
                     Check("art: a square 1.5 card heights high, centred on the card's height, just inside its right edge",
                           Mathf.Abs(artRect.width - 140.25f) < 0.01f && Mathf.Abs(artRect.height - 140.25f) < 0.01f && Mathf.Abs(artRect.center.y - 246.75f) < 0.01f && Mathf.Abs(artRect.center.x - (351 - 15.06f)) < 0.01f, artRect.ToString());
                     Check("art: the side strip explains a card without artwork",
-                          TechTreeWindow.ArtLine(new TechTreeData.Node { ArtPath = "Assets/Resources/Images/x512.png", ArtNamed = true }) == "Image: x512.png"
-                          && TechTreeWindow.ArtLine(new TechTreeData.Node { ArtNamed = true }) == "Image: not in this project (one of the game's own)"
-                          && TechTreeWindow.ArtLine(new TechTreeData.Node()) == "Image: none set");
+                          TechTreeWindow.ArtLine(new TechTreeData.Node { ArtPath = "Assets/Resources/Images/x512.png", ArtNamed = true }, null, "") == "Image: x512.png"
+                          && TechTreeWindow.ArtLine(new TechTreeData.Node { ArtNamed = true }, "UI_Technology_Era6_00.png", "") == "Image: one of the game's own (in UI_Technology_Era6_00.png)"
+                          && TechTreeWindow.ArtLine(new TechTreeData.Node { ArtNamed = true }, null, "no bundle") == "Image: not in this project, and the game's own cannot be read: no bundle"
+                          && TechTreeWindow.ArtLine(new TechTreeData.Node { ArtNamed = true }, null, "") == "Image: not found, neither in this project nor among the game's own"
+                          && TechTreeWindow.ArtLine(new TechTreeData.Node(), null, "") == "Image: none set");
+                    // The game's atlas rectangles are measured from the texture's TOP. The numbers are World-Wide Web's
+                    // entry as read from the game's UI bundle (UnityPy, 2026-11-21): x .70751953125, y .00048828125,
+                    // 0.17578125 square, on a 2048 atlas: the picture is in the top rows, so its v starts at 0.82373046875.
+                    var uv = TechTreeVanillaArt.UvOf(new Rect(0.70751953125f, 0.00048828125f, 0.17578125f, 0.17578125f));
+                    Check("art: a game atlas rectangle (from the top) becomes Unity texture coordinates (from the bottom)",
+                          Mathf.Abs(uv.x - 0.70751953125f) < 1e-6f && Mathf.Abs(uv.y - 0.82373046875f) < 1e-6f && Mathf.Abs(uv.width - 0.17578125f) < 1e-6f && Mathf.Abs(uv.height - 0.17578125f) < 1e-6f, uv.ToString("0.000000"));
+                    var fit = TechTreeWindow.FitInside(new Rect(0, 0, 100, 100), 2f);
+                    Check("art: an image twice as wide as high is fitted into the square at half its height, centred", Mathf.Abs(fit.width - 100) < 0.01f && Mathf.Abs(fit.height - 50) < 0.01f && Mathf.Abs(fit.y - 25) < 0.01f, fit.ToString());
                     // the canvas: a click in the middle of a card finds that card (cards sit on the game's grid)
                     var rectT = (Rect)VCall("NodeRect", N("Technology_T"));
                     Check("canvas: a card is 251 x 93.5 at zoom 1, in the game's proportions", Mathf.Abs(rectT.width / rectT.height - 251f / 93.5f) < 0.001f, rectT.ToString());

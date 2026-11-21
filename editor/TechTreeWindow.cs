@@ -22,7 +22,8 @@ using UnityEngine;
 ///  - The selection is kept by name across a reload (it was the node object from before it).
 ///  - The canvas looks like the game's tech screen (asked for by the user, 2026-11-21): cards in the game's
 ///    proportions and spacing, and links routed by the game's own rule. See the GEOMETRY block and LinkPath.
-///    A card shows its artwork where the project holds the image (TechTreeData.ArtPathOf, ArtRect).
+///    A card shows its artwork: the project's own image file, or one of the game's own out of the game's UI bundle
+///    (TechTreeData.ArtPathOf, TechTreeVanillaArt, ArtRect).
 /// </summary>
 public class TechTreeWindow : EditorWindow
 {
@@ -244,7 +245,7 @@ public class TechTreeWindow : EditorWindow
             EditorStyles.toolbarButton, GUILayout.Width(80));
         GUI.backgroundColor = Color.white;
         if (edit != _editMode) { _editMode = edit; EditorPrefs.SetBool(EditModeKey, edit); }
-        if (GUILayout.Button("Reload", EditorStyles.toolbarButton, GUILayout.Width(60))) Reload(keepView: true);
+        if (GUILayout.Button("Reload", EditorStyles.toolbarButton, GUILayout.Width(60))) { TechTreeVanillaArt.RetryFailed(); Reload(keepView: true); }
         if (GUILayout.Button("Frame All", EditorStyles.toolbarButton, GUILayout.Width(70))) { _framed = false; _fitWholeTree = true; }
 
         using (new EditorGUI.DisabledScope(!Dirty))
@@ -451,7 +452,7 @@ public class TechTreeWindow : EditorWindow
         {
             Rect r = NodeRect(n);
             Rect artRect = ArtRect(r);
-            if (!r.Overlaps(local) && !(n.ArtPath != null && artRect.Overlaps(local))) continue;
+            if (!r.Overlaps(local) && !(n.ArtNamed && artRect.Overlaps(local))) continue;
 
             bool selected = n == _selected;
             float radius = 4f * _zoom;
@@ -460,8 +461,8 @@ public class TechTreeWindow : EditorWindow
             GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, selected ? GOLD : CARD_EDGE, selected ? 2f : 1f, radius);
 
             // the artwork, over the card's right end and standing out of it
-            var art = ArtOf(n);
-            if (art != null) GUI.DrawTexture(artRect, art, ScaleMode.ScaleToFit, true);
+            if (Event.current.type == EventType.Repaint && TryArt(n, out var art, out var artUv, out float artAspect))
+                GUI.DrawTextureWithTexCoords(FitInside(artRect, artAspect), art, artUv, true);
 
             float pad = 8f * _zoom;
             float titleH = 0.29f * r.height;   // the game's title band: the divider sits at 29% of the card's height
@@ -503,11 +504,31 @@ public class TechTreeWindow : EditorWindow
     // ── Artwork ───────────────────────────────────────────────────────────────
     readonly Dictionary<string, Texture> _art = new Dictionary<string, Texture>();   // asset path -> texture, loaded when first drawn
 
-    Texture ArtOf(TechTreeData.Node n)
+    // The card's image: the project's own file, else the game's own from its atlases. `uv` is the part of the
+    // texture to draw, `aspect` the image's width over its height.
+    bool TryArt(TechTreeData.Node n, out Texture tex, out Rect uv, out float aspect)
     {
-        if (string.IsNullOrEmpty(n.ArtPath)) return null;
-        if (!_art.TryGetValue(n.ArtPath, out var tex)) _art[n.ArtPath] = tex = AssetDatabase.LoadAssetAtPath<Texture>(n.ArtPath);
-        return tex;
+        tex = null; uv = new Rect(0, 0, 1, 1); aspect = 1f;
+        if (!string.IsNullOrEmpty(n.ArtPath))
+        {
+            if (!_art.TryGetValue(n.ArtPath, out tex)) _art[n.ArtPath] = tex = AssetDatabase.LoadAssetAtPath<Texture>(n.ArtPath);
+            if (tex != null) { aspect = tex.height > 0 ? tex.width / (float)tex.height : 1f; return true; }
+        }
+        if (TechTreeVanillaArt.TryRegion(n.ArtGuid, out var region))
+        {
+            tex = TechTreeVanillaArt.Atlas(region.Output);
+            if (tex != null) { uv = region.Uv; aspect = region.Height > 0 ? region.Width / (float)region.Height : 1f; return true; }
+        }
+        return false;
+    }
+
+    /// <summary>The largest rectangle of that aspect (width over height) inside `box`, centred.</summary>
+    internal static Rect FitInside(Rect box, float aspect)
+    {
+        if (aspect <= 0f) return box;
+        float w = box.width, h = w / aspect;
+        if (h > box.height) { h = box.height; w = h * aspect; }
+        return new Rect(box.center.x - w * 0.5f, box.center.y - h * 0.5f, w, h);
     }
 
     /// <summary>
@@ -587,7 +608,9 @@ public class TechTreeWindow : EditorWindow
             string detail = $"def:{(n.DefModded ? "mod" : "vanilla")}  map:{(n.MapperModded ? "mod" : "vanilla")}";
             EditorGUILayout.LabelField($"{state}   ({detail})", EditorStyles.miniLabel);
             EditorGUILayout.LabelField($"{n.Era} · {n.Tier} · ({EffX(n)},{EffY(n)})", EditorStyles.miniLabel);
-            EditorGUILayout.LabelField(ArtLine(n), EditorStyles.miniLabel);
+            TechTreeVanillaArt.Region shown = default(TechTreeVanillaArt.Region);
+            bool gameImage = string.IsNullOrEmpty(n.ArtPath) && TechTreeVanillaArt.TryRegion(n.ArtGuid, out shown);
+            EditorGUILayout.LabelField(ArtLine(n, gameImage ? shown.Output : null, TechTreeVanillaArt.Problem), EditorStyles.wordWrappedMiniLabel);
 
             if (!_editMode)
                 EditorGUILayout.HelpBox("Edit is OFF, so the position, the rule and the prerequisites are greyed out. Switch on \"Edit\" at the top left to change them.", MessageType.Info);
@@ -653,10 +676,14 @@ public class TechTreeWindow : EditorWindow
     }
 
     // what the side strip says about the card's image, so a card without artwork is explained
-    internal static string ArtLine(TechTreeData.Node n) =>
+    // `gameAtlas` = the game's atlas texture that holds the image (null when it is not one of the game's);
+    // `gameProblem` = why the game's images cannot be read ("" when they can).
+    internal static string ArtLine(TechTreeData.Node n, string gameAtlas, string gameProblem) =>
         !string.IsNullOrEmpty(n.ArtPath) ? "Image: " + System.IO.Path.GetFileName(n.ArtPath)
-        : n.ArtNamed ? "Image: not in this project (one of the game's own)"
-        : "Image: none set";
+        : !n.ArtNamed ? "Image: none set"
+        : !string.IsNullOrEmpty(gameAtlas) ? "Image: one of the game's own (in " + gameAtlas + ")"
+        : !string.IsNullOrEmpty(gameProblem) ? "Image: not in this project, and the game's own cannot be read: " + gameProblem
+        : "Image: not found, neither in this project nor among the game's own";
 
     internal static string RuleHeader(bool unreadable, bool requireAll) =>
         unreadable ? "Prerequisites:" : requireAll ? "Prerequisites (AND):" : "Prerequisites (OR):";
