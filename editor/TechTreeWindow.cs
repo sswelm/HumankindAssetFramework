@@ -537,18 +537,26 @@ class TechPickerDropdown : AdvancedDropdown
     readonly List<TechTreeData.Node> _candidates;
     readonly Action<string> _onPick;
     readonly Dictionary<AdvancedDropdownItem, string> _map = new();
+    // The list's heading. LOCAL CHANGE to this file (2026-11-20): the heading was the fixed text "Add prerequisite";
+    // TechRequireAllWindow.cs reuses this picker and passes "Add technology" as the fourth constructor argument.
+    // This viewer came from another modder's tool (the user, 2026-11-20; the file carries no credit line and the
+    // history starts at its move into this repo). If the file is ever replaced by a newer copy of that tool, keep
+    // the `title` parameter or TechRequireAllWindow stops compiling. Recorded in docs/Review-Backlog.md.
+    readonly string _title;
 
-    public TechPickerDropdown(AdvancedDropdownState state, List<TechTreeData.Node> candidates, Action<string> onPick)
+    public TechPickerDropdown(AdvancedDropdownState state, List<TechTreeData.Node> candidates, Action<string> onPick,
+                              string title = "Add prerequisite")
         : base(state)
     {
         _candidates = candidates;
         _onPick = onPick;
+        _title = title;
         minimumSize = new Vector2(320, 420);
     }
 
     protected override AdvancedDropdownItem BuildRoot()
     {
-        var root = new AdvancedDropdownItem("Add prerequisite");
+        var root = new AdvancedDropdownItem(_title);
         foreach (var era in _candidates.Select(c => c.Era).Distinct()
                                        .OrderBy(e => string.IsNullOrEmpty(e) ? "zzz" : e))
         {

@@ -46,6 +46,7 @@ pinpointed corruption and one-click recovery in each window). The runtime plugin
 | **Districts** (`haf_districts.json`) | `config/haf_districts.json` (artifact) | `Assets/Databases/haf_districts.backup.json` (THE source — historical name) | District Factory |
 | **Formations** (`haf_formations.json`) | `config/haf_formations.json` (artifact) | `Assets/Databases/haf_formations.backup.json` (THE source — historical name) | Formation Override |
 | **Sound overrides** (`haf_sounds.json`) | `config/haf_sounds.json` | project backup | Game Sound Lab |
+| **Technologies that require all prerequisites** (`haf_tech_requires_all.json`) | `config/haf_tech_requires_all.json` (artifact) | `Assets/Databases/haf_tech_requires_all.backup.json` (THE source) | Tech Requires All |
 | **Props** (`haf_props.json`) | `Assets/Databases/haf_props.json` | — | Prop Lab (editor-side recipe store; the runtime reads the baked GUIDs, not this file) |
 
 > `<PackName>` is `ENCReload` in the home project and is derived from the host project by `HafPackageContext` in a
@@ -559,6 +560,23 @@ windows. **Deep dive:**
 - **Tech Tree** — `Tools ▸ HAF ▸ Tech Tree ▸ Open Viewer` (+ `Diagnose Mod Split`, `Dump Data`). View/edit the tech tree;
   in edit mode drag node positions and remove prereqs, committed on Save (edits in place under `Databases/`, else
   copy-on-write into "New Additions"). New-tech creation / +prereq are noted not-yet-implemented.
+- **Tech Requires All** — `Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites`. A list of technologies, nothing else.
+  The game unlocks a technology when **any one** of its prerequisites is researched, and its data has no field to say
+  otherwise; a technology in this list unlocks only when **all** of them are. **+ Add technology** picks from the
+  technologies that have two or more prerequisites; each row shows what "all" means for it (`Needs all of: A + B`) and
+  warns when an entry can have no effect (unknown name, fewer than two prerequisites). The prerequisites themselves are
+  not edited here — that stays in the Tech Tree viewer. **Save** writes the project's
+  `haf_tech_requires_all.backup.json` and deploys `haf_tech_requires_all.json`; relaunch the game to apply. The file is
+  one list of `TechnologyDefinition` names, `{"technologies": ["Technology_Era4_LandClearance", …]}`. The plugin
+  (`Patches/TechRequireAllPatch.cs`) then keeps a listed technology locked until every prerequisite is completed, and
+  when a locked one is queued (by the player or the AI) it queues **every** missing prerequisite in front of it, where
+  the game queues one chain. It changes the simulation, so in multiplayer every player needs the same list;
+  `[Technologies] TechRequireAll = false` in the plugin's `.cfg` ignores the file. Not covered: a technology that is
+  already in a saved research queue behind one prerequisite keeps that place, anything that completes a technology
+  outside the research queue, and the tech screen gives no hint that a technology needs all its prerequisites.
+  **Saves:** a research queue planned under a list is saved with its ordering constraints. The plugin keeps such a save
+  safe whether or not the list is still there; loaded with the plugin **uninstalled**, removing a queued prerequisite
+  that two queued branches share can throw in the game's own code. Clear the research queue before uninstalling.
 - **Pawn Rig Dump** — `Tools ▸ HAF ▸ Diagnostics ▸ Pawn Rig Dump`. Dump every matching `PresentationPawnDefinition`'s full
   serialized graph (skeleton, clip collections, assets) to `rig_dump.txt` for rig investigation.
 - **Export selected atlas to PNG** — `Tools ▸ HAF ▸ Export selected atlas to PNG`. Blit a selected compressed atlas through a

@@ -248,6 +248,15 @@ the mechanics are detailed in [Animated-Runtime §3b](Animated-Runtime.md#3b-run
   desync** — it changes what a unit *looks like*, not what the deterministic simulation computes (Humankind combat is
   tile/data-based, not mesh-raycast). Treat that as an architectural expectation, not a tested guarantee: it hasn't
   been stress-tested across asymmetric host/client pack setups.
+  **One opt-in exception (2026-11-20): the Tech Requires All list.** It is the only HAF feature that changes the
+  simulation, and it is inert until `haf_tech_requires_all.json` names a technology. With a list, a named technology
+  stays locked until all its prerequisites are researched, and the research queue is planned differently. Three
+  consequences follow, none of which the paragraph above covers: in multiplayer every player needs the same list (a
+  different list is a different simulation); a research queue planned under a list is written into the save with
+  extra ordering constraints; and such a save, loaded with the plugin **uninstalled**, can throw in the game's own
+  code when a queued prerequisite shared by two queued branches is removed — clear the research queue before
+  uninstalling. Not yet run in a game session. See
+  [Editor Tools → Tech Requires All](Editor-Tools.md#utilities-diagnostics--safety).
 - **Game updates fail loud, not silent.** HAF binds to the game's types by name via reflection (the cost of no source
   access), so a game update *could* rename one. Rather than misbehave silently, a startup **compatibility report**
   (`GameBinding`) resolves a catalog of **47 core game types + their hot-path members** (including the army-walk

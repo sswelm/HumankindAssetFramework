@@ -32,6 +32,30 @@ cases pass after the fixes. An isolated Unity 2021.3.1 embedded-Mono probe also 
 and parallel live-key lookups with incremental GC enabled, plus factory re-entry and cross-thread access. This checks
 the replacement's behavior; the original native game crash was not reproduced by a standalone test.
 
+**Technologies that require all prerequisites (2026-11-20):** `TechRequireAllRulesTests` (23 cases) holds the pure
+rules: the list parser (a broken file is no names plus a reason, never an empty list), the ALL rule, and the queue plan
+(both parents, a completed parent left out, a diamond, a parent already queued, an era lock, a cycle, an unknown name).
+The planner also refuses a locked technology whose prerequisite names are all unknown and uses the vanilla route
+for a listed technology with only one prerequisite.
+`bash tools/tech_requires_all_game_drill.sh` runs the hooks against the **installed game's own assemblies**. The
+25 checks cover state updates, locked enqueue, and cascading removal. Four assertions share a prerequisite array
+between a listed and an unlisted definition in both registration orders. Before the fix, whichever definition came
+last supplied the rule for both. The game drill runs the original state update loop with the era check, Sandbox frame
+read, and empire counter updates stubbed. In the overlapping-branch fixture,
+removing A from the queue also removes B and T and leaves the unrelated X. Before the fix, the game's cascade tried
+to remove T twice and threw; the control now shows that on the unpatched game, with the queue and its three
+constraints built by hand as a save carries them (in the order the plan writes them: with `A>T` first in the list the
+cascade takes T before B and nothing is visited twice). The script then runs a second time with **no list file**
+(9 checks): the feature is inactive, the game's ANY rule is back, and the same saved queue is still removed cleanly,
+because the removal guard is not gated on the list. With the old list-gated guard planted back, that run fails with
+the game's `ArgumentOutOfRangeException`. Leaf queue mutations that need the live Sandbox are replaced by list
+operations.
+Set `HAF_DRILL_MONO` to run the checks under the Unity editor's Mono as well.
+`bash tools/tech_requires_all_unity_drill.sh` drives the real window in a
+temporary Unity project (add, save, reopen, remove; 14 checks) and reads every deployed file back with the plugin's
+parser; the tech tree is injected, so the picker's list over a real modding project is not exercised. Neither drill is
+in the push gate. Research investment, the tech screen and the AI still need live game coverage.
+
 **F8 Units table (PR #297 review, 2026-11-19):** `UnitTableTests` covers adjustment-only retextures (desaturate,
 brightness and each tint channel) using the same rule as injection, including pending/in-use status and a baked-model
 control. Five cases failed on the original PR. Two window-result cases hold the returned title-bar position together

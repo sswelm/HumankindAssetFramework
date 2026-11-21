@@ -23,6 +23,27 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   Thirteen defects planted one at a time (the rotation read without its inverse, a mirrored part not re-wound, the object offset inherited, the mask inverted, ...) each failed at least one test. The editor assembly compiles headlessly. **Not run by me
   inside Unity**: the pickers themselves and Unity's JPEG decoder (the drill decodes JPEG through System.Drawing; the
   composition code is the same). All four sample files are of the 3ds Max 2/3 generation.
+- **Technologies can require ALL their prerequisites (2026-11-20).** The game unlocks a technology as soon as any one
+  listed prerequisite is researched, and a `TechnologyDefinition` has no field to say otherwise. A new window,
+  `Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites`, holds a list of technologies (and only that) for which every
+  prerequisite must be researched; it saves `haf_tech_requires_all.json` on the shared registry engine. The plugin
+  applies it with three hooks on `DepartmentOfScience`: the availability test keeps a listed technology locked until all
+  its prerequisites are completed, and queueing a locked technology puts every missing prerequisite of a listed one in
+  front of it (the game queues one chain, and research is paid into the queue without looking at the lock). The third
+  guards the game's own removal cascade: a queue planned here can put a technology behind two ordering constraints,
+  and removing a shared prerequisite then visits it twice and throws. Those constraints are written into the save, so
+  that guard is **not** gated on the list: a save made with a list stays safe after the list is emptied or switched
+  off (with the plugin uninstalled nothing guards it). Off with
+  `[Technologies] TechRequireAll = false`; the lock and the queue plan are inert without the file. It changes the
+  simulation, so multiplayer needs the
+  same list on every machine. Checked: 23 unit tests on the rules; a drill of the hooks against the installed game's
+  assemblies with the unpatched game as the control (25 checks with a list, 9 without one, .NET Framework and the Unity
+  editor's Mono). The availability rule now uses the actual technology definition, so listed and unlisted definitions
+  can share a prerequisite array and still get their own rules. A drill of
+  the real window in a temporary Unity project (14 checks, deployed files read back by the plugin's parser); every
+  bound game member resolves (bindcheck). Not checked: nothing was run in the game - the tech screen, a real research
+  queue, the AI and a multiplayer session are untested. Not covered: a technology already in a saved queue behind one
+  prerequisite, technologies completed outside the research queue, and any on-screen hint that a technology needs all.
 - **F8 Units table review fixes (2026-11-19).** Adjustment-only retextures now have the same type/status as PNG
   retextures. The Units frame retains dimensions requested by the resize grip while keeping the returned title-bar
   position, and its summary wraps so narrow sizes remain narrow. Checked: seven regression cases and twelve layout
