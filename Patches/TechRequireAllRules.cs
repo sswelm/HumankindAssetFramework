@@ -65,8 +65,10 @@ namespace HumankindAssetFramework
 
         // ---- the tech screen's hint (2026-11-21): a mark in front of a listed technology's title, a line in its tooltip ----
 
+        // [SharedProject] is the game's own branching symbol (one point joined to two). Chosen in the game on 2026-11-21 from
+        // eleven candidates shown in a tooltip; of the plain characters tried, the game's font has & and » but not ⋀ or ⇉.
         /// <summary>Default mark. Plain text or the game's own text markup: an inline symbol "[Name]", a colour "&lt;c=RRGGBB&gt;..&lt;/c&gt;".</summary>
-        internal const string DefaultMark = "&";
+        internal const string DefaultMark = "[SharedProject]";
         /// <summary>Default tooltip line; {0} is the list of prerequisite titles.</summary>
         internal const string DefaultTooltip = "Requires ALL of: {0}";
 

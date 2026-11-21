@@ -1827,7 +1827,10 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
 - **The tech screen's mark covers the tech screen only** (added 2026-11-21, `Hk_TechRequireAllMark`): the node's title
   and its tooltip. The search results, the research widget outside the tech screen and the "technology researched"
   notification show the plain title. The tooltip line is English unless `TechRequireAllTooltip` is set. The mark shows
-  after the first research update of the process (the list's census publishes what to mark).
+  after the first research update of the process (the list's census publishes what to mark). Seen in the game the
+  same day: a text mark (`&`) in front of the title and the tooltip line with the prerequisites' titles; the game's
+  inline symbols render inside the tooltip, and its font has `&` and `»` but shows `?` for `⋀` and `⇉`. **Not yet
+  seen:** the default mark, the `[SharedProject]` symbol, in the TITLE label (it was seen in the tooltip only).
 - **The planner walks up to 32 levels where the game stops at 5** (`TryFillParentTechnologiesToCompleteBefore`), in a
   tree that holds a listed technology. Deliberate; noted because it is a difference from the game.
 - **The new window depends on a local change to the Tech Tree viewer.** `TechRequireAllWindow` reuses the viewer's

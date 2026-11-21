@@ -530,7 +530,7 @@ windows. **Deep dive:**
   outside the research queue.
   **On the tech screen (2026-11-21)** a listed technology carries a mark in front of its title and its tooltip ends
   with a line that names the prerequisites it waits for (`Requires ALL of: Multimedia Computer, Ethernet`). Both are
-  display only and set in the plugin's `.cfg`: `[Technologies] TechRequireAllMark` (default `&`; plain text or the
+  display only and set in the plugin's `.cfg`: `[Technologies] TechRequireAllMark` (default `[SharedProject]`, the game's own branching symbol; plain text or the
   game's own text markup, an inline symbol such as `[Technology]` or a colour as `<c=FFCC66>&</c>`; empty = no mark)
   and `TechRequireAllTooltip` (`{0}` = the prerequisite titles; empty = no line). A listed technology with fewer than
   two prerequisites gets neither. Only the tech screen's nodes are marked, not the search results or notifications.

@@ -14,7 +14,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   Requires All list now carries a mark in front of its title on the tech screen, and its tooltip ends with a line that
   names the prerequisites it waits for (`Requires ALL of: Multimedia Computer, Ethernet`). One display-only hook on
   `TechnologyItem.RefreshTooltips` (main thread; the first HAF code that writes game UI); the prerequisite titles are
-  the ones the screen itself resolved. Both texts are config: `[Technologies] TechRequireAllMark` (default `&`; the
+  the ones the screen itself resolved. Both texts are config: `[Technologies] TechRequireAllMark` (default `[SharedProject]`, the game's branching symbol; the
   game's text markup works, so an inline symbol or a colour can be used) and `TechRequireAllTooltip`; empty switches
   either off. The rule itself was seen in a game for the first time the same day (one listed technology on a
   turn-180 save: it stayed locked on one prerequisite, and clicking it queued the missing chain in front). Checked: 3
