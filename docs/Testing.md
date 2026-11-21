@@ -288,8 +288,8 @@ What this drill is not:
   models' output changed: ten of those kinds, and one in the transform arithmetic whose effect stayed inside the
   tolerance. `Tests/MaxReaderTests.cs` holds each of them, on files built byte by byte.
 
-**`Tests/MaxReaderTests.cs` and what was planted against it** (95 tests). The review of 2026-11-21 planted defects
-in four passes:
+**`Tests/MaxReaderTests.cs` and what was planted against it** (97 tests, 101 cases). The review of 2026-11-21 planted defects
+in five passes:
 
 | Who, against which tests | Planted | Caught by a test | Not caught |
 |---|---|---|---|
@@ -297,6 +297,13 @@ in four passes:
 | Round 2's reviewer, the 41 tests after round 1 | 141 | 82 | 59 (the drill caught 1 of them) |
 | The author, round 2's own fixes against the tests written for them | 22 | 20, then 22 after two more fixtures | 0 |
 | The author, round 3's own fixes likewise | 23 | 22, then 23 after one more fixture | 0 |
+| The author, the fourth review's two fixes against its six cases (both source files put back as one plant) | 1 | 5 of the 6 cases fail | 0 |
+
+The fourth review came from a second reviewer after the three rounds: a mini-sector chain that returns to a sector it
+used (the old check counted steps against the whole table, and a small stream ends after at most 64, so it never
+fired), and a BMP whose pixels start inside its header or palette or whose palette size wraps the size check. The
+sixth case (a palette of 257 colours) was refused before the fix too, as "the palette runs past the file": no test
+holds the 256-colour limit on its own.
 
 30 of the round-2 reviewer's 31 fixtures for its survivors are in the test file, two of them adapted. Its 141 plants
 were run again against the final tests: against the tests after round 2, 132 were caught, 3 survived and 6 no longer applied as written; those nine against the final tests: 7 are caught in their present form, 1 went with its rule (a list of names is no longer cut at twenty), 1 survives (the TGA size check below).

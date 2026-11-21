@@ -66,12 +66,20 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     - A file named like a picture that is none is no longer embedded as one; one far-away helper no longer costs the
       whole file; a mesh under more than 16 modifier stacks, a controller that names nothing and an Editable Mesh
       without its mesh are named; the Vehicle Lab's Generate refuses an unconverted `.max` by name.
+  - **A fourth review, by a second reviewer after the three rounds,** found two more:
+    - A small stream whose chain of mini sectors came back to a sector it had used was read with that sector's
+      bytes twice. The loop check counted steps against the whole allocation table, and a small stream ends
+      after at most 64 steps, so the check could never fire. A sector met twice is now refused, as for the large
+      streams.
+    - A BMP whose pixels were declared to start inside its header or palette was decoded from there, and a palette
+      size past 536 million wrapped the size check, which then let a pixel name a colour outside the file. Both
+      are refused by name now.
   Checked on the committed tree of this entry:
   - `tools/max_drill.sh`: the four models (257 parts, 244,337 triangles) equal to a second reader in Python per part
     in area, bounds and winding.
   - `tools/max_unity_drill.sh`: the conversion inside a Unity editor with Unity's own image decoder, bit-equal in
     geometry and pixel-equal in its 16 composed pictures to the stand-alone one (61 checks).
-  - `Tests/MaxReaderTests.cs`: 95 tests on files built byte by byte (19 in the first version).
+  - `Tests/MaxReaderTests.cs`: 97 tests (101 cases) on files built byte by byte (19 in the first version).
   - The round-1 reviewer's 24 crafted files: 15 convert, 9 are refused by name, none takes more than 0.8 s; the most
     memory, 345 MB, goes to a stream built to unpack to 1 GB, which is refused at 194 MB (20 million empty chunks:
     1,761 MB before the review, 144 MB now; four unread packed streams of 149 KB: 1,193 MB after round 1 by the
