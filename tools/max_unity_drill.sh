@@ -45,6 +45,10 @@ mkdir -p "$TMPD/work" "$TMPD/project/Assets/Editor" "$TMPD/project/Assets/Plugin
 : > "$TMPD/list.txt"; n=0
 for f in "${files[@]}"; do
   n=$((n + 1)); mkdir -p "$TMPD/work/$n"
+  # the file's whole folder is copied (its pictures lie beside it or one folder down): a .max in a library's root would
+  # copy the library, so a folder past 500 MB is refused instead
+  mb=$(du -sm "$(dirname "$f")" 2>/dev/null | cut -f1)
+  [ -n "$mb" ] && [ "$mb" -le 500 ] || { echo "FAIL - the folder of $(basename "$f") holds ${mb:-?} MB; give a .max that sits in its own folder (the .max door was NOT drilled in Unity)"; exit 2; }
   cp -r "$(dirname "$f")/." "$TMPD/work/$n/" || { echo "FAIL - could not copy $(dirname "$f")"; exit 2; }
   copy="$TMPD/work/$n/$(basename "$f")"
   "$TMPD/ref/maxdrill.exe" convert "$(cygpath -w "$copy")" "$(cygpath -w "$TMPD/work/$n.reference.glb")" > "$TMPD/work/$n.reference.txt" 2>&1 \

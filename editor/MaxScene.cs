@@ -3,7 +3,7 @@
 // triangles of each Editable Mesh, Standard and Multi/Sub-Object materials with their diffuse map.
 //
 // How a .max scene is laid out (held on the user's four models: an armoured car, a second one, a torpedo boat, a stealth
-// ship - 257 mesh parts, 244,353 faces):
+// ship - 257 mesh parts, 244,337 visible faces and 16 hidden ones):
 // - the class directory lists every class the scene uses (a class id of two 32-bit numbers plus a superclass id);
 // - the Scene stream holds ONE container whose children are the scene's objects; a child's chunk id is its class's
 //   index in the directory, except 0x2032 / 0x2033 = a derived object (an object with modifiers on it);
@@ -18,9 +18,11 @@
 // WHAT IS NOT, said by name in the notes and never guessed: modifiers (a .max stores the base object and the list of
 // modifiers, not the result - only 3ds Max can evaluate them; a Skin is one of them and is counted with them),
 // parametric primitives (stored as their parameters), Editable Poly (no sample file yet to hold a reader to),
-// controllers of other classes, procedural maps, every map slot but diffuse (named by slot), lights and cameras.
-// NOT READ AND NOT DETECTED, so the report cannot name it: animation. A part stands where the value stored in each of
-// its controllers puts it; whether that controller also holds keys is not looked at.
+// controllers of other classes, procedural maps, every map slot but diffuse (named by slot), a map's angle and mirror
+// switches. Lights, cameras and helpers are counted by class; hidden faces are left out and counted.
+// NOT READ AND NOT DETECTED, so the report cannot name it: animation (a part stands where the value stored in each of
+// its controllers puts it; whether that controller also holds keys is not looked at), whether an object is hidden,
+// UV channels beyond the first and vertex colours.
 //
 // Pure C#: no Unity. Numbers are doubles here; MaxModel casts to the float32 a GLB holds.
 using System;
@@ -43,6 +45,7 @@ public sealed class MaxBitmap
     public double OffsetU, OffsetV, TilingU = 1, TilingV = 1, Angle;
     public bool HasPlacement => OffsetU != 0 || OffsetV != 0 || TilingU != 1 || TilingV != 1;
     public bool PlacementLeft;               // the file's offset / tiling / angle held an unusable number: none is applied
+    public bool MirrorU, MirrorV;            // the Placement's mirror switches: read as plain tiling (and said)
 }
 
 public sealed class MaxMaterial
@@ -148,7 +151,7 @@ public sealed class MaxScene
 
     /// <summary>An object's references: slot -> object index. Empty slots (0xFFFFFFFF) are left out. Built once per
     /// object and kept (callers only read it): rebuilt on every call, one object with 200,000 references named by 20
-    /// nodes took 17 seconds (review 2026-11-21).</summary>
+    /// nodes took about 20 seconds (review 2026-11-21).</summary>
     public SortedDictionary<int, int> Refs(MaxChunk c)
     {
         if (c == null || !c.IsContainer) return NoRefs;
@@ -168,6 +171,9 @@ public sealed class MaxScene
         else
         {
             var p = c.First(0x2035);
+            // the pair form opens with the object's SLOT count (in the samples' 1,245 such chunks it is always larger
+            // than the largest slot named - a node's 6, a map table's 22 - and never the number of pairs)
+            if (p != null && !p.IsContainer && p.Length >= 4 && p.U32(0) <= int.MaxValue) slots = (int)p.U32(0);
             if (p != null && !p.IsContainer)
                 for (int i = 4; i + 8 <= p.Length; i += 8)
                 {
@@ -227,7 +233,7 @@ public sealed class MaxScene
         return m;
     }
     /// <summary>Translate * Rotate * Scale. A scale chunk holds three factors and, where it is seven numbers long, a
-    /// quaternion: the axis system the factors apply in (a part scaled along the WORLD's axes after it was turned is
+    /// quaternion: the axis system the factors apply in (a part scaled along its PARENT's axes after it was turned is
     /// stretched along directions that are not its own). The scale is then U * diag(factors) * U-transposed, with U
     /// that quaternion's rotation read like every other one in the file.
     /// Measured 2026-11-21 on the twelve parts of the four models where the rule changes anything (factors that
@@ -235,12 +241,14 @@ public sealed class MaxScene
     /// off-diagonal of A*A-transposed over its largest diagonal entry). With the axis applied this way nine of them
     /// lie on the world's axes (0.015 or less; the torpedo boat's PIEZA-156 goes from 0.891 to 0.015) and a tenth
     /// close to them (0.093 from 0.814); with it left out, or applied the other way round, none of the boat's eleven
-    /// does. Two (its anchor and PIEZA-75) lie on them under no reading. PIEZA-74 and PIEZA-75 are the same fitting on
+    /// does. Two (its anchor and PIEZA-75) lie on them under no reading, and further from them with the axis than
+    /// without (0.21 to 0.36, 0.14 to 0.50): the rule stands on the other ten. PIEZA-74 and PIEZA-75 are the same fitting on
     /// the boat's two sides: with the axis applied their boxes are 30 x 167 x 54 and 35 x 163 x 54, without it
     /// 46 x 50 x 54 and 39 x 206 x 54 - two different things where the boat has a pair.
     /// Why nine land on the axes: a part turned by R and then scaled along its PARENT's axes has the matrix
-    /// K*R = R*(R-transposed*K*R), so its stored axis system is the inverse of its rotation - which is what the file
-    /// holds for those parts, and what only this reading turns back into a stretch along the parent's axes.
+    /// K*R = R*(R-transposed*K*R), so its stored axis system is the inverse of its rotation - which, up to a quarter
+    /// or half turn and a degree or two, is what the file holds for those parts (their parents are not turned, so
+    /// parent and world are one here), and what only this reading turns back into a stretch along those axes.
     /// The first version of this reader left the axis out on the anchor's evidence (more right angles survive without
     /// it); a diagonal scale keeps every right angle of the part's own axes whatever the file means, so that test
     /// could not tell the readings apart (review 2026-11-21).</summary>
@@ -271,9 +279,11 @@ public sealed class MaxScene
         if (IsList(ClassOf(c)) && depth < 8)
         {
             // a list controller: its first entry. 3ds Max combines all of a list's entries, so a list of more than one
-            // (or of none) is said - no sample file has a list at all.
+            // (or of none) is said. Each sample scene holds list objects, and no node of theirs uses one.
             var r = Refs(c);
-            if (r.Count != 1 && note == null) note = "its " + what + " is a list controller with " + r.Count + " entries, of which only the first is read";
+            // (the entries are counted as the list's references; whether a real list keeps other references there too
+            // is not known - with one it would be named here needlessly, never read wrongly)
+            if (r.Count != 1 && note == null) note = "its " + what + " is a list controller with " + (r.Count == 0 ? "no entry" : r.Count + " entries, of which only the first is read");
             foreach (var kv in r) return ControllerValue(Objects[kv.Value], valueChunk, n, ref note, depth + 1);
             return null;
         }
@@ -398,6 +408,8 @@ public sealed class MaxScene
             uv = tv.Length == 4 + 12 * nt && tf.Length == 12 * nf && nt > 0;
             if (!uv && nt > 0) m.UvLeft = tv.Length != 4 + 12 * nt ? $"its UV list declares {nt} entries in {tv.Length} bytes" : $"its UV faces fill {tf.Length} bytes where {nf} faces need {12 * nf}";
         }
+        // a UV list without its faces (or the other way round, or either one holding chunks): said too
+        else if (tv != null || tf != null) m.UvLeft = tv == null ? "it has UV faces and no UV list" : tf == null ? "it has a UV list and no UV faces" : "its UV chunks are not the lists this reader knows";
         var keep = new List<int>();
         for (int i = 0; i < nf; i++)
         {
@@ -538,7 +550,17 @@ public sealed class MaxScene
         if (pl != null && pl.IsContainer)
         {
             var fl = pl.First(0x9002);
-            if (fl != null && !fl.IsContainer && fl.Length >= 4) { bm.TileU = (fl.U32(0) & 1) != 0; bm.TileV = (fl.U32(0) & 2) != 0; }
+            if (fl != null && !fl.IsContainer && fl.Length >= 4)
+            {
+                // bits 0 and 1 are the tile switches (held on the samples' decals); bits 2 and 3 are TAKEN for the mirror
+                // switches, the order 3ds Max's own names for them have (U_WRAP, V_WRAP, U_MIRROR, V_MIRROR) - no sample
+                // sets either: the four models hold 3 (41 times) or 0 (17 times) in these four bits. A mirrored map
+                // repeats, so it is NOT a decal: read as plain tiling, and said, since every second repeat is then
+                // the wrong way round.
+                uint f = fl.U32(0);
+                bm.MirrorU = (f & 4) != 0; bm.MirrorV = (f & 8) != 0;
+                bm.TileU = (f & 1) != 0 || bm.MirrorU; bm.TileV = (f & 2) != 0 || bm.MirrorV;
+            }
             var pb = Ref(pl, 0);
             if (pb != null && pb.IsContainer)
                 foreach (var k in pb.All(0x0002))

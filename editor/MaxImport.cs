@@ -4,7 +4,7 @@
 // and Unity cannot open one), so the conversion happens once, at the door, and everything after it - probes, bakes,
 // recipes, and every Blender fallback of the in-process ports - sees an ordinary GLB.
 //
-// The report (parts, triangles, textures found or missing, and every thing the reader left by name) is shown once and
+// The report (parts, triangles, textures found or missing, and what the reader left, as far as it can tell) is shown once and
 // written to the Console in full. A `name_max.glb` whose generator line names this reader is replaced without asking;
 // any other file of that name asks first. Picking a .max whose copy already holds exactly the bytes the conversion
 // gives leaves that file untouched and shows no report.

@@ -15,36 +15,53 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   tree, `MaxScene.cs` the objects and references, `MaxModel.cs` the model) converts it to `name_max.glb` beside the file
   and the tool goes on with that copy, so every later step — and every Blender fallback — sees an ordinary GLB. Read:
   Editable Mesh parts with smoothing groups, material ids and UVs; each part's place, with the scale's axis system
-  (mirrored parts re-wound); Standard and Multi/Sub-Object materials with the diffuse picture; decals (a Mask map,
-  tiling off) composed onto a canvas of the plain colour. Named in the report and not read: modifiers (a `.max` stores
-  their settings, not their result), parametric objects, Editable Poly, other controller classes, the other map slots
-  by slot, a part that could not be placed. Not read and not detected: animation.
-  **Reviewed the same day in three rounds** (reviewers by slice with their own fuzzers and crafted files; planted
-  defects and a docs audit; the documented workflow and a blind reread). What the first round changed:
-  - the scale chunk's axis system is now APPLIED. The first version left it out on evidence that could not tell the
-    readings apart; the measurement that can is in `docs/Testing.md`. Eleven parts of the torpedo boat and one of an
-    armoured car change shape;
-  - UVs are written wherever the file has them (they were dropped wherever no picture was shown, and the report's
-    count said otherwise: 74 parts "with UVs" over the four models, 33 in the written files; now 74 in both);
-  - a sheet with both its sides in one smoothing group keeps a normal per side;
-  - an empty Multi/Sub-Object slot no longer moves the sub-materials after it;
-  - the report names what it was silent on: maps in the other slots (the Rolls-Royce has an opacity map on two
-    materials), a part under a node that could not be placed, a picture taken from another folder, a picture's alpha,
-    parts without a material, UVs that could not be read;
-  - picking the same `.max` again leaves an unchanged copy untouched (the rewrite gave it a new write time, which
-    makes an open Model Cutter drop its unsaved marks);
-  - hostile files are refused before they are paid for. Measured on the reviewer's files, before and after: an
-    allocation table larger than the file (1,018 MB of memory from a 1 MB file; now refused at once), a packed stream
-    of 20 million empty chunks (1,761 MB from 179 KB; refused at 2 million chunks), an object with 400,000 references
-    named by 20 nodes (47 s; 1.5 s). The reviewer also measured 2.5 GB from a 529 KB file whose streams share their
-    sectors; that file is now refused at once.
-  Checked: `tools/max_drill.sh` — the user's four models (257 parts, 244,337 triangles) equal to a second reader in
-  Python per part in area, bounds and winding; `tools/max_unity_drill.sh` — the conversion inside a Unity editor with
-  Unity's own image decoder, equal to the stand-alone one bit for bit in geometry and pixel for pixel in its 16 decoded
-  pictures (57 checks); the reviewers' 23 crafted files; unit tests on files built byte by byte
-  (`Tests/MaxReaderTests.cs`); the four converted files rendered and compared by eye. The editor assembly compiles
-  headlessly. **Still not run:** the pickers on screen (the dialogs' text, the window layout). All four sample files
-  are of the 3ds Max 2/3 generation.
+  (mirrored parts re-wound); Standard and Multi/Sub-Object materials with the diffuse picture and its alpha; decals (a
+  Mask map, tiling off) composed onto a canvas of the plain colour. Not read, and what the report says of it, is listed
+  in `docs/Editor-Tools.md`; animation is neither read nor detected.
+  **Reviewed the same day** (PR #299), each round from another angle; what each changed:
+  - **Round 1, three reviewers by slice with their own fuzzers and crafted files.**
+    - The scale chunk's axis system is now APPLIED. The first version left it out on evidence that could not tell the
+      readings apart; the measurement that can is in `docs/Testing.md`. Twelve parts change shape, eleven of them on
+      the torpedo boat.
+    - UVs are written wherever the file has them (they were dropped wherever no picture was shown, and the report's
+      count said otherwise: 74 parts "with UVs" over the four models, 33 in the written files; now 74 in both).
+    - A sheet with both its sides in one smoothing group keeps a normal per side; an empty Multi/Sub-Object slot no
+      longer moves the sub-materials after it.
+    - The report names what it was silent on: maps in the other slots (the Rolls-Royce has an opacity map on two
+      materials), a part under a node that could not be placed, a picture taken from another folder, parts without a
+      material, UVs that could not be read.
+    - Picking the same `.max` again leaves an unchanged copy untouched (the rewrite gave it a new write time, which
+      makes an open Model Cutter drop its unsaved marks).
+    - Hostile containers are refused early. Measured on the reviewer's files, before and after: an allocation table
+      larger than the file (1,018 MB of memory from a 1 MB file; refused at once), an object with 400,000 references
+      named by 20 nodes (47 s; 1.8 s). The reviewer also measured 2.5 GB from a 529 KB file whose streams share their
+      sectors; that file is refused at once.
+  - **Round 2, a reread of round 1's fixes, planted defects, and an audit of every number in the docs.**
+    - A fix of round 1 was itself a defect: the notes for parts under an unplaced node grew with the square of a
+      chain's length (800 chained parts: 320,401 notes and 340 s; the reviewer's 200-part file now takes 0.2 s). One
+      reason per part now, the parts of one reason in one note.
+    - A picture's own alpha now shows the material's colour. The torpedo boat's hull picture is a render with
+      everything around the hull transparent and black, and 64 % of the surface using the material lands there: the
+      hull side came out black, and is now the superstructure's grey with the picture as a band. Not checked against
+      3ds Max; the report names each such picture.
+    - A sheet with several triangles a side keeps a normal per side too (the sum cancels to a rounding residue, not
+      to zero); the slot count of a Multi/Sub-Object is read in the paired form of the references as well.
+    - Packed streams: only the streams the reader reads are unpacked, and one may unpack to 200 times its packed
+      size past 64 MB (four unread packed streams of 149 KB cost 1,590 MB by the reviewer's measure; 34 MB now. A
+      packed stream of 20 million empty chunks: 1,761 MB before the review, 128 MB now).
+    - The WARNING counts only parts that are written; modifiers are named by part; a mirrored map, a UV list without
+      its faces and a mask from another folder are said.
+    - Planted defects: 141 rules changed one at a time against the 41 tests of round 1 - 82 caught by the tests, 1
+      by the drill alone, 58 by nothing, 11 of those changing the four models' output. The reviewer's 30 fixtures
+      for the survivors are in the test file, which holds 83 tests now.
+  Checked on the tree of this entry: `tools/max_drill.sh` — the four models (257 parts, 244,337 triangles) equal to a
+  second reader in Python per part in area, bounds and winding; `tools/max_unity_drill.sh` — the conversion inside a
+  Unity editor with Unity's own image decoder, bit-equal in geometry and pixel-equal in its 16 composed pictures to
+  the stand-alone one (61 checks); the round-1 reviewer's 24 crafted files (15 convert, 9 are refused by name, none
+  takes more than 1.8 s; the most memory, 339 MB, goes to a stream built to unpack to 1 GB, which is refused at
+  194 MB); the four converted files rendered and looked at. The editor assembly compiles headlessly.
+  **Still not run:** the pickers on screen (the dialogs' text, the question before a foreign file is overwritten, the
+  window layout). All four sample files are of the 3ds Max 2/3 generation.
 - **Technologies can require ALL their prerequisites (2026-11-20).** The game unlocks a technology as soon as any one
   listed prerequisite is researched, and a `TechnologyDefinition` has no field to say otherwise. A new window,
   `Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites`, holds a list of technologies (and only that) for which every

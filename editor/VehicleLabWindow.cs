@@ -1614,7 +1614,10 @@ public class VehicleLabWindow : EditorWindow
         // Blender one answered with an import error that does not name the way out.
         if (MaxModel.IsMax(srcFile) || MaxModel.IsMax(srcFile2))
         {
-            status = "A 3ds Max file must be converted first: press 'Convert .max' under the " + (MaxModel.IsMax(srcFile) ? "Raw model" : "Second model") + " field, then Probe parts.";
+            bool first = MaxModel.IsMax(srcFile); string max = (first ? srcFile : srcFile2).Trim();
+            // the Convert button is drawn only for a file that exists: name the missing file instead of a button that is not there
+            status = !File.Exists(max) ? "The 3ds Max file in the " + (first ? "Raw model" : "Second model") + " field does not exist: " + max
+                : "A 3ds Max file must be converted first: press 'Convert .max' under the " + (first ? "Raw model" : "Second model (in 'Second model — merge another source')") + " field, then Probe parts.";
             return;
         }
         // Re-probing MERGES, never wipes: roles already assigned (by hand or a loaded recipe) are re-applied by

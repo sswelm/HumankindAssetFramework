@@ -18,7 +18,10 @@
 //   written as a PNG. A decal is shown ONCE in 3ds Max, with the plain colour around it: its picture is set in the
 //   middle of a larger canvas of that colour and the UVs are scaled to match, so no sampler setting has to be honoured
 //   downstream. A map's own offset and tiling are folded into the UVs.
-// What is not carried is NAMED in the report (MaxReport.Notes), never dropped silently: see MaxScene.cs for the list.
+// What is not carried is said in the report (MaxReport) wherever the reader can tell it is there - named part by part
+// or material by material, or counted (hidden faces, lights and cameras); what it cannot tell (animation, a hidden
+// object, further UV channels) is in the list at the top of MaxScene.cs and in docs/Editor-Tools.md.
+// A picture's own alpha (PNG, 32-bit TGA) works like a mask: the material's colour shows where it is not opaque.
 //
 // Pure C#: no Unity (PngCodec for PNG; a TGA and a BMP decoder below; JPEG pixels come from a decoder the caller hands in -
 // Unity's in the editor - and without one a JPEG is embedded as it is and a decal over it is named as left).
@@ -44,8 +47,10 @@ public sealed class MaxReport
     public readonly List<string> PartsLeft = new List<string>();        // "name: why" - a geometry object that gave no mesh
     public readonly SortedDictionary<string, int> NotGeometry = new SortedDictionary<string, int>(StringComparer.Ordinal);   // lights, cameras, helpers by class
     public readonly List<string> Notes = new List<string>();
+    readonly HashSet<string> said = new HashSet<string>(StringComparer.Ordinal);
 
-    internal void Note(string s) { if (!Notes.Contains(s)) Notes.Add(s); }
+    /// <summary>A note, once (the set, not a search of the list: a search per note made many notes cost their square).</summary>
+    internal void Note(string s) { if (said.Add(s)) Notes.Add(s); }
 
     /// <summary>The report as text. `full` (the Console's copy) names every part that was not read; the dialog's copy
     /// names the first twelve and says how many there are.</summary>
@@ -55,14 +60,14 @@ public sealed class MaxReport
         // first, because it decides whether the model is usable at all: a file of a newer 3ds Max keeps its parts'
         // places in controllers this reader does not read, and every such part then sits at its parent's origin
         if (PartsUnplaced > 0)
-            sb.Append("WARNING: ").Append(PartsUnplaced).Append(" of ").Append(Parts).Append(" part(s) could NOT be placed (a controller this reader does not read) - ")
+            sb.Append("WARNING: ").Append(PartsUnplaced).Append(" of ").Append(Parts).Append(" part(s) may stand in the wrong place (a controller this reader does not read, or reads in part) - ")
               .Append(PartsUnplaced * 2 > Parts ? "the model is most likely not assembled.\n" : "look at them before using the model.\n");
         sb.Append(Parts).Append(" part").Append(Parts == 1 ? "" : "s").Append(", ").Append(Triangles.ToString("N0", CultureInfo.InvariantCulture)).Append(" triangles, ")
           .Append(PartsWithUv).Append(" with UVs, ").Append(Materials).Append(" material").Append(Materials == 1 ? "" : "s").Append(", ").Append(Images).Append(" texture").Append(Images == 1 ? "" : "s").Append(" embedded");
         sb.Append(string.Format(CultureInfo.InvariantCulture, "; size {0:0.###} x {1:0.###} x {2:0.###} (wide, high, long)", Size[0], Size[1], Size[2]));
         if (PartsLeft.Count > 0) sb.Append("\nNOT READ (").Append(PartsLeft.Count).Append("): ").Append(string.Join("; ", full ? PartsLeft : PartsLeft.Take(12)))
             .Append(!full && PartsLeft.Count > 12 ? "; ... (" + (PartsLeft.Count - 12) + " more, all named in the Console)" : "");
-        if (MissingTextures.Count > 0) sb.Append("\nTextures not found beside the file (their parts keep their UVs, so the picture can be put on later): ").Append(string.Join(", ", MissingTextures));
+        if (MissingTextures.Count > 0) sb.Append("\nTextures not found beside the file").Append(PartsWithUv > 0 ? " (a part that has UVs keeps them, so a picture can be put on later)" : "").Append(": ").Append(string.Join(", ", MissingTextures));
         if (NotGeometry.Count > 0) sb.Append("\nLeft out (nothing to draw): ").Append(string.Join(", ", NotGeometry.Select(k => k.Value + " x " + k.Key)));
         foreach (var n in Notes) sb.Append("\n- ").Append(n);
         return sb.ToString();
@@ -72,7 +77,9 @@ public sealed class MaxReport
 public static class MaxModel
 {
     public const string GeneratorTag = "HAF MaxModel";
-    public const string Revision = "2026-11-21.2";   // .2: the scale's axis system is applied, UVs are kept without a picture, a cancelled smoothing sum is not shared
+    // .2: the scale's axis system is applied, UVs are kept without a picture, a cancelled smoothing sum is not shared.
+    // .3: a picture's alpha shows the material's colour; a smoothing sum that cancels to a rounding residue is not shared.
+    public const string Revision = "2026-11-21.3";
     public const int MaxPad = 4;                 // a decal's canvas reaches at most this many pictures to each side
     public const int MaxCanvas = 8192;           // and stays within this many pixels a side
 
@@ -147,7 +154,8 @@ public static class MaxModel
 
         // ---- pass 1: every part's geometry in world axes, and which material each face names
         var slots = new List<Slot>(); var slotOf = new Dictionary<int, int>(); int noMaterial = -1;
-        var parts = new List<Part>(); var unmaterialled = new List<string>();
+        var parts = new List<Part>(); var unmaterialled = new List<string>(); var modified = new List<string>();
+        var misplaced = new Dictionary<(int above, string why), List<string>>(); var misplacedOrder = new List<(int above, string why)>();
         for (int ni = 0; ni < scene.Nodes.Count; ni++)
         {
             var n = scene.Nodes[ni];
@@ -165,22 +173,9 @@ public static class MaxModel
             if (!finite) { rep.PartsLeft.Add(Label(n) + ": its transform is not a finite number"); continue; }
             double det = MaxScene.Det3(w);
             if (det == 0) { rep.PartsLeft.Add(Label(n) + ": its transform flattens it (a scale of 0)"); continue; }
-            // its own controller, or one of a node above it: a part under a helper that could not be placed is as
-            // misplaced as the helper, and says so
-            bool unplaced = false;
-            for (int at = ni; at >= 0; at = scene.Nodes[at].Parent)
-            {
-                var a = scene.Nodes[at];
-                if (a.TransformNote == null) continue;
-                unplaced = true;
-                rep.Note("part '" + n.Name + "' may be misplaced: " + (at == ni ? a.TransformNote : "the node above it, '" + a.Name + "': " + a.TransformNote));
-            }
-            if (unplaced) rep.PartsUnplaced++;
             double px = n.World[3], py = n.World[7], pz = n.World[11];
             if (Math.Abs(px) > 1e30 || Math.Abs(py) > 1e30 || Math.Abs(pz) > 1e30) { rep.PartsLeft.Add(Label(n) + ": its place does not fit a 32-bit float"); continue; }
-            rep.ModifiersSkipped += n.Modifiers;
             var m = n.Mesh;
-            if (m.UvLeft != null) rep.Note("part '" + n.Name + "' is read without UVs: " + m.UvLeft);
             var p = new Part { Node = n, NodeIndex = ni, Sg = m.Smoothing, Tv = m.TVerts };
             int nv = m.Verts.Length / 3;
             p.Pos = new double[nv * 3];
@@ -203,6 +198,26 @@ public static class MaxModel
                     int t = p.Faces[f * 3]; p.Faces[f * 3] = p.Faces[f * 3 + 2]; p.Faces[f * 3 + 2] = t;
                     if (p.TFaces != null) { t = p.TFaces[f * 3]; p.TFaces[f * 3] = p.TFaces[f * 3 + 2]; p.TFaces[f * 3 + 2] = t; }
                 }
+            // From here the part is WRITTEN: what is said about it below is said about a part of the model (a part left
+            // out above is named once, in PartsLeft, and counted nowhere else).
+            rep.ModifiersSkipped += n.Modifiers;
+            if (n.Modifiers > 0) modified.Add("'" + n.Name + "'");
+            if (m.UvLeft != null) rep.Note("part '" + n.Name + "' is read without UVs: " + m.UvLeft);
+            // Its own controller, or the nearest node above it whose controller is not read: a part under a helper that
+            // could not be placed is as misplaced as the helper. ONE reason per part, and the parts of one reason in one
+            // note - a note per part and ancestor grew with the square of a chain's length (review round 2: 800 chained
+            // parts gave 320,401 notes and took 340 s).
+            for (int at = ni; at >= 0; at = scene.Nodes[at].Parent)
+            {
+                var a = scene.Nodes[at];
+                if (a.TransformNote == null) continue;
+                var key = (at == ni ? -1 : at, a.TransformNote);
+                if (!misplaced.TryGetValue(key, out var names)) { misplaced[key] = names = new List<string>(); misplacedOrder.Add(key); }
+                names.Add("'" + n.Name + "'");
+                rep.PartsUnplaced++;
+                break;
+            }
+            bool bare = false;
             p.Slot = new int[nf];
             var byId = new Dictionary<int, int>();
             for (int f = 0; f < nf; f++)
@@ -213,7 +228,7 @@ public static class MaxModel
                     if (mat == null)
                     {
                         if (why != "no material") rep.Note("part '" + n.Name + "': " + why + " (drawn in plain grey)");
-                        else if (!unmaterialled.Contains(n.Name)) unmaterialled.Add(n.Name);
+                        else if (!bare) { bare = true; unmaterialled.Add("'" + n.Name + "'"); }
                         if (noMaterial < 0) { noMaterial = slots.Count; slots.Add(new Slot { Why = why }); }
                         si = noMaterial;
                     }
@@ -226,7 +241,13 @@ public static class MaxModel
         }
         if (parts.Count == 0)
             throw new InvalidDataException("the .max file holds no mesh this reader can read" + (rep.PartsLeft.Count > 0 ? ": " + string.Join("; ", rep.PartsLeft.Take(6)) + (rep.PartsLeft.Count > 6 ? "; ..." : "") : " (no geometry object in it)"));
-        if (rep.ModifiersSkipped > 0) rep.Note(rep.ModifiersSkipped + " modifier(s) sit on parts of this scene; a .max stores a modifier's settings, not its result, so those parts are read as they were BEFORE the modifier");
+        foreach (var key in misplacedOrder)
+        {
+            var names = misplaced[key];
+            // straight into the list: two nodes of one name above two groups of parts give two notes of one beginning
+            rep.Notes.Add(names.Count + " part(s) may be misplaced - " + (key.above < 0 ? key.why : "the node above, '" + scene.Nodes[key.above].Name + "': " + key.why) + ": " + Names(names));
+        }
+        if (rep.ModifiersSkipped > 0) rep.Note(rep.ModifiersSkipped + " modifier(s) sit on " + modified.Count + " part(s); a .max stores a modifier's settings, not its result, so those parts are read as they were BEFORE the modifier: " + Names(modified));
         if (rep.HiddenFaces > 0) rep.Note(rep.HiddenFaces + " face(s) are marked hidden in the file (3ds Max does not draw them): left out");
         if (unmaterialled.Count > 0) rep.Note(unmaterialled.Count + " part(s) have no material and are drawn in plain grey: " + Names(unmaterialled));
         if (scene.DanglingReferences > 0) rep.Note(scene.DanglingReferences + " reference(s) in the file name an object the scene does not have (a damaged file?): read as empty");
@@ -246,12 +267,14 @@ public static class MaxModel
             }
             if (s.Mat.Map == null) continue;
             if (s.Mat.Map.PlacementLeft || (s.Mat.Mask != null && s.Mat.Mask.PlacementLeft)) rep.Note("material '" + s.Mat.Name + "': its map's offset, tiling or angle holds a number that cannot be used; the picture is placed without them");
+            // said whether or not the picture is found: the offset and tiling are folded into the UVs either way
+            if (s.Mat.Map.MirrorU || s.Mat.Map.MirrorV) rep.Note("material '" + s.Mat.Name + "': its map is mirrored in 3ds Max (every second repeat turned round); it is written as plain tiling");
+            if (s.Mat.Map.Angle != 0) rep.Note("material '" + s.Mat.Name + "': its map is turned by an angle, which is not applied");
+            if (s.Mat.Map.HasPlacement) rep.Note("material '" + s.Mat.Name + "': the map's offset/tiling (" + Num(s.Mat.Map.OffsetU) + ", " + Num(s.Mat.Map.OffsetV) + " / " + Num(s.Mat.Map.TilingU) + ", " + Num(s.Mat.Map.TilingV) + ") is folded into the UVs by the documented rule - check its placement");
             s.File = files.Find(s.Mat.Map.File);
             if (s.File == null) { if (!rep.MissingTextures.Contains(s.Mat.Map.File)) rep.MissingTextures.Add(s.Mat.Map.File); continue; }
             s.Textured = true;
             if (!files.IsBeside(s.File)) rep.Note("texture '" + s.Mat.Map.File + "' is not beside the .max; the one in '" + files.Relative(s.File) + "' is used");
-            if (s.Mat.Map.Angle != 0) rep.Note("material '" + s.Mat.Name + "': its map is turned by an angle, which is not applied");
-            if (s.Mat.Map.HasPlacement) rep.Note("material '" + s.Mat.Name + "': the map's offset/tiling (" + Num(s.Mat.Map.OffsetU) + ", " + Num(s.Mat.Map.OffsetV) + " / " + Num(s.Mat.Map.TilingU) + ", " + Num(s.Mat.Map.TilingV) + ") is folded into the UVs by the documented rule - check its placement");
         }
         // a map in any other slot is not read: said once per slot, with the materials that have one. An opacity map is
         // the one that changes the SHAPE the eye sees (it cuts holes), so it is said in those words.
@@ -357,8 +380,9 @@ public static class MaxModel
     }
 
     static string Label(MaxNode n) => "'" + n.Name + "'" + (n.BaseClass == "" ? "" : " (" + n.BaseClass + ")");
-    /// <summary>A list of names for a note: all of them up to twenty, then the first twenty and how many more.</summary>
-    static string Names(List<string> names) => names.Count <= 20 ? string.Join(", ", names) : string.Join(", ", names.Take(20)) + " and " + (names.Count - 20) + " more";
+    /// <summary>A list of names for a note: ALL of them. A note is the same text in the dialog and in the Console; the
+    /// dialog cuts the whole report at a length (and says so), the Console holds it whole, so nothing is named nowhere.</summary>
+    static string Names(List<string> names) => string.Join(", ", names);
     static string Num(double v) => v.ToString("0.####", CultureInfo.InvariantCulture);
 
     /// <summary>A display value 0..1 as the linear number a GLB's colour factor holds (the sRGB curve).</summary>
@@ -410,8 +434,11 @@ public static class MaxModel
         bool decal = !map.TileU || !map.TileV;
         string maskFile = mat.Mask == null ? null : files.Find(mat.Mask.File);
         if (mat.Mask != null && maskFile == null) { if (!rep.MissingTextures.Contains(mat.Mask.File)) rep.MissingTextures.Add(mat.Mask.File); rep.Note("material '" + mat.Name + "': its mask picture is missing, the map is shown whole"); }
+        if (maskFile != null && !files.IsBeside(maskFile)) rep.Note("texture '" + mat.Mask.File + "' is not beside the .max; the one in '" + files.Relative(maskFile) + "' is used");
         bool mix = Math.Abs(mat.Amount - 1) >= 0.005;       // under half a percent the mix is not visible in 8 bits, and the note would read "100 % instead of 100 %"
-        bool needsPixels = decal || maskFile != null || mix || (kind != "png" && kind != "jpeg");
+        // a PNG with an alpha channel is decoded too: where it is not opaque the material's colour shows (below)
+        bool pngAlpha = kind == "png" && (PngCodec.ReadInfo(bytes)?.HasAlpha ?? false);
+        bool needsPixels = decal || maskFile != null || mix || pngAlpha || (kind != "png" && kind != "jpeg");
         if (!needsPixels)
         {
             string key = "raw|" + s.File.ToLowerInvariant();
@@ -449,11 +476,26 @@ public static class MaxModel
             else if (mat.Mask.TileU != map.TileU || mat.Mask.TileV != map.TileV || mat.Mask.OffsetU != map.OffsetU || mat.Mask.OffsetV != map.OffsetV || mat.Mask.TilingU != map.TilingU || mat.Mask.TilingV != map.TilingV)
                 rep.Note("material '" + mat.Name + "': its mask is placed differently from its map; the map's placement is used for both");
         }
-        // the picture's own alpha is not used (see MaxImages): said when it has any, because a cut-out stored in the
-        // alpha channel then shows as a solid picture
-        bool alpha = false;
-        for (int i = 3; i < rgba.Length; i += 4) if (rgba[i] != 255) { alpha = true; break; }
-        if (alpha) rep.Note("material '" + mat.Name + "': the alpha channel of '" + map.File + "' is not used; the picture is shown whole");
+        // The picture's own alpha works like a mask: where the picture is not opaque the material's colour shows. That
+        // is what 3ds Max's default for a bitmap ("Image Alpha") does, and what the torpedo boat's hull says: its
+        // picture is a render of the hull's side with everything around it transparent and BLACK, 64 % of the surface
+        // that uses the material lands on those pixels, and the material's own colour is the superstructure's
+        // (136, 154, 159) - a hull two thirds black is not what its artist drew (review round 2). Not checked against
+        // 3ds Max itself, so it is said in the report with the share of the picture it concerns.
+        long clear = 0;
+        for (int i = 3; i < rgba.Length; i += 4) if (rgba[i] != 255) clear++;
+        if (clear > 0) rep.Note("material '" + mat.Name + "': '" + map.File + "' has an alpha channel (" + Math.Round(100.0 * clear / (rgba.Length / 4)).ToString(CultureInfo.InvariantCulture) + " % of it is not opaque); the material's colour shows through there, as with 3ds Max's 'Image Alpha'");
+        if (clear == 0 && !decal && maskFile == null && !mix && kind == "png")
+        {
+            // a PNG whose alpha channel is opaque everywhere, with nothing else to compose: embedded as it is after all
+            string key = "raw|" + s.File.ToLowerInvariant();
+            if (!imageOf.TryGetValue(key, out s.Image))
+            {
+                s.Image = model.Images.Count; imageOf[key] = s.Image;
+                model.Images.Add(new HafImage { Name = Path.GetFileNameWithoutExtension(s.File), MimeType = "image/png", Bytes = bytes });
+            }
+            return;
+        }
         s.Ku = map.TileU ? 0 : PadFor(s.MinU, s.MaxU, w);
         s.Kv = map.TileV ? 0 : PadFor(s.MinV, s.MaxV, h);
         if ((!map.TileU && Math.Max(-s.MinU, s.MaxU - 1) > s.Ku + 1e-4) || (!map.TileV && Math.Max(-s.MinV, s.MaxV - 1) > s.Kv + 1e-4))
@@ -463,7 +505,7 @@ public static class MaxModel
         if (imageOf.TryGetValue(ckey, out s.Image)) { s.Canvas = true; return; }
         var canvas = Compose(rgba, w, h, mask, mw, mh, mat.Amount, mat.Diffuse, s.Ku, s.Kv, out int cw, out int ch);
         s.Image = model.Images.Count; imageOf[ckey] = s.Image;
-        model.Images.Add(new HafImage { Name = Path.GetFileNameWithoutExtension(s.File) + (mask != null || decal ? "_decal" : mix ? "_mixed" : ""), MimeType = "image/png", Bytes = PngCodec.Encode(cw, ch, canvas, false) });
+        model.Images.Add(new HafImage { Name = Path.GetFileNameWithoutExtension(s.File) + (mask != null || decal ? "_decal" : mix || clear > 0 ? "_mixed" : ""), MimeType = "image/png", Bytes = PngCodec.Encode(cw, ch, canvas, false) });
         s.Canvas = true;
     }
 
@@ -475,8 +517,9 @@ public static class MaxModel
         return Path.GetExtension(path).TrimStart('.').ToLowerInvariant();
     }
 
-    /// <summary>The picture a material shows: the map, through its mask (white shows the map) and its amount, over the
-    /// material's colour - set in the middle of a canvas of that colour `ku` / `kv` pictures wider to each side.
+    /// <summary>The picture a material shows: the map, through its own alpha, its mask (white shows the map) and its
+    /// amount, over the material's colour - set in the middle of a canvas of that colour `ku` / `kv` pictures wider to
+    /// each side. The map's colour is taken as it is stored (not as multiplied by its alpha beforehand).
     /// Four bytes per pixel, rows top-down, opaque.</summary>
     public static byte[] Compose(byte[] map, int w, int h, byte[] mask, int mw, int mh, double amount, double[] diffuse, int ku, int kv, out int cw, out int ch)
     {
@@ -493,7 +536,7 @@ public static class MaxModel
             for (int x = 0; x < w; x++)
             {
                 int at = (y * w + x) * 4;
-                double a = amount;
+                double a = amount * (map[at + 3] / 255.0);
                 if (mask != null)
                 {
                     int ma = ((int)((long)y * mh / h) * mw + (int)((long)x * mw / w)) * 4;
@@ -533,7 +576,7 @@ public static class MaxModel
             uint sg = p.Sg[f];
             long key = sg != 0 ? ((long)v << 32) | sg : -1;
             if (sg != 0 && smoothKey.TryGetValue(key, out int have)) return have;
-            double x = 0, y = 0, z = 0;
+            double x = 0, y = 0, z = 0, terms = 0;
             if (sg == 0) { x = fn[f * 3]; y = fn[f * 3 + 1]; z = fn[f * 3 + 2]; }
             else
             {
@@ -545,14 +588,17 @@ public static class MaxModel
                     last = g;
                     if ((p.Sg[g] & sg) == 0) continue;
                     x += fn[g * 3]; y += fn[g * 3 + 1]; z += fn[g * 3 + 2];
+                    terms += Math.Sqrt(fn[g * 3] * fn[g * 3] + fn[g * 3 + 1] * fn[g * 3 + 1] + fn[g * 3 + 2] * fn[g * 3 + 2]);
                 }
             }
             double len = Math.Sqrt(x * x + y * y + z * z);
             // The sum cancels (a sheet with both its sides in one smoothing group): each face then keeps its OWN
             // normal, and that normal is not shared through the vertex's key - shared, the back face got the front
-            // face's normal (review 2026-11-21: four corners in the sample models).
-            bool own = len == 0;
-            if (own) { x = fn[f * 3]; y = fn[f * 3 + 1]; z = fn[f * 3 + 2]; len = Math.Sqrt(x * x + y * y + z * z); }
+            // face's normal. "Cancels" is measured against the size of what was summed: with more than one triangle a
+            // side the sum is a rounding residue, not zero. In the four sample models every sum is either below 1e-9 of
+            // its terms (eight corners, four of them exactly zero) or above 1e-2 (review rounds 1 and 2).
+            bool own = sg != 0 && len <= 1e-6 * terms;
+            if (own || len == 0) { x = fn[f * 3]; y = fn[f * 3 + 1]; z = fn[f * 3 + 2]; len = Math.Sqrt(x * x + y * y + z * z); }
             if (len == 0) { x = 0; y = 1; z = 0; len = 1; }
             x = x / len; y = y / len; z = z / len;
             if (!byValue.TryGetValue((v, x, y, z), out int id))
@@ -676,7 +722,8 @@ public static class MaxImages
     }
 
     /// <summary>Truevision TGA: true colour (15/16/24/32 bit), grey (8 bit) and colour-mapped (8-bit index), plain or
-    /// run-length packed. The alpha channel is dropped: 3ds Max does not use it for a diffuse map.</summary>
+    /// run-length packed. A 32-bit file's alpha is kept when its header declares alpha bits (MaxModel lets the
+    /// material's colour show through it); an alpha that is zero everywhere counts as none.</summary>
     public static bool Tga(byte[] b, out int w, out int h, out byte[] rgba, out string why)
     {
         w = h = 0; rgba = null; why = null;
@@ -729,6 +776,7 @@ public static class MaxImages
         }
         var o4 = new byte[(long)w * h * 4];
         bool top = (desc & 0x20) != 0, right = (desc & 0x10) != 0;
+        bool alphaBits = (desc & 15) != 0;        // the header says how many of a pixel's bits are alpha; none = the fourth byte means nothing
         void Colour(byte[] src, int s, int bits, int o)
         {
             if (bits == 8) { o4[o] = o4[o + 1] = o4[o + 2] = src[s]; }
@@ -738,7 +786,7 @@ public static class MaxImages
                 o4[o] = (byte)(((v >> 10) & 31) * 255 / 31); o4[o + 1] = (byte)(((v >> 5) & 31) * 255 / 31); o4[o + 2] = (byte)((v & 31) * 255 / 31);
             }
             else { o4[o] = src[s + 2]; o4[o + 1] = src[s + 1]; o4[o + 2] = src[s]; }
-            o4[o + 3] = 255;
+            o4[o + 3] = bits == 32 && alphaBits ? src[s + 3] : (byte)255;
         }
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
@@ -753,11 +801,16 @@ public static class MaxImages
                 }
                 else Colour(px, s, kind == 3 ? 8 : bpp, o);
             }
+        // an alpha channel that is zero everywhere was never written (a common 32-bit TGA): the picture is opaque
+        bool any = false;
+        for (int i = 3; i < o4.Length && !any; i += 4) any = o4[i] != 0;
+        if (!any) for (int i = 3; i < o4.Length; i += 4) o4[i] = 255;
         rgba = o4;
         return true;
     }
 
-    /// <summary>Windows BMP: 8-bit with a palette, 24-bit and 32-bit, not packed. Alpha is dropped.</summary>
+    /// <summary>Windows BMP: 8-bit with a palette, 24-bit and 32-bit, not packed. The fourth byte of a 32-bit pixel is
+    /// reserved in this header form, not alpha: every pixel is opaque.</summary>
     public static bool Bmp(byte[] b, out int w, out int h, out byte[] rgba, out string why)
     {
         w = h = 0; rgba = null; why = null;

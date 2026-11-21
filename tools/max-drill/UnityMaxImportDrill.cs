@@ -96,9 +96,10 @@ public static class UnityMaxImportDrill
                 }
                 Check(tag + ": positions, normals and UVs equal to the reference bit for bit (" + floats + " floats, " + differ + " differ)", differ == 0 && floats > 0);
 
-                // 5. the pictures: same sizes; pixels within a JPEG decoder's rounding of the reference, and far from
-                //    the reference turned upside down (a flipped hand-over would score the other way round).
-                int pictures = 0, decoded = 0; double worstMean = 0, worstFlip = double.MaxValue; int worstMax = 0; bool sizes = true, rawSame = true;
+                // 5. the pictures: same sizes; pixels within a JPEG decoder's rounding of the reference (a mean of 2 in
+                //    255 is the LIMIT; what a run measures is printed per picture), and never nearer to the reference
+                //    turned upside down than to the reference (a flipped hand-over scores the other way round).
+                int pictures = 0, decoded = 0, upsideDown = 0; double worstMean = 0; int worstMax = 0; bool sizes = true, rawSame = true;
                 for (int i = 0; i < mine.Images.Count; i++)
                 {
                     byte[] a = mine.Images[i].Bytes, b = theirs.Images[i].Bytes;
@@ -119,11 +120,14 @@ public static class UnityMaxImportDrill
                     double mean = sum / (double)pa.Length, meanFlip = flip / (double)pa.Length;
                     log.AppendLine("  picture " + i + " " + ia.Width + "x" + ia.Height + ": mean difference " + mean.ToString("0.000", CultureInfo.InvariantCulture) + ", largest " + largest + ", against the reference upside down " + meanFlip.ToString("0.000", CultureInfo.InvariantCulture));
                     if (mean > worstMean) worstMean = mean; if (largest > worstMax) worstMax = largest;
-                    if (meanFlip - mean < worstFlip) worstFlip = meanFlip - mean;
+                    if (mean > meanFlip) upsideDown++;
                 }
                 Check(tag + ": every picture has the reference's size, and pictures embedded as they are equal it byte for byte (" + pictures + " pictures, " + decoded + " decoded)", sizes && rawSame);
                 if (decoded > 0)
-                    Check(tag + ": Unity's decoder agrees with System.Drawing's within a decoder's rounding (worst mean difference " + worstMean.ToString("0.000", CultureInfo.InvariantCulture) + " of 255, limit 2; largest single " + worstMax + ")", worstMean <= 2.0);
+                {
+                    Check(tag + ": the composed pictures agree with the reference's within a decoder's rounding (worst mean difference " + worstMean.ToString("0.000", CultureInfo.InvariantCulture) + " of 255, limit 2; largest single " + worstMax + ")", worstMean <= 2.0);
+                    Check(tag + ": no picture is nearer to the reference turned upside down than to the reference (" + upsideDown + " are)", upsideDown == 0);
+                }
 
                 // 6. the same file picked again: the copy holds these bytes already and is NOT written again (a tool
                 //    that watches its source's write time - the Cutter with unsaved marks - sees no change).

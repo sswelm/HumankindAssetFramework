@@ -261,30 +261,55 @@ What this drill is not:
 
 - **Not an independent reading of the format.** The Python reader shares no code with the C# one and every reading of
   the format with it (which chunk is what, the inverse quaternion, the scale's axis system, hidden faces, the re-wind of
-  a mirrored part). It catches a slip in one of the two implementations. The check of the reading itself is the renders
-  of the converted files, compared by eye with the artists' own pictures.
-- **Not a check of UV values, normals, materials, pivots or parent links:** none of those is compared.
-  `Tests/MaxReaderTests.cs` holds each of them, on files built byte by byte.
+  a mirrored part). It catches a slip in one of the two implementations. The check of the reading itself is looking at
+  renders of the converted files: assembled, textured, faces outward.
+- **Not a check of UV values, normals, materials, pictures, pivots, parent links or the report's text:** none of those
+  is compared. Round 2 of the review changed eleven such rules in the reader with this drill still passing and the four
+  models' output changed. `Tests/MaxReaderTests.cs` holds each of them, on files built byte by byte.
+
+**`Tests/MaxReaderTests.cs` and what was planted against it.** The review of 2026-11-21 planted defects in three passes:
+the round-1 reviewer changed 13 rules with all of the then 19 tests passing; the round-2 reviewer changed 141 rules one
+at a time against the 41 tests that followed, of which the tests caught 82, the drill alone 1, and nothing 58; the
+author put each of round 2's 22 fixes back in turn against the tests written for them (20 caught at first, 22 after two
+more fixtures). The file now holds 83 tests; 30 of them are the round-2 reviewer's fixtures for its 58 survivors.
+Known to be held by no test: the early size check of a TGA (with and without it a cut file is refused in the same words;
+only the memory asked for first differs).
 
 One rule was decided by measurement, and decided twice. A scale chunk carries a quaternion: the axis system the three
 factors apply in. The first version left it out (on the torpedo boat's anchor more right angles survive without it); the
 review showed that test cannot tell the readings apart, because a diagonal scale keeps the right angles of a part's own
 axes whatever the file means. The measurement that can: how far each part's stretch in the world sits from the world's
-axes. Of the twelve parts where the rule changes anything, applying the axis puts nine on the axes and a tenth close to
-them, where leaving it out, or applying it the other way round, puts none of the boat's eleven there; and the boat's two
-bow fittings, one on each side, come out as a pair (30 x 167 x 54 and 35 x 163 x 54) instead of as two different
-things (46 x 50 x 54 and 39 x 206 x 54). It is applied.
+axes (the largest off-diagonal of A·Aᵀ over its largest diagonal entry; 0 = on the axes). The rule changes twelve
+parts, eleven of them on the boat:
+
+| Parts | Left out | Applied | Applied the other way round |
+|---|---|---|---|
+| The boat's PIEZA CORAZA 01 and 02 | 0.075 | 0.004 | 0.107 |
+| PIEZA CORAZA 03 to 06 (through the object offset's scale) | 0.130 | 0.011 | 0.177 |
+| PIEZA-156 and 157 | 0.891 | 0.015 | 0.131 |
+| PIEZA-74 | 0.814 | 0.093 | 0.227 |
+| PIEZA-75 | 0.137 | 0.495 | 0.495 |
+| The anchor | 0.210 | 0.361 | 0.544 |
+| The armoured car's D9013Tp2 | 0.005 | 0.000 | 0.010 |
+
+It is applied, on the strength of the first three rows (eight parts, which are three distinct scale records of one
+file), of PIEZA-74's, and of one more observation: PIEZA-74 and PIEZA-75 are the same fitting on the boat's two sides, and with the axis
+applied their boxes are 30 x 167 x 54 and 35 x 163 x 54, without it 46 x 50 x 54 and 39 x 206 x 54. The anchor and
+PIEZA-75 sit further from the axes with it than without; nothing here says how 3ds Max itself shows them.
 
 **`tools/max_unity_drill.sh`** (the `.max` door inside Unity, 2026-11-21): builds a temporary Unity project, copies each
-sample file's folder into it and runs `MaxImport.Picked` / `Convert` there in batch mode
+sample file's folder beside it and runs `MaxImport.Picked` / `Convert` there in batch mode
 (`tools/max-drill/UnityMaxImportDrill.cs`), with Unity's own image decoder. Held to the `.glb` the stand-alone drill's
 executable writes from the same copy with System.Drawing's decoder: positions, normals and UVs bit for bit, every
-picture's size, and the pixels of each decoded picture. Also: a 5 x 3 picture through Unity's decoder byte for byte (row
+picture's size, and each composed picture's pixels within a mean difference of 2 in 255 (and never nearer to the
+reference turned upside down than to the reference). Also: a 5 x 3 picture through Unity's decoder byte for byte (row
 order and channel order); the same file converted again leaves the copy untouched; the Convert button's deferred half
 outside a GUI pass; a file cut to a third, a text file named `.max` and a missing file are refused without an exception
-and leave no `.glb`. Run 2026-11-21: 4 files, 57 checks, none failed; all 16 decoded pictures equal the reference pixel
-for pixel. **Not in the push gate** (same population). **Not covered:** the dialogs' text and the IMGUI layout — a
-modal dialog answers itself in batch mode — so the pickers themselves, on screen, are still the user's to try.
+and leave no `.glb`. Run 2026-11-21 on the tree of this entry: 4 files, 61 checks, none failed; the 16 composed pictures
+equal the reference pixel for pixel (15 come from JPEGs through Unity's decoder, one from a TGA through the reader's
+own). **Not in the push gate** (same population). **Not covered:** the dialogs' text, the question before a foreign
+file is overwritten, and the IMGUI layout — a modal dialog answers itself in batch mode — so the pickers themselves,
+on screen, are still the user's to try.
 
 **`tools/fbx_model_drill.sh`** (step 6a of the native FBX reader, 2026-11-01: the FBX path into the Factory): Blender imports
 every static FBX source and fixture with its FBX importer's defaults and exports a GLB (`tools/fbx-drill/fbx_to_glb.py`);

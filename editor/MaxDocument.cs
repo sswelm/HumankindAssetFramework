@@ -5,7 +5,8 @@
 // header. Newer 3ds Max versions gzip each stream; that is unpacked here.
 //
 // Pure C#: no Unity. Written from the files themselves (the user's four models, read byte by byte with a Python probe
-// first) and from the public descriptions of the format; no code of another reader is in here. What does not hold - a
+// first) and from the public descriptions of the format; two open-source readers (io_scene_max, Ryzom Core's
+// pipeline_max) served as references for the chunk ids, and no code of theirs is in here. What does not hold - a
 // file that is not a compound file, a sector chain that leaves the file or loops, a chunk that runs past its parent - is
 // refused by name with InvalidDataException, never read around.
 using System;
@@ -91,7 +92,7 @@ public sealed class MaxDocument
         }
         // the sectors that hold the allocation table: 109 in the header, the rest through the DIFAT chain
         // A file cannot hold more allocation sectors than it has sectors: without this bound a 1 MB file whose DIFAT
-        // names one sector over and over asked for gigabytes (review 2026-11-21).
+        // names one sector over and over asked for 1,018 MB (review 2026-11-21).
         if (nFat > sectors) throw new InvalidDataException($"compound file: {nFat} allocation sectors declared in a file of {sectors} sectors");
         var fatSects = new List<uint>();
         for (int i = 0; i < 109; i++) { uint s = BitConverter.ToUInt32(b, 0x4C + 4 * i); if (s < MaxRegular) fatSects.Add(s); }
@@ -156,13 +157,13 @@ public sealed class MaxDocument
             if (doc.Streams.ContainsKey(e.name)) continue;
             // Streams do not share sectors, so together they cannot hold more bytes than the file: without this bound
             // 4,095 entries naming one chain cost 2.5 GB from a 529 KB file (review 2026-11-21).
+            if (e.size > 0 && e.size < cutoff && e.size > mini.Length) throw new InvalidDataException($"compound file: stream '{e.name}' declares {e.size} bytes, the mini stream holds {mini.Length}");
             claimed += e.size;
             if (claimed > b.Length) throw new InvalidDataException($"compound file: its streams declare more bytes together than the file holds ({b.Length}) - sectors named by more than one stream");
             byte[] raw;
             if (e.size == 0) raw = new byte[0];
             else if (e.size < cutoff)
             {
-                if (e.size > mini.Length) throw new InvalidDataException($"compound file: stream '{e.name}' declares {e.size} bytes, the mini stream holds {mini.Length}");
                 raw = new byte[e.size];
                 uint s = e.start; long done = 0, n = 0;
                 while (done < e.size)
@@ -179,14 +180,28 @@ public sealed class MaxDocument
                 }
             }
             else raw = Chain(e.start, e.size, "stream '" + e.name + "'");
-            if (raw.Length >= 2 && raw[0] == 0x1F && raw[1] == 0x8B) { raw = Gunzip(raw, e.name); doc.Compressed = true; }
+            // Unpacked only when it is one of the streams this reader READS: unpacking every stream on sight let four
+            // unread streams of 149 KB cost 1,590 MB (review round 2). Any other packed stream stays as the file has it.
+            if (raw.Length >= 2 && raw[0] == 0x1F && raw[1] == 0x8B)
+            {
+                doc.Compressed = true;
+                if (Array.IndexOf(ReadStreams, e.name) >= 0) raw = Gunzip(raw, e.name);
+            }
             doc.Streams[e.name] = raw;
         }
         return doc;
     }
 
+    /// <summary>The streams the reader parses; a packed stream of another name is kept packed.</summary>
+    public static readonly string[] ReadStreams = { "Scene", "ClassDirectory", "ClassDirectory2", "ClassDirectory3" };
+    /// <summary>A packed stream may unpack to this many times its packed size (and always to 64 MB). Scene data packs a
+    /// few times over; a stream built to unpack a thousand times over is refused when it passes the bound, not at 1 GB.</summary>
+    public const int MaxUnpackRatio = 200;
+    public const long UnpackFloor = 64L << 20;
+
     static byte[] Gunzip(byte[] raw, string name)
     {
+        long limit = Math.Min(MaxStreamBytes, Math.Max(UnpackFloor, (long)raw.Length * MaxUnpackRatio));
         try
         {
             using (var src = new MemoryStream(raw))
@@ -198,7 +213,7 @@ public sealed class MaxDocument
                 {
                     int n = gz.Read(buf, 0, buf.Length);
                     if (n <= 0) break;
-                    if (outp.Length + n > MaxStreamBytes) throw new InvalidDataException($"stream '{name}' unpacks to more than 1 GB");
+                    if (outp.Length + n > limit) throw new InvalidDataException($"stream '{name}' is {raw.Length} bytes packed and unpacks to more than {limit >> 20} MB; this reader stops there");
                     outp.Write(buf, 0, n);
                 }
                 return outp.ToArray();
@@ -219,7 +234,7 @@ public sealed class MaxDocument
     public static List<MaxChunk> ParseChunks(byte[] buf) { int count = 0; return ParseChunks(buf, 0, buf.Length, 0, "the stream", ref count); }
 
     /// <summary>A stream's chunk tree stops here: the tree is built whole, and a gzip-packed stream of empty chunks
-    /// (179 KB packed, 20 million chunks) cost 1.6 GB before this bound (review 2026-11-21). The largest of the four
+    /// (179 KB packed, 20 million chunks) cost 1,761 MB before this bound (review 2026-11-21). The largest of the four
     /// sample scenes holds 11,981 chunks for its 152 parts - about 80 a part, so the bound leaves room for a scene of
     /// some 25,000 parts.</summary>
     public const int MaxChunks = 2000000;

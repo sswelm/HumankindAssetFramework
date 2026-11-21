@@ -310,73 +310,100 @@ animated bake → game sequence.
 The **Model Cutter**, the **Model Fuser**, the **Vehicle Lab** (both source fields) and the **Model Factory** take a
 `.max` file in their file pickers. Picking one converts it: the reader (`editor/MaxDocument.cs`, `MaxScene.cs`,
 `MaxModel.cs` — C#, no 3ds Max and no Blender involved) writes `name_max.glb` beside the file, and the tool works on
-that copy from then on. A `.max` path typed into the field shows a **Convert .max** button under it. A report says what
-was read and names what was not; the Console holds the same report in full.
+that copy from then on. A report says what was read and what was not: the dialog shows it cut to a length, the Console
+holds it whole.
 
-Why a copy: nothing else in the pipeline can open a `.max` (Blender and Unity cannot), so every later step — including
-the Blender fallbacks of the in-process routes — needs an ordinary GLB.
+Why a copy: nothing else in the pipeline can open a `.max` (stock Blender and Unity cannot), so every later step —
+including the Blender fallbacks of the in-process routes — needs an ordinary GLB.
 
+- **A `.max` path typed into the field** shows a **Convert .max** button under it, when the file exists. Until it is
+  pressed the tool has no model: the Vehicle Lab's Probe says so by name; in the Cutter, the Fuser and the Factory an
+  unconverted `.max` fails with that tool's own error for a file it cannot read.
 - **Picking the same `.max` again** converts it again and compares: when the copy already holds exactly those bytes it
-  is left untouched (a tool that has it open sees no change) and no report is shown.
+  is left untouched and no report is shown. Another tool that has the copy open sees no change; the window you pick
+  in lists the model afresh.
 - **An existing `name_max.glb`** is replaced without asking when its generator line names this reader. That is a file
   the reader wrote — and also a file a HAF tool wrote from one, because the GLB writer keeps that line. Any other file
   of that name asks first.
+- **A file with no part the reader can read** is refused with the reasons, and no copy is written.
 
-**What is read** (held on four models — two armoured cars, a torpedo boat, a stealth ship: 257 parts, 244,337 visible
-triangles):
+**What is read** (the four sample models — two armoured cars, a torpedo boat, a stealth ship: 257 parts, 244,337
+visible triangles — hold most of it; what only files built by the tests hold is said):
 
 - **Editable Mesh parts:** vertices, triangles, smoothing groups (written as normals), material ids, one UV channel.
-  The UVs are written wherever the file has them, also on a part whose picture is missing, so the picture can be put
-  on later without converting again.
+  The UVs are written wherever the file has them, also on a part whose picture is missing. A plain repeating picture
+  can then be put on later without converting again; a decal cannot (its UVs are fitted to its canvas only when the
+  picture is there).
 - **Each part's place:** position, rotation and scale, parents, the object offset, and the scale's axis system (a part
   scaled along its parent's axes after it was turned). A mirrored part is re-wound so its faces still face out. Axes
   are converted from 3ds Max's Z-up to a GLB's Y-up; units stay as the file has them.
-- **Standard and Multi/Sub-Object materials:** the diffuse colour, the two-sided switch, and the diffuse slot's picture
-  (JPEG, PNG, TGA, BMP). A material id counts the Multi/Sub-Object's slots, the empty ones too.
+- **Standard and Multi/Sub-Object materials:** the diffuse colour, the two-sided switch, and the diffuse slot's
+  picture: JPEG and TGA in the samples, PNG and BMP in built files only. A material id counts the Multi/Sub-Object's
+  slots, the empty ones too.
+- **A picture's own alpha** (a PNG's, a 32-bit TGA's) works like a mask: where the picture is not opaque the
+  material's colour shows. That is taken to be 3ds Max's default for a bitmap ("Image Alpha"), and it is what the
+  torpedo boat's hull needs — its picture is a render of the hull's side with everything around it transparent and
+  black, and 64 % of the surface that uses the material lands on those pixels. It was **not checked against 3ds Max**;
+  the report names every picture it applies to, with the share of the picture that is not opaque.
 - **Where pictures are looked for:** beside the `.max`, then in every folder directly under it, then one folder up. A
   picture taken from another folder than the file's own is named in the report.
 - **Decals:** a picture behind a mask, or one with tiling switched off, is shown once in 3ds Max with the plain colour
   around it. The reader composes it onto a larger canvas of that colour and scales the UVs to match, so nothing
   downstream has to honour a sampler setting. The canvas holds at most four pictures to each side and 8,192 pixels;
-  faces that reach further are held at its edge, which draws the decal larger on them, and the report says so. A map
-  below 100 % amount is mixed with the colour; a map's own offset and tiling are folded into the UVs.
+  faces that reach further are held at its edge, which draws the decal larger on them, and the report says so.
+- **A map's amount, offset and tiling:** a map below 100 % is mixed with the colour. Offset and tiling are folded into
+  the UVs by the documented rule, which **no sample confirms** (one material of the Rolls-Royce uses it); the report
+  asks you to check each such material. A map's angle is not applied, and a mirrored map is written as plain tiling;
+  both are named.
 
-**What is not read, and named in the report when a file has it:**
+**What is not read.**
 
-- **Modifiers.** A `.max` stores the base object and each modifier's settings, not the result; only 3ds Max can evaluate
-  them. The part is read as it was before the modifier. A Skin is a modifier and is counted with the others.
-- **Parametric objects** (Box, Cylinder, …): stored as their parameters, not as a mesh.
-- **Editable Poly**, and transform controllers other than Position/Rotation/Scale with Bezier position, TCB rotation
-  and Bezier scale: no sample file yet to hold a reader to. A list controller gives its first entry; a list of more
-  than one entry is named.
-- **A part that could not be placed** (its own controller, or one of a node above it, is not read): the report opens
-  with a WARNING that counts them.
-- **Every map slot but diffuse,** by slot. An opacity map is the one that changes the shape the eye sees — it cuts
-  holes in 3ds Max, here the faces are written whole — and is named in those words (two materials of the Rolls-Royce
-  have one). **Procedural maps; a picture's own alpha channel; a transparent material** (written opaque).
-- **Lights, cameras and helpers** are counted by class.
+- **Named in the report, part by part or material by material:**
+  - **Modifiers** (the count and the parts). A `.max` stores the base object and each modifier's settings, not the
+    result; only 3ds Max can evaluate them. The part is read as it was before the modifier. A Skin is a modifier and
+    is counted with the others.
+  - **Parametric objects** (Box, Cylinder, …): stored as their parameters, not as a mesh.
+  - **Editable Poly:** no sample file yet to hold a reader to.
+  - **Parts that may stand in the wrong place:** a part whose own controller, or that of the nearest node above it,
+    is not read. The report opens with a WARNING that counts them. A list controller gives its first entry; a list
+    of more than one entry is counted here too.
+  - **Maps in every slot but diffuse,** by slot. An opacity map is the one that changes the shape the eye sees — it
+    cuts holes in 3ds Max, here the faces are written whole — and is named in those words (two materials of the
+    Rolls-Royce have one).
+  - **Procedural maps; a transparent material** (written opaque); **parts without a material; UVs that could not be
+    read.**
+- **Counted only:** hidden faces (left out), and lights, cameras and helpers by class.
+- **Not detected, so the report cannot say it:**
+  - **Animation.** A part stands where the value stored in each of its controllers puts it; whether a controller also
+    holds keys is not looked at.
+  - **Whether an object is hidden.** Hidden faces are left out; a hidden object is converted like any other.
+  - **UV channels beyond the first, and vertex colours.**
 - A node keeps its name, its parent and the **place** of its pivot, not its rotation or scale: a part's vertices are
   written in world axes relative to that pivot.
 
-**Not read and not detected, so the report cannot name it: animation.** A part stands where the value stored in each of
-its controllers puts it; whether a controller also holds keys is not looked at.
+**Which controllers are read:** a Position/Rotation/Scale controller whose three parts store their value in the chunk
+the samples use (Bezier position, TCB rotation and Bezier scale there). A controller of another class is expected to end
+in the WARNING above; no file has shown that yet.
+
+**Limits** (a file past one is refused, with the limit named): the file 1 GB; a stream 2,000,000 chunks; a packed
+stream 200 times its packed size once that is more than 64 MB; a TGA or BMP picture 64 megapixels.
 
 **Tested on:** all four files come from the 3ds Max 2/3 generation. A file of a newer version may differ in three
 ways, none of them seen in a real file here:
 
 - **Packed streams** (gzip): unpacked. Exercised by files the tests build, and in the review of 2026-11-21 by two of
-  the sample files rewritten with Windows' own compound-file writer (packed, with 4,096-byte sectors, and with an
-  allocation table past the header's 109 entries).
-- **Other controller classes** (Position XYZ, Euler XYZ): not read. Such a file converts with its parts unplaced, and
-  the report opens with the WARNING above.
-- **Editable Poly** instead of Editable Mesh: not read; the parts are named.
+  the sample files rewritten with Windows' own compound-file writer: packed, with 4,096-byte sectors, and — in
+  512-byte sectors — with an allocation table past the header's 109 entries.
+- **Other controller classes** (Position XYZ, Euler XYZ): expected to end in the WARNING, with the parts unplaced.
+- **Editable Poly** instead of Editable Mesh: not read. If no part of the file is an Editable Mesh the file is
+  refused; the refusal names the first six parts.
 
 Collapse the model to Editable Mesh in 3ds Max before saving when you can.
 
 **Checks:** `tools/max_drill.sh` and, inside a Unity editor, `tools/max_unity_drill.sh` (see [Testing.md](Testing.md)).
 **Format sources:** the files themselves, read with a Python probe first, and the public descriptions of the format; two
-open-source readers served as references for the chunk ids — the Blender extension `io_scene_max` (GPL) and Ryzom
-Core's `pipeline_max` (AGPL). No code of theirs is in HAF, which is MIT.
+open-source readers served as references for the chunk ids — `io_scene_max`, an importer for Blender (GPL), and Ryzom
+Core's `pipeline_max` (AGPL). Neither was run and neither's code was copied; HAF is MIT.
 
 ## The injection-axis tools
 
