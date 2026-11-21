@@ -1826,11 +1826,13 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   only planned when something is added, and research is paid into the queue without looking at the lock.
 - **The tech screen's mark covers the tech screen only** (added 2026-11-21, `Hk_TechRequireAllMark`): the node's title
   and its tooltip. The search results, the research widget outside the tech screen and the "technology researched"
-  notification show the plain title. The tooltip line is English unless `TechRequireAllTooltip` is set. The mark shows
-  after the first research update of the process (the list's census publishes what to mark). Seen in the game the
-  same day: a text mark (`&`) in front of the title and the tooltip line with the prerequisites' titles; the game's
-  inline symbols render inside the tooltip, and its font has `&` and `»` but shows `?` for `⋀` and `⇉`. **Not yet
-  seen:** the default mark, the `[SharedProject]` symbol, in the TITLE label (it was seen in the tooltip only).
+  notification show the plain title. The tooltip line is English unless `TechRequireAllTooltip` and
+  `TechRequireAllTooltipMany` are set. The mark shows after the first research update of the process (the list's census
+  publishes what to mark). Seen in the game the same day, on World-Wide Web: the `[SharedProject]` symbol in front of
+  the title (the user: "the icon looks good") and a tooltip line with the prerequisites' titles; the game's font has
+  `&` and `»` but shows `?` for `⋀` and `⇉`. The wording was then changed at the user's request to *Requires both A
+  and B*, in italics. **Not seen in a game:** the three-or-more wording (no listed technology has three), and Masonry,
+  whose two prerequisites have no title in the editor's Tech Requires All window (the game's own titles are used here).
 - **The planner walks up to 32 levels where the game stops at 5** (`TryFillParentTechnologiesToCompleteBefore`), in a
   tree that holds a listed technology. Deliberate; noted because it is a difference from the game.
 - **The new window depends on a local change to the Tech Tree viewer.** `TechRequireAllWindow` reuses the viewer's

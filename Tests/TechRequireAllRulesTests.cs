@@ -41,13 +41,28 @@ namespace HumankindAssetFramework.Tests
         [Fact]
         public void TheTooltipLineNamesEveryPrerequisiteAndSurvivesAStrayBrace()
         {
-            Assert.Equal("Requires ALL of: Carpentry, City Defense", R.TooltipLine(R.DefaultTooltip, new[] { "Carpentry", "City Defense" }));
-            Assert.Equal("Needs A, B, C.", R.TooltipLine("Needs {0}.", new[] { "A", "B", "C" }));
-            Assert.Equal("{ A, B {1}", R.TooltipLine("{ {0} {1}", new[] { "A", "B" }));   // string.Format would throw here
-            Assert.Equal("", R.TooltipLine("", new[] { "A", "B" }));
-            Assert.Equal("", R.TooltipLine(null, new[] { "A", "B" }));
-            Assert.Equal("", R.TooltipLine(R.DefaultTooltip, new[] { "A" }));   // one prerequisite: the rule changes nothing
-            Assert.Equal("", R.TooltipLine(R.DefaultTooltip, null));
+            // the user's wording (2026-11-21): "Requires both Multimedia Computer and Ethernet", in italics
+            Assert.Equal("<i>Requires both Multimedia Computer and Ethernet</i>",
+                         R.TooltipLine(R.DefaultTooltip, R.DefaultTooltipMany, new[] { "Multimedia Computer", "Ethernet" }));
+            // "both" is wrong for three: the other format, the last one joined by "and"
+            Assert.Equal("<i>Requires all of A, B and C</i>", R.TooltipLine(R.DefaultTooltip, R.DefaultTooltipMany, new[] { "A", "B", "C" }));
+            Assert.Equal("<i>Requires all of A, B, C and D</i>", R.TooltipLine(R.DefaultTooltip, R.DefaultTooltipMany, new[] { "A", "B", "C", "D" }));
+            // each count uses its own format
+            Assert.Equal("two: A+B", R.TooltipLine("two: {0}+{1}", "many: {0}+{1}", new[] { "A", "B" }));
+            Assert.Equal("many: A, B+C", R.TooltipLine("two: {0}+{1}", "many: {0}+{1}", new[] { "A", "B", "C" }));
+            // a format without {1} must not drop the last prerequisite: the whole list goes into {0}
+            Assert.Equal("Needs A, B, C.", R.TooltipLine("unused", "Needs {0}.", new[] { "A", "B", "C" }));
+            Assert.Equal("Requires ALL of: A, B", R.TooltipLine("Requires ALL of: {0}", "unused", new[] { "A", "B" }));
+            // string.Format would throw on these; and a title that holds a slot is not filled in a second time
+            Assert.Equal("{ A {2} B }", R.TooltipLine("{ {0} {2} {1} }", "unused", new[] { "A", "B" }));
+            Assert.Equal("{1} then B", R.TooltipLine("{0} then {1}", "unused", new[] { "{1}", "B" }));
+            Assert.Equal("ends {0", R.TooltipLine("ends {0", "unused", new[] { "A", "B" }));
+            // no format, or fewer than two prerequisites (the rule changes nothing then): no line
+            Assert.Equal("", R.TooltipLine("", R.DefaultTooltipMany, new[] { "A", "B" }));
+            Assert.Equal("", R.TooltipLine(null, R.DefaultTooltipMany, new[] { "A", "B" }));
+            Assert.Equal("", R.TooltipLine(R.DefaultTooltip, "", new[] { "A", "B", "C" }));
+            Assert.Equal("", R.TooltipLine(R.DefaultTooltip, R.DefaultTooltipMany, new[] { "A" }));
+            Assert.Equal("", R.TooltipLine(R.DefaultTooltip, R.DefaultTooltipMany, null));
         }
 
         [Fact]

@@ -12,11 +12,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 - **The tech screen marks a technology that needs ALL its prerequisites (2026-11-21).** A technology in the Tech
   Requires All list now carries a mark in front of its title on the tech screen, and its tooltip ends with a line that
-  names the prerequisites it waits for (`Requires ALL of: Multimedia Computer, Ethernet`). One display-only hook on
+  names the prerequisites it waits for, in italics: *Requires both Multimedia Computer and Ethernet*, or *Requires all
+  of A, B and C* for three or more. One display-only hook on
   `TechnologyItem.RefreshTooltips` (main thread; the first HAF code that writes game UI); the prerequisite titles are
-  the ones the screen itself resolved. Both texts are config: `[Technologies] TechRequireAllMark` (default `[SharedProject]`, the game's branching symbol; the
-  game's text markup works, so an inline symbol or a colour can be used) and `TechRequireAllTooltip`; empty switches
-  either off. The rule itself was seen in a game for the first time the same day (one listed technology on a
+  the ones the screen itself resolved. The texts are config: `[Technologies] TechRequireAllMark` (default
+  `[SharedProject]`, the game's branching symbol; the game's text markup works, so an inline symbol or a colour can be
+  used), `TechRequireAllTooltip` (two prerequisites) and `TechRequireAllTooltipMany` (three or more); empty switches
+  any of them off. The symbol and the wording were chosen by the user in the game. The rule itself was seen in a game for the first time the same day (one listed technology on a
   turn-180 save: it stayed locked on one prerequisite, and clicking it queued the missing chain in front). Checked: 3
   more rule tests (26), 7 more drill checks with a list (32) and 3 more without (12), the game's own
   `RefreshTooltips` running on items built without Unity. Not checked by any test: how the mark looks (no pixel is

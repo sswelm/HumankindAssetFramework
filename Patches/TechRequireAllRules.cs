@@ -69,8 +69,13 @@ namespace HumankindAssetFramework
         // eleven candidates shown in a tooltip; of the plain characters tried, the game's font has & and » but not ⋀ or ⇉.
         /// <summary>Default mark. Plain text or the game's own text markup: an inline symbol "[Name]", a colour "&lt;c=RRGGBB&gt;..&lt;/c&gt;".</summary>
         internal const string DefaultMark = "[SharedProject]";
-        /// <summary>Default tooltip line; {0} is the list of prerequisite titles.</summary>
-        internal const string DefaultTooltip = "Requires ALL of: {0}";
+        /// <summary>
+        /// Default tooltip lines, for exactly two prerequisites and for three or more ("both" is wrong for three).
+        /// {0} = every prerequisite title but the last, comma-separated; {1} = the last. The wording and the italics
+        /// are the user's, from the first look in the game (2026-11-21); the game's own texts use &lt;i&gt; too.
+        /// </summary>
+        internal const string DefaultTooltip = "<i>Requires both {0} and {1}</i>";
+        internal const string DefaultTooltipMany = "<i>Requires all of {0} and {1}</i>";
 
         /// <summary>The title the tech screen shows: the mark, a space, the game's title. No mark = the game's title.</summary>
         internal static string MarkedTitle(string mark, string title)
@@ -82,14 +87,31 @@ namespace HumankindAssetFramework
 
         /// <summary>
         /// The tooltip's line, or "" for none (no format, or fewer than two prerequisites: the rule changes nothing
-        /// then). A plain replace, not string.Format: the format is a person's config text, and a stray brace in it
-        /// must not throw on the UI thread.
+        /// then). <paramref name="formatTwo"/> is used for exactly two prerequisites, <paramref name="formatMany"/>
+        /// for more. {0} = every title but the last, comma-separated; {1} = the last. A format WITHOUT {1} gets the
+        /// whole list in {0}, so no prerequisite is ever left out of the sentence. One pass by hand, not
+        /// string.Format: the format is a person's config text, a stray brace in it must not throw on the UI thread,
+        /// and a title that itself holds "{1}" must not be filled in a second time.
         /// </summary>
-        internal static string TooltipLine(string format, IList<string> prerequisiteTitles)
+        internal static string TooltipLine(string formatTwo, string formatMany, IList<string> prerequisiteTitles)
         {
-            format = (format ?? "").Trim();
-            if (format.Length == 0 || prerequisiteTitles == null || prerequisiteTitles.Count < 2) return "";
-            return format.Replace("{0}", string.Join(", ", prerequisiteTitles));
+            if (prerequisiteTitles == null || prerequisiteTitles.Count < 2) return "";
+            int n = prerequisiteTitles.Count;
+            string format = ((n == 2 ? formatTwo : formatMany) ?? "").Trim();
+            if (format.Length == 0) return "";
+            bool namesLast = format.IndexOf("{1}", StringComparison.Ordinal) >= 0;
+            var head = new List<string>(n);
+            for (int i = 0; i < (namesLast ? n - 1 : n); i++) head.Add(prerequisiteTitles[i] ?? "");
+            string first = string.Join(", ", head.ToArray()), last = prerequisiteTitles[n - 1] ?? "";
+            var sb = new System.Text.StringBuilder(format.Length + first.Length + last.Length);
+            for (int i = 0; i < format.Length; i++)
+            {
+                bool slot = format[i] == '{' && i + 2 < format.Length && format[i + 2] == '}' && (format[i + 1] == '0' || format[i + 1] == '1');
+                if (!slot) { sb.Append(format[i]); continue; }
+                sb.Append(format[i + 1] == '0' ? first : last);
+                i += 2;
+            }
+            return sb.ToString();
         }
 
         /// <summary>

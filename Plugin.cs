@@ -155,7 +155,8 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<bool>   FormationReinstantiateOn; // FORMATION axis: after apply, re-instantiate already-spawned units of a repointed type so they reach the new pawn count (fixes the load-race undercount)
         internal static ConfigEntry<bool>   TechRequireAllOn;     // TECHNOLOGIES: haf_tech_requires_all.json (Tech Requires All window) — listed technologies unlock only when ALL their prerequisites are completed
         internal static ConfigEntry<string> TechRequireAllMark;    // TECHNOLOGIES: the tech screen's mark in front of a listed technology's title (display only)
-        internal static ConfigEntry<string> TechRequireAllTooltip; // TECHNOLOGIES: the line added to a listed technology's tooltip, {0} = its prerequisites (display only)
+        internal static ConfigEntry<string> TechRequireAllTooltip; // TECHNOLOGIES: the line added to a listed technology's tooltip when it has two prerequisites, {0} and {1} (display only)
+        internal static ConfigEntry<string> TechRequireAllTooltipMany; // TECHNOLOGIES: the same line for three or more prerequisites, {0} = all but the last, {1} = the last (display only)
 
         private bool show;
         private Rect winRect = new Rect(60, 60, 520, 420);
@@ -494,8 +495,12 @@ namespace HumankindAssetFramework
                                   "text or the game's own text markup: an inline symbol such as [Technology], a colour as <c=FFCC66>&</c>. " +
                                   "Empty = no mark. Display only.");
             TechRequireAllTooltip = Config.Bind("Technologies", "TechRequireAllTooltip", TechRequireAllRules.DefaultTooltip,
-                                  "The line added to that technology's tooltip on the tech screen; {0} is replaced by the titles of its " +
-                                  "prerequisites. Empty = no line. Display only.");
+                                  "The line added to the tooltip of such a technology on the tech screen when it has exactly TWO " +
+                                  "prerequisites: {0} is the first one's title, {1} the second's. The game's text markup works (<i>, <b>, " +
+                                  "<c=RRGGBB>). Empty = no line. Display only.");
+            TechRequireAllTooltipMany = Config.Bind("Technologies", "TechRequireAllTooltipMany", TechRequireAllRules.DefaultTooltipMany,
+                                  "The same line for a technology with THREE OR MORE prerequisites: {0} is every title but the last, " +
+                                  "comma-separated, {1} the last. Without {1} the whole list goes into {0}. Empty = no line. Display only.");
 
             // Patch each hook independently so a single missing Amplitude target (a game update renaming one type) only
             // disables THAT hook -- instead of a null TargetMethod throwing out of PatchAll and failing the whole plugin.

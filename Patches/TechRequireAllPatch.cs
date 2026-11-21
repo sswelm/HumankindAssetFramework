@@ -392,6 +392,7 @@ namespace HumankindAssetFramework
 
         internal static string Mark => Plugin.TechRequireAllMark != null ? Plugin.TechRequireAllMark.Value : TechRequireAllRules.DefaultMark;
         internal static string Tooltip => Plugin.TechRequireAllTooltip != null ? Plugin.TechRequireAllTooltip.Value : TechRequireAllRules.DefaultTooltip;
+        internal static string TooltipMany => Plugin.TechRequireAllTooltipMany != null ? Plugin.TechRequireAllTooltipMany.Value : TechRequireAllRules.DefaultTooltipMany;
 
         /// <summary>Called after the game refreshed one tech item's tooltip (it has just set the plain title and description).</summary>
         internal static void Apply(object item)
@@ -437,7 +438,7 @@ namespace HumankindAssetFramework
             var shown = new string[prerequisites.Length];
             for (int k = 0; k < shown.Length; k++)
                 shown[k] = titles.TryGetValue(prerequisites[k], out var t) ? t : prerequisites[k];
-            string line = TechRequireAllRules.TooltipLine(Tooltip, shown);
+            string line = TechRequireAllRules.TooltipLine(Tooltip, TooltipMany, shown);
             if (line.Length == 0) return;
             string description = b.Description.GetValue(target) as string;
             string with = TechRequireAllRules.WithTooltipLine(description, line);
