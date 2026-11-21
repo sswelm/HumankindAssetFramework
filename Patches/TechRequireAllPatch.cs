@@ -50,6 +50,12 @@ namespace HumankindAssetFramework
         [ProcessLived("the list from haf_tech_requires_all.json: read once, replaced whole, never mutated")]
         static volatile HashSet<string> listed = new HashSet<string>(StringComparer.Ordinal);
         static Bind bind;   // resolved under `gate`, read-only afterwards
+        // What the tech screen's hint reads (Hk_TechRequireAllMark, MAIN thread): each listed technology that has two
+        // or more prerequisites -> their names. Built by the first census on the simulation thread and published
+        // whole; null until then, so a screen opened before the first research update shows no mark.
+        [ProcessLived("listed technology -> prerequisite names: published whole by the first census, never mutated")]
+        static volatile Dictionary<string, string[]> hinted;
+        internal static Dictionary<string, string[]> Hinted => hinted;
 
         internal static bool Active
         {
@@ -183,14 +189,20 @@ namespace HumankindAssetFramework
             var v = new View(b, dept);
             var seen = new HashSet<string>(StringComparer.Ordinal);
             var single = new List<string>();
+            var hints = new Dictionary<string, string[]>(StringComparer.Ordinal);
             for (int i = 0; i < v.Count; i++)
             {
                 var def = v.Def(i);
                 string name = b.NameOf(def);
                 if (!listed.Contains(name)) continue;
                 seen.Add(name);
-                if ((b.NamesOf(def)?.Length ?? 0) < 2) single.Add(name);
+                var prerequisites = b.NamesOf(def);
+                if ((prerequisites?.Length ?? 0) < 2) { single.Add(name); continue; }
+                var names = new string[prerequisites.Length];
+                for (int k = 0; k < names.Length; k++) names[k] = prerequisites.GetValue(k)?.ToString() ?? "";
+                hints[name] = names;
             }
+            hinted = hints;
             var missing = listed.Where(n => !seen.Contains(n)).OrderBy(n => n, StringComparer.Ordinal).ToArray();
             if (missing.Length > 0) Plugin.Log.LogWarning($"[TechAll] {missing.Length} listed name(s) are not technologies in this game (no effect): {string.Join(", ", missing)}");
             if (single.Count > 0) Plugin.Log.LogWarning($"[TechAll] {single.Count} listed technolog{(single.Count == 1 ? "y has" : "ies have")} fewer than two prerequisites (no effect): {string.Join(", ", single)}");
@@ -337,6 +349,119 @@ namespace HumankindAssetFramework
                 Plugin.LogOnceWarning("techall:prefix:" + ex.GetType().Name, "[TechAll] queue planning failed — the game's own queueing runs (first occurrence): " + ex);
                 return true;
             }
+        }
+    }
+
+    // The tech screen's hint for a listed technology: a mark in front of its title and a line in its tooltip that
+    // names the prerequisites it waits for. Presentation only, MAIN thread, and the first HAF code that writes game UI.
+    // The titles of the prerequisites are the ones the screen itself resolved (each item's own Title), so no
+    // localisation is looked up here; until a prerequisite's item has been seen, its internal name stands in.
+    internal static class TechRequireAllHint
+    {
+        sealed class UiBind
+        {
+            public readonly PropertyInfo DefinitionName, Title, Text;
+            public readonly FieldInfo Label, Target, Description;
+            public UiBind(Type item)
+            {
+                DefinitionName = P(item, "TechnologyDefinitionName");
+                Title = P(item, "Title");
+                Label = F(item, "title");
+                Text = P(Label.FieldType, "Text");
+                Target = F(item, "tooltipTarget");
+                Description = F(Target.FieldType, "Description");
+                if (Text.PropertyType != typeof(string) || Description.FieldType != typeof(string) || Title.PropertyType != typeof(string))
+                    throw new InvalidOperationException("the tech item's title, label text or tooltip description is no longer a string");
+            }
+            static FieldInfo F(Type t, string name) =>
+                AccessTools.Field(t, name) ?? throw new InvalidOperationException($"{t.Name}.{name} not found");
+            static PropertyInfo P(Type t, string name) =>
+                AccessTools.Property(t, name) ?? throw new InvalidOperationException($"{t.Name}.{name} not found");
+        }
+
+        [MainThread("the tech screen's refresh")] [ProcessLived("the tech item's members, resolved once")]
+        static UiBind ui;
+        [MainThread("the tech screen's refresh")] [ProcessLived("set when the tech item's members did not resolve: the hint stays off, said once")]
+        static bool unusable;
+        [MainThread("the tech screen's refresh")] [ProcessLived("the hint map `wanted` was built from")]
+        static Dictionary<string, string[]> wantedFor;
+        [MainThread("the tech screen's refresh")] [ProcessLived("every prerequisite name of a hinted technology")]
+        static HashSet<string> wanted = new HashSet<string>(StringComparer.Ordinal);
+        [MainThread("the tech screen's refresh")] [ProcessLived("prerequisite name -> the title its own tech item showed last")]
+        static readonly Dictionary<string, string> titles = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        internal static string Mark => Plugin.TechRequireAllMark != null ? Plugin.TechRequireAllMark.Value : TechRequireAllRules.DefaultMark;
+        internal static string Tooltip => Plugin.TechRequireAllTooltip != null ? Plugin.TechRequireAllTooltip.Value : TechRequireAllRules.DefaultTooltip;
+
+        /// <summary>Called after the game refreshed one tech item's tooltip (it has just set the plain title and description).</summary>
+        internal static void Apply(object item)
+        {
+            var map = TechRequireAll.Hinted;
+            if (unusable || item == null || map == null || map.Count == 0) return;
+            UiBind b = ui;
+            if (b == null)
+            {
+                try { ui = b = new UiBind(item.GetType()); }
+                catch (Exception ex)
+                {
+                    unusable = true;
+                    Plugin.Log.LogWarning("[TechAll] the tech screen's mark is off — the rule itself is not affected: " + ex.Message);
+                    return;
+                }
+            }
+            if (!ReferenceEquals(wantedFor, map))
+            {
+                var all = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var names in map.Values) foreach (var n in names) all.Add(n);
+                wanted = all; wantedFor = map;
+            }
+            string name = b.DefinitionName.GetValue(item, null)?.ToString() ?? "";
+            bool isPrerequisite = wanted.Contains(name);
+            bool isHinted = map.TryGetValue(name, out var prerequisites);
+            if (!isPrerequisite && !isHinted) return;
+            string title = b.Title.GetValue(item, null) as string ?? "";
+            if (isPrerequisite && title.Length > 0) titles[name] = title;
+            if (!isHinted) return;
+
+            string mark = (Mark ?? "").Trim();
+            if (mark.Length > 0)
+            {
+                object label = b.Label.GetValue(item);
+                string marked = TechRequireAllRules.MarkedTitle(mark, title);
+                // only when it differs: setting a label's text makes the game lay it out again
+                if (label != null && !string.Equals(b.Text.GetValue(label, null) as string, marked, StringComparison.Ordinal))
+                    b.Text.SetValue(label, marked, null);
+            }
+            object target = b.Target.GetValue(item);
+            if (target == null) return;
+            var shown = new string[prerequisites.Length];
+            for (int k = 0; k < shown.Length; k++)
+                shown[k] = titles.TryGetValue(prerequisites[k], out var t) ? t : prerequisites[k];
+            string line = TechRequireAllRules.TooltipLine(Tooltip, shown);
+            if (line.Length == 0) return;
+            string description = b.Description.GetValue(target) as string;
+            string with = TechRequireAllRules.WithTooltipLine(description, line);
+            if (!string.Equals(description, with, StringComparison.Ordinal)) b.Description.SetValue(target, with);
+        }
+    }
+
+    [HarmonyPatch] internal static class Hk_TechRequireAllMark
+    {
+        static MethodBase TargetMethod()
+        {
+            var t = GameBinding.TechnologyItem;
+            var m = t != null ? AccessTools.Method(t, "RefreshTooltips") : null;
+            if (m != null) Plugin.Log.LogInfo("[TechAll] hooked TechnologyItem.RefreshTooltips (the tech screen marks a listed technology and its tooltip names what it waits for)");
+            else Plugin.Log.LogWarning("[TechAll] NOT found: TechnologyItem.RefreshTooltips — the tech screen does not mark listed technologies (the rule itself is not affected)");
+            return m;
+        }
+
+        // Runs for every visible tech item on every refresh of the tech screen: without a list it returns at once.
+        static void Postfix(object __instance)
+        {
+            if (!TechRequireAll.Active) return;
+            try { TechRequireAllHint.Apply(__instance); }
+            catch (Exception ex) { Plugin.LogOnceWarning("techall:mark:" + ex.GetType().Name, "[TechAll] marking a tech item failed — the game's own title and tooltip stand (first occurrence): " + ex); }
         }
     }
 

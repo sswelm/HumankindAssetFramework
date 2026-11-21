@@ -63,6 +63,45 @@ namespace HumankindAssetFramework
             return true;
         }
 
+        // ---- the tech screen's hint (2026-11-21): a mark in front of a listed technology's title, a line in its tooltip ----
+
+        /// <summary>Default mark. Plain text or the game's own text markup: an inline symbol "[Name]", a colour "&lt;c=RRGGBB&gt;..&lt;/c&gt;".</summary>
+        internal const string DefaultMark = "&";
+        /// <summary>Default tooltip line; {0} is the list of prerequisite titles.</summary>
+        internal const string DefaultTooltip = "Requires ALL of: {0}";
+
+        /// <summary>The title the tech screen shows: the mark, a space, the game's title. No mark = the game's title.</summary>
+        internal static string MarkedTitle(string mark, string title)
+        {
+            mark = (mark ?? "").Trim();
+            title = title ?? "";
+            return mark.Length == 0 ? title : mark + " " + title;
+        }
+
+        /// <summary>
+        /// The tooltip's line, or "" for none (no format, or fewer than two prerequisites: the rule changes nothing
+        /// then). A plain replace, not string.Format: the format is a person's config text, and a stray brace in it
+        /// must not throw on the UI thread.
+        /// </summary>
+        internal static string TooltipLine(string format, IList<string> prerequisiteTitles)
+        {
+            format = (format ?? "").Trim();
+            if (format.Length == 0 || prerequisiteTitles == null || prerequisiteTitles.Count < 2) return "";
+            return format.Replace("{0}", string.Join(", ", prerequisiteTitles));
+        }
+
+        /// <summary>
+        /// The description with the line as its last line, ONCE: the game rebuilds the description on every refresh,
+        /// and a second pass over one it did not rebuild must not add the line again.
+        /// </summary>
+        internal static string WithTooltipLine(string description, string line)
+        {
+            description = description ?? "";
+            if (string.IsNullOrEmpty(line)) return description;
+            if (description == line || description.EndsWith("\n" + line, StringComparison.Ordinal)) return description;
+            return description.Length == 0 ? line : description + "\n" + line;
+        }
+
         internal sealed class Plan
         {
             public bool Ok = true;             // false: nothing may be queued (Why says what stopped it)

@@ -10,6 +10,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **The tech screen marks a technology that needs ALL its prerequisites (2026-11-21).** A technology in the Tech
+  Requires All list now carries a mark in front of its title on the tech screen, and its tooltip ends with a line that
+  names the prerequisites it waits for (`Requires ALL of: Multimedia Computer, Ethernet`). One display-only hook on
+  `TechnologyItem.RefreshTooltips` (main thread; the first HAF code that writes game UI); the prerequisite titles are
+  the ones the screen itself resolved. Both texts are config: `[Technologies] TechRequireAllMark` (default `&`; the
+  game's text markup works, so an inline symbol or a colour can be used) and `TechRequireAllTooltip`; empty switches
+  either off. The rule itself was seen in a game for the first time the same day (one listed technology on a
+  turn-180 save: it stayed locked on one prerequisite, and clicking it queued the missing chain in front). Checked: 3
+  more rule tests (26), 7 more drill checks with a list (32) and 3 more without (12), the game's own
+  `RefreshTooltips` running on items built without Unity. Not checked by any test: how the mark looks (no pixel is
+  drawn in the drill). Not covered: the search results, the research widget outside the tech screen and notifications
+  show the plain title. The config text of `TechRequireAll` no longer says "nothing in the save".
 - **Technologies can require ALL their prerequisites (2026-11-20).** The game unlocks a technology as soon as any one
   listed prerequisite is researched, and a `TechnologyDefinition` has no field to say otherwise. A new window,
   `Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites`, holds a list of technologies (and only that) for which every

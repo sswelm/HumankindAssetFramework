@@ -526,8 +526,14 @@ windows. **Deep dive:**
   when a locked one is queued (by the player or the AI) it queues **every** missing prerequisite in front of it, where
   the game queues one chain. It changes the simulation, so in multiplayer every player needs the same list;
   `[Technologies] TechRequireAll = false` in the plugin's `.cfg` ignores the file. Not covered: a technology that is
-  already in a saved research queue behind one prerequisite keeps that place, anything that completes a technology
-  outside the research queue, and the tech screen gives no hint that a technology needs all its prerequisites.
+  already in a saved research queue behind one prerequisite keeps that place, and anything that completes a technology
+  outside the research queue.
+  **On the tech screen (2026-11-21)** a listed technology carries a mark in front of its title and its tooltip ends
+  with a line that names the prerequisites it waits for (`Requires ALL of: Multimedia Computer, Ethernet`). Both are
+  display only and set in the plugin's `.cfg`: `[Technologies] TechRequireAllMark` (default `&`; plain text or the
+  game's own text markup, an inline symbol such as `[Technology]` or a colour as `<c=FFCC66>&</c>`; empty = no mark)
+  and `TechRequireAllTooltip` (`{0}` = the prerequisite titles; empty = no line). A listed technology with fewer than
+  two prerequisites gets neither. Only the tech screen's nodes are marked, not the search results or notifications.
   **Saves:** a research queue planned under a list is saved with its ordering constraints. The plugin keeps such a save
   safe whether or not the list is still there; loaded with the plugin **uninstalled**, removing a queued prerequisite
   that two queued branches share can throw in the game's own code. Clear the research queue before uninstalling.

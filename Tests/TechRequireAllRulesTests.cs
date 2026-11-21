@@ -25,6 +25,46 @@ namespace HumankindAssetFramework.Tests
 
         static string Edges(R.Plan p) => string.Join(" ", p.Edges.Select(e => e.Key + ">" + e.Value).OrderBy(s => s, StringComparer.Ordinal));
 
+        // ---- the tech screen's hint ----
+
+        [Fact]
+        public void TheMarkGoesInFrontOfTheTitleAndNoMarkLeavesTheTitleAlone()
+        {
+            Assert.Equal("& Masonry", R.MarkedTitle("&", "Masonry"));
+            Assert.Equal("[Technology] Masonry", R.MarkedTitle("  [Technology] ", "Masonry"));
+            Assert.Equal("Masonry", R.MarkedTitle("", "Masonry"));
+            Assert.Equal("Masonry", R.MarkedTitle("   ", "Masonry"));
+            Assert.Equal("Masonry", R.MarkedTitle(null, "Masonry"));
+            Assert.Equal("&", R.MarkedTitle("&", null).Trim());
+        }
+
+        [Fact]
+        public void TheTooltipLineNamesEveryPrerequisiteAndSurvivesAStrayBrace()
+        {
+            Assert.Equal("Requires ALL of: Carpentry, City Defense", R.TooltipLine(R.DefaultTooltip, new[] { "Carpentry", "City Defense" }));
+            Assert.Equal("Needs A, B, C.", R.TooltipLine("Needs {0}.", new[] { "A", "B", "C" }));
+            Assert.Equal("{ A, B {1}", R.TooltipLine("{ {0} {1}", new[] { "A", "B" }));   // string.Format would throw here
+            Assert.Equal("", R.TooltipLine("", new[] { "A", "B" }));
+            Assert.Equal("", R.TooltipLine(null, new[] { "A", "B" }));
+            Assert.Equal("", R.TooltipLine(R.DefaultTooltip, new[] { "A" }));   // one prerequisite: the rule changes nothing
+            Assert.Equal("", R.TooltipLine(R.DefaultTooltip, null));
+        }
+
+        [Fact]
+        public void TheTooltipLineIsAddedOnce()
+        {
+            string line = "Requires ALL of: A, B";
+            string once = R.WithTooltipLine("Unlocks the web. (1,200 [Science])", line);
+            Assert.Equal("Unlocks the web. (1,200 [Science])\n" + line, once);
+            Assert.Equal(once, R.WithTooltipLine(once, line));
+            Assert.Equal(line, R.WithTooltipLine("", line));
+            Assert.Equal(line, R.WithTooltipLine(null, line));
+            Assert.Equal(line, R.WithTooltipLine(line, line));
+            Assert.Equal("text", R.WithTooltipLine("text", ""));
+            // a description that merely ENDS with the same words is not the line: it still gets its own
+            Assert.Equal("see Requires ALL of: A, B\n" + line, R.WithTooltipLine("see " + line, line));
+        }
+
         // ---- the list file ----
 
         [Fact]
