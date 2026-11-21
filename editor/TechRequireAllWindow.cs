@@ -27,6 +27,7 @@ public class TechRequireAllWindow : EditorWindow
     List<TechTreeData.Node> nodes = new List<TechTreeData.Node>();
     Dictionary<string, TechTreeData.Node> byName = new Dictionary<string, TechTreeData.Node>();
     string treeProblem = "";
+    bool treeStale;   // the Tech Tree viewer saved: read the tree again at the next draw (not a second full build inside its save)
 
     [MenuItem("Tools/HAF/Tech Tree/Requires All Prerequisites")]
     static void Open() => GetWindow<TechRequireAllWindow>("Tech Requires All").minSize = new Vector2(460, 320);
@@ -38,7 +39,7 @@ public class TechRequireAllWindow : EditorWindow
         treeProblem = "";
         try
         {
-            nodes = TechTreeData.Build();
+            nodes = TechTreeWindow.BuildTreeImpl(TechTreeData.DefaultModPath);   // the viewer's seam: one tree source for both windows
             byName = nodes.GroupBy(n => n.Name).ToDictionary(g => g.Key, g => g.First());
             if (nodes.Count == 0) treeProblem = "No technologies were found in this project, so entries cannot be checked or picked from a list.";
         }
@@ -76,8 +77,8 @@ public class TechRequireAllWindow : EditorWindow
     {
         foreach (var w in Resources.FindObjectsOfTypeAll<TechRequireAllWindow>())
         {
-            w.LoadTree();
-            if (!w.Dirty) w.Reload();
+            w.treeStale = true;
+            if (!w.Dirty) { w.Reload(); w.status = "The Tech Tree viewer saved: " + w.status; }
             w.Repaint();
         }
     }
@@ -86,6 +87,7 @@ public class TechRequireAllWindow : EditorWindow
 
     void OnGUI()
     {
+        if (treeStale && Event.current.type == EventType.Layout) { treeStale = false; LoadTree(); }
         EditorGUILayout.HelpBox(
             "A technology in this list unlocks only when ALL its prerequisites are researched. Every other technology keeps the " +
             "game's rule: any ONE prerequisite unlocks it.\n\n" +

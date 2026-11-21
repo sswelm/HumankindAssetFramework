@@ -17,7 +17,12 @@ using UnityEngine;
 ///   2. Title (%key) -> processed localization collection -> CompactedNodes[0].TextValue
 ///   3. tech -> TechnologyPrerequisite.SerializableTechnologyNames -> prereq names (OR)
 ///
-/// Run "Tools/Tech Tree/Dump Data" to verify rows before any canvas is built.
+/// Run "Tools/HAF/Tech Tree/Dump Data" to verify rows before any canvas is built.
+///
+/// LOCAL CHANGES to this file (it came with the viewer from another modder's tool), 2026-11-21: Node.ArtPath /
+/// ArtNamed / ArtGuid / BaseVisibility, AmplitudeGuidToUnity, ArtPathOf, the Visibility helpers (OnTechScreen,
+/// VisibilityName, ReadVisibility, WriteVisibility), and EnsureWritable remembering its copy and refusing to copy
+/// over an existing asset.
 /// </summary>
 public static class TechTreeData
 {
@@ -61,9 +66,10 @@ public static class TechTreeData
         // TechnologyDefinition.Visibility as its number (a flags enum: Always = -1, Never = 0, TechnologyScreen = 1,
         // ControlBannerTechnologyPopup = 2). Two different things hang on it in the game (decompiled, not run):
         //  - Never (0) switches the technology OFF. DepartmentOfScience.CreateTechnologies adds a definition to an
-        //    empire only when Visibility != 0, so a Never technology cannot be researched, traded or granted, and a
-        //    technology that names only it as a prerequisite never unlocks. Scenarios use Never to disable a
-        //    technology; the game's debug window lists such technologies as "obsolete".
+        //    empire only when Visibility != 0, so by the game's own rules a Never technology cannot be researched,
+        //    traded or granted, and a technology that names only it as a prerequisite never unlocks. Scenarios use
+        //    Never to disable a technology; the game's debug window lists such technologies as "obsolete" (and can
+        //    still unlock one by hand).
         //  - Without the TechnologyScreen bit (1) the technology gets no card on the tech screen.
         // LOCAL CHANGE 2026-11-21.
         public int BaseVisibility = VisibilityAlways;
@@ -173,8 +179,8 @@ public static class TechTreeData
     /// <summary>
     /// An Amplitude.Framework.Guid (four ints, as a UIMapper stores an image reference) as the Unity asset GUID it
     /// stands for: the bytes of each int from low to high, each byte with its LOW hex digit first. This is what the
-    /// game's own Guid.ToString() prints (checked against Amplitude.Framework.dll, 2026-11-21), and 124 of the 213
-    /// card images of the ENC project resolve to a PNG with it.
+    /// game's own Guid.ToString() prints (checked against Amplitude.Framework.dll, 2026-11-21: 200,400 inputs by a
+    /// reviewer). Of the ENC project's 213 mappers 124 name a PNG of the project with it and 89 one of the game's own.
     /// </summary>
     internal static string AmplitudeGuidToUnity(int a, int b, int c, int d)
     {
@@ -334,6 +340,15 @@ public static class TechTreeData
             EnsureFolder(modPath);
             string src = AssetDatabase.GetAssetPath(refAsset);
             string dst = $"{modPath}/{refAsset.name}.asset";
+            // Never over an asset that is already there. A standalone mapper and its definition have the same name,
+            // so the second copy replaced the first: the position was reported saved and was gone (review 2026-11-21,
+            // executed). The edit stays staged; the two kinds need different folders, which is the modder's choice.
+            if (AssetDatabase.LoadMainAssetAtPath(dst) != null || System.IO.File.Exists(dst))
+            {
+                Debug.LogWarning($"[TechTree] {refAsset.name}: not copied into \"{modPath}\" — '{dst}' exists already (a standalone mapper and its definition share a name). " +
+                                 "Move one of the two into a collection or another folder, then save again; the edit is KEPT staged.");
+                return null;
+            }
             if (!AssetDatabase.CopyAsset(src, dst))
             { Debug.LogError($"[TechTree] CopyAsset failed: {src} -> {dst}"); return null; }
             AssetDatabase.ImportAsset(dst);

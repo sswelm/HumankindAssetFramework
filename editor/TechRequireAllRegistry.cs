@@ -49,6 +49,9 @@ public static class TechRequireAllRegistry
     /// <summary>The last Load, by whichever window, could not use the list (see RegistryLoadVerdict.Failed).</summary>
     public static bool LastLoadFailed => Store.LastLoadFailed;
 
+    /// <summary>The last Load found the list changed outside the editor, with the game still reading an older copy.</summary>
+    public static bool LastLoadStale => Store.LastLoadStale;
+
     /// <summary>Trimmed, without blanks or duplicates, sorted by name: the form the file is written in.</summary>
     public static List<string> Clean(IEnumerable<string> names)
     {

@@ -9,14 +9,15 @@ using UnityEngine;
 /// Tech-tree viewer/editor. Edit mode adds position drag (snap to grid) and prereq
 /// removal, staged in an in-memory overlay and committed on Save. Save materializes
 /// each change: edit-in-place when the asset is under Databases/, copy-on-write into
-/// New Additions when it's reference-only (TechTreeData.EnsureWritable). The +prereq
-/// picker (step 4) and new-tech creation (step 5) are the remaining pieces.
+/// New Additions when it's reference-only (TechTreeData.EnsureWritable). New-tech
+/// creation (step 5) is the remaining piece.
 ///
-/// LOCAL CHANGES to this file (it came from another modder's tool, see the note at TechPickerDropdown), 2026-11-21:
+/// LOCAL CHANGES to this file (it came from another modder's tool, see the note at TechPickerDropdown), 2026-11-21.
+/// The list names what a user or a maintainer meets; the full set is the file's diff since 2026-08-24.
 ///  - The prerequisite RULE per technology. The game unlocks a technology on ANY ONE prerequisite (OR); HAF's Tech
 ///    Requires All list (TechRequireAllRegistry, applied by the plugin) names the ones that wait for ALL (AND). The
 ///    side strip shows which rule the selected technology has and switches it; the switch is staged like every other
-///    edit and written to that list on Save. A node under the AND rule carries "AND" in its lower left corner.
+///    edit and written to that list on Save. A card under the AND rule carries "AND" under its title.
 ///  - Scroll bars under and beside the canvas. They move the same pan as the middle-mouse drag.
 ///  - X and Y fields in the side strip: the selected node's position as numbers, staged like a drag.
 ///  - The selection is kept by name across a reload (it was the node object from before it).
@@ -28,6 +29,12 @@ using UnityEngine;
 ///    proportions and spacing, and links routed by the game's own rule. See the GEOMETRY block and LinkPath.
 ///    A card shows its artwork: the project's own image file, or one of the game's own out of the game's UI bundle
 ///    (TechTreeData.ArtPathOf, TechTreeVanillaArt, ArtRect).
+///  - Editing is ON when the window opens and the choice is remembered (EditorPrefs "TechTree.EditMode").
+///  - Save writes part by part (CommitChanges), says what each outcome guarantees (RuleNote), and never writes a
+///    technology that is not in the tree.
+///  - Frame All may zoom below the wheel's floor (MIN_ZOOM); a drag starts after a few pixels and not on a card
+///    that is only a pixel or two high.
+///  - Seams and hooks for the list's window and the drill: BuildTreeImpl, RepaintOpenWindows.
 /// </summary>
 public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 {
@@ -55,6 +62,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     }
     [SerializeField] List<PendingRecord> _pendingRecords = new List<PendingRecord>();
     [SerializeField] string _selectedName;   // the selection across a script reload
+    [SerializeField] string _stagedSession;  // the editor session the staged edits belong to (see OnEnable)
 
     void ISerializationCallbackReceiver.OnBeforeSerialize()
     {
@@ -100,6 +108,8 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     bool _rulesUnreadable;    // the list could not be read: the rule is not shown and cannot be switched
     bool _rulesStoreFailed;   // TechRequireAllRegistry.LastLoadFailed when _requireAll was read
     bool _rulesStale;         // the list changed outside the editor and the game still reads an older copy of it
+    bool _rulesStoreStale;    // TechRequireAllRegistry.LastLoadStale when _requireAll was read
+    bool _dropFocus;          // a reload changed values under a possibly focused field: drop the focus at the next draw
     string _rulesVersion;     // TechRequireAllRegistry.LoadedVersion when _requireAll was read (null after a failed read)
 
     // mod path (editable, persisted)
@@ -113,8 +123,10 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     // is remembered. OFF is for looking only: a click on the canvas then never moves a card.
     bool _editMode = true;
     const string EditModeKey = "TechTree.EditMode";
+    const string SessionKey = "TechTree.StagedInThisSession";
 
     // position-drag state (edit mode)
+    bool _dragMoved;          // the mouse has moved far enough for this click to be a drag
     TechTreeData.Node _dragNode;
     Vector2 _dragStartMouse;
     int _dragStartX, _dragStartY;
@@ -128,18 +140,27 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 
     // ── GEOMETRY of the game's tech screen ────────────────────────────────────
     // The game puts a card at (TechTreeX * columnsSize, TechTreeY * rowsSize) (TechnologyScreen) and routes the links
-    // between the cards' rectangles (TechnologyScreen_Links). The two sizes and the card's own size are serialized in
-    // the game's prefabs, not in its code, so they are MEASURED: from a screenshot of the game's tech screen (ENC,
-    // 2026-11-21) with six cards whose TechTreeX / Y are known. Six columns were 720 px, 26 rows 927 px, a card
-    // 502 x 187 px. Brought to a card width of 251: only the ratios matter here.
-    const float COL = 60f, ROW = 17.8f;            // one step of TechTreeX / TechTreeY
-    const float NODE_W = 251f, NODE_H = 93.5f;     // a card: 4.18 columns wide, 5.25 rows high
-    const float LINK_CURVE = 12f;                  // radius of a link's elbow (the game's value is serialized too: a guess)
+    // between the cards' rectangles (TechnologyScreen_Links). The numbers are the game's own, READ from its prefabs
+    // (AssetBundles/UI_Textures, with UnityPy, 2026-11-21), in the game's own units:
+    //   TechnologyScreen        columnsSize 74, rowsSize 22 (the code's defaults, 148 / 66, are overridden there)
+    //   TechnologyItem          310 x 116
+    //   TechnologyScreen_Links  curviness 40, thickness 1, availableColor = completedColor = (1, 0.8745, 0.5843)
+    //   the card's "Artwork"    200 x 200, from 200 right of the card's left edge and 60 above its top
+    // A first version measured the ratios from a screenshot of the game (six columns 720 px, 26 rows 927 px, a card
+    // 502 x 187 px): 4.18 columns and 5.25 rows per card against the prefab's 4.19 and 5.27.
+    const float COL = 74f, ROW = 22f;              // one step of TechTreeX / TechTreeY
+    const float NODE_W = 310f, NODE_H = 116f;      // a card
+    const float LINK_CURVE = 40f;                  // radius of a link's elbow
     const int   CORNER_STEPS = 6;                  // line pieces an elbow is drawn with
-    const float LABEL_MIN_ZOOM = 0.3f;
-    // How far out the view goes. 0.05 was the floor of the old, narrower geometry; with the game's column width the
-    // ENC tree (TechTreeX up to 411) needs about 0.03 to fit a 1000 px window, so Frame All cut both ends off.
+    const float LABEL_MIN_ZOOM = 0.25f;
+    // How far out the WHEEL goes. 0.05 was the floor of the old, narrower geometry and Frame All stopped there too:
+    // with the game's column width the ENC tree (TechTreeX up to 411) needs about 0.02 to fit a 1000 px window, so
+    // both its ends were cut off. Frame All is not floored at this (FIT_MIN_ZOOM): at the window's minimum width it
+    // needs less still.
     const float MIN_ZOOM = 0.01f;
+    const float FIT_MIN_ZOOM = 0.001f;
+    const float DRAG_START = 4f;        // pixels the mouse must move before a click on a card becomes a drag
+    const float DRAG_MIN_ROW = 2f;      // no card drag while a row is fewer pixels than this: a one-pixel slip would move a card rows
     const float SIDE_W = 300f;
     const float BAR = 15f;             // thickness of the canvas scroll bars
     const float SCROLL_MARGIN = 60f;   // empty space the bars allow around the tree, in pixels
@@ -148,14 +169,14 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     static readonly Color MOD_BADGE = new Color(0.4f, 0.7f, 1f);     // blue: modded on disk
     static readonly Color AND_MARK = new Color(1f, 0.85f, 0.45f);    // the "AND" on a card
     // The game's look for a technology that is not researched yet: a dark card with a thin gold edge on dark indigo.
-    // The colours are read off the same screenshot; GOLD is the game's own "available" link colour
-    // (TechnologyScreen_Links.availableColor).
+    // The card's and the canvas's colours are read off a screenshot by eye; GOLD is the game's own link colour
+    // (TechnologyScreen_Links.availableColor, as its prefab holds it).
     static readonly Color CANVAS = new Color(0.075f, 0.065f, 0.19f);
     static readonly Color CARD = new Color(0.25f, 0.24f, 0.38f);
     static readonly Color CARD_SELECTED = new Color(0.36f, 0.35f, 0.52f);
     static readonly Color CARD_EDGE = new Color(0.72f, 0.62f, 0.42f);
-    static readonly Color GOLD = new Color(1f, 0.87f, 0.58f);
-    static readonly Color LINK = new Color(1f, 0.87f, 0.58f, 0.8f);
+    static readonly Color GOLD = new Color(1f, 0.8745f, 0.5843f);
+    static readonly Color LINK = new Color(1f, 0.8745f, 0.5843f, 0.8f);
 
     static readonly GUIContent[] RuleChoices =
     {
@@ -165,10 +186,10 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     static readonly GUIContent[] VisibilityChoices =
     {
         new GUIContent("In the game", "The game creates this technology (Visibility = Always, or the value its definition already had)."),
-        new GUIContent("Switched off", "Visibility = Never. The game does not create this technology for any empire: it is not on the tech screen and cannot be researched, traded or granted. Scenarios use this to disable a technology. Save writes it to the technology's definition."),
+        new GUIContent("Switched off", "Visibility = Never. The game does not create this technology for any empire: it is not on the tech screen and, by the game's own rules, cannot be researched, traded or granted. Scenarios use this to disable a technology. Save writes it to the technology's definition."),
     };
     static readonly Color HIDDEN_MARK = new Color(0.75f, 0.78f, 0.9f);   // the "OFF" / "HIDDEN" on a card
-    const float HIDDEN_ALPHA = 0.4f;                                    // how faint an invisible technology's card and links are
+    const float HIDDEN_ALPHA = 0.4f;                                    // how faint the card and links of a technology without a card in the game are
 
     [MenuItem("Tools/HAF/Tech Tree/Open Viewer")]
     static void Open()
@@ -186,15 +207,33 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         _editMode = EditorPrefs.GetBool(EditModeKey, true);
         _refPath = TechTreeData.ReferenceFolder;   // pick up whatever the Index set
         Undo.undoRedoPerformed += OnUndoRedo;
+        // Staged edits survive a SCRIPT reload, not an editor restart or a layout from another day: Unity also writes
+        // a window's serialized state into the layout, and an old staged prerequisite list would go over whatever the
+        // project holds by then. SessionState lives exactly as long as the editor process.
+        // The edits carry the id of the session they were staged in. Only a DIFFERENT id drops them: edits without one
+        // come from the window as it was before this id existed, in this same session, and are kept.
+        string session = SessionState.GetString(SessionKey, "");
+        if (session == "") { session = Guid.NewGuid().ToString("N"); SessionState.SetString(SessionKey, session); }
+        if (_pending.Count > 0 && !string.IsNullOrEmpty(_stagedSession) && _stagedSession != session)
+        {
+            Debug.LogWarning($"[TechTree] {_pending.Count} staged edit(s) from an earlier editor session were dropped (staged edits are kept across script reloads, not across a restart).");
+            _pending.Clear();
+        }
+        _stagedSession = session;
         try { Reload(keepView: _framed); }   // after a script reload the view is still the one the user had
         catch (Exception e) { Debug.LogError($"[TechTree] Build failed on open: {e}"); _nodes = new(); _byName = new(); }
     }
 
+    internal static string SaveLabel(int live, int missing) =>
+        "Save" + (live > 0 ? $" ({live})" : "") + (missing > 0 ? $" · {missing} missing" : "");
+
     /// <summary>The Tech Requires All window saved or reloaded the list: draw again, the rules are re-read then.</summary>
     internal static void RepaintOpenWindows()
     {
+        RepaintRequests++;
         foreach (var w in Resources.FindObjectsOfTypeAll<TechTreeWindow>()) w.Repaint();
     }
+    internal static int RepaintRequests;   // counted so that a drill, which draws the windows itself, can see the request
 
     void OnDisable()
     {
@@ -222,13 +261,15 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         // reference path half typed lost them for good). They are not drawn and not written while it is missing;
         // Save says so, Revert discards them.
         _art.Clear();
-        GUIUtility.keyboardControl = 0;   // a focused X / Y field would keep showing what was typed before the reload
+        // A focused X / Y field would keep showing what was typed before the reload, and the next key would build on
+        // it. Reload also runs outside OnGUI (undo), where clearing the focus does not hold: the next draw does it.
+        _dropFocus = true;
         // The nodes are new objects: keep the selection by NAME. The old object holds the values from before this
         // reload, so after a Save the side strip showed the previous position and prerequisites, the X / Y fields
         // compared against them, and the node lost its highlight (local change 2026-11-21).
         string keep = _selected != null ? _selected.Name : _selectedName;
         _selected = keep != null && _byName.TryGetValue(keep, out var again) ? again : null;
-        _selectedName = _selected?.Name;
+        _selectedName = keep;   // also while the technology is missing: it is selected again when it is back
         if (rules) LoadRules();
         if (!keepView) _framed = false;   // re-frame only on first load / explicit Frame All
         Repaint();
@@ -254,6 +295,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         }
         _rulesVersion = TechRequireAllRegistry.LoadedVersion;
         _rulesStoreFailed = TechRequireAllRegistry.LastLoadFailed;
+        _rulesStoreStale = TechRequireAllRegistry.LastLoadStale;
         if (_rulesUnreadable) return;   // what the list holds is unknown: every staged switch stays
         foreach (var kv in _pending.ToList())
             if (kv.Value.RequireAll == _requireAll.Contains(kv.Key))
@@ -268,9 +310,9 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     int EffY(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Y.HasValue ? p.Y.Value : n.BaseY;
     IReadOnlyList<string> EffPrereqs(TechTreeData.Node n) =>
         _pending.TryGetValue(n.Name, out var p) && p.Prereqs != null ? p.Prereqs : (IReadOnlyList<string>)n.BasePrereqs;
-    // true = the technology waits for ALL its prerequisites (AND); false = the game's rule, any one (OR)
     int EffVisibility(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Visibility.HasValue ? p.Visibility.Value : n.BaseVisibility;
     bool Hidden(TechTreeData.Node n) => !TechTreeData.OnTechScreen(EffVisibility(n));
+    // true = the technology waits for ALL its prerequisites (AND); false = the game's rule, any one (OR)
     bool EffRequireAll(TechTreeData.Node n) =>
         _pending.TryGetValue(n.Name, out var p) && p.RequireAll.HasValue ? p.RequireAll.Value : _requireAll.Contains(n.Name);
 
@@ -301,19 +343,21 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     {
         if (_nodes == null || _nodes.Count == 0) return;
         const float margin = 30f;
-        float w = _nodes.Max(EffX) * COL + NODE_W + 2 * margin;
-        float h = _nodes.Max(EffY) * ROW + NODE_H + 2 * margin;
+        // the tree's extent starts at 0, or lower where a card sits at a negative column or row
+        float minX = Mathf.Min(0, _nodes.Min(EffX)), minY = Mathf.Min(0, _nodes.Min(EffY));
+        float w = (_nodes.Max(EffX) - minX) * COL + NODE_W + 2 * margin;
+        float h = (_nodes.Max(EffY) - minY) * ROW + NODE_H + 2 * margin;
         float zx = canvas.width / w, zy = canvas.height / h;
         if (_fitWholeTree)
         {
-            _zoom = Mathf.Clamp(Mathf.Min(zx, zy), MIN_ZOOM, 2f);
-            _pan = new Vector2(canvas.x + (canvas.width - w * _zoom) * 0.5f + margin * _zoom,
-                               canvas.y + (canvas.height - h * _zoom) * 0.5f + margin * _zoom);
+            _zoom = Mathf.Clamp(Mathf.Min(zx, zy), FIT_MIN_ZOOM, 2f);
+            _pan = new Vector2(canvas.x + (canvas.width - w * _zoom) * 0.5f + (margin - minX * COL) * _zoom,
+                               canvas.y + (canvas.height - h * _zoom) * 0.5f + (margin - minY * ROW) * _zoom);
         }
         else
         {
-            _zoom = Mathf.Clamp(zy, MIN_ZOOM, 1f);
-            _pan = new Vector2(canvas.x + margin * _zoom, canvas.y + (canvas.height - h * _zoom) * 0.5f + margin * _zoom);
+            _zoom = Mathf.Clamp(zy, FIT_MIN_ZOOM, 1f);
+            _pan = new Vector2(canvas.x + (margin - minX * COL) * _zoom, canvas.y + (canvas.height - h * _zoom) * 0.5f + (margin - minY * ROW) * _zoom);
         }
         _fitWholeTree = false;
         _framed = true;
@@ -322,31 +366,38 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     void OnGUI()
     {
         if (Event.current.type == EventType.MouseMove) Repaint();
+        if (_dropFocus && Event.current.type == EventType.Layout)
+        { _dropFocus = false; GUIUtility.keyboardControl = 0; EditorGUIUtility.editingTextField = false; }
         // The Tech Requires All window (or this one) saved the list since this window read it: show the list as it is now.
-        // Also when only its readability changed: "Keep it empty" in the list's window makes an unreadable list
-        // usable under the same version.
+        // Also when only its readability or staleness changed: "Keep it empty" and "Deploy the source" in the list's
+        // window change those under the same version.
         if (Event.current.type == EventType.Layout
-            && (TechRequireAllRegistry.LoadedVersion != _rulesVersion || TechRequireAllRegistry.LastLoadFailed != _rulesStoreFailed)) LoadRules();
+            && (TechRequireAllRegistry.LoadedVersion != _rulesVersion || TechRequireAllRegistry.LastLoadFailed != _rulesStoreFailed
+                || TechRequireAllRegistry.LastLoadStale != _rulesStoreStale)) LoadRules();
 
         // ── Toolbar ──
         EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
         GUI.backgroundColor = _editMode ? EDIT_DOT : Color.white;
         bool edit = GUILayout.Toggle(_editMode, new GUIContent(_editMode ? "● Edit: ON" : "Edit: OFF",
-            "ON: drag a card or type its X / Y, switch OR / AND, add or remove prerequisites. Nothing is written until Save. OFF: look only."),
+            "ON: drag a card or type its X / Y, switch it off in the game, switch OR / AND, add or remove prerequisites. Nothing is written until Save. OFF: look only."),
             EditorStyles.toolbarButton, GUILayout.Width(80));
         GUI.backgroundColor = Color.white;
         if (edit != _editMode) { _editMode = edit; EditorPrefs.SetBool(EditModeKey, edit); }
         if (GUILayout.Button("Reload", EditorStyles.toolbarButton, GUILayout.Width(60))) { TechTreeVanillaArt.RetryFailed(); Reload(keepView: true); }
         if (GUILayout.Button("Frame All", EditorStyles.toolbarButton, GUILayout.Width(70))) { _framed = false; _fitWholeTree = true; }
 
-        using (new EditorGUI.DisabledScope(!Dirty))
+        // Staged edits of a technology that is not in the tree right now cannot be saved: they are counted apart,
+        // and Save is for the ones that can.
+        int live = _byName == null ? 0 : _pending.Keys.Count(k => _byName.ContainsKey(k)), missing = _pending.Count - live;
+        using (new EditorGUI.DisabledScope(live == 0))
         {
-            GUI.backgroundColor = Dirty ? EDIT_DOT : Color.white;
-            if (GUILayout.Button($"Save{(Dirty ? $" ({_pending.Count})" : "")}", EditorStyles.toolbarButton, GUILayout.Width(80)))
+            GUI.backgroundColor = live > 0 ? EDIT_DOT : Color.white;
+            if (GUILayout.Button(SaveLabel(live, missing), EditorStyles.toolbarButton, GUILayout.Width(missing > 0 ? 150 : 80)))
                 CommitChanges();
             GUI.backgroundColor = Color.white;
-            if (GUILayout.Button("Revert", EditorStyles.toolbarButton, GUILayout.Width(60))) RevertChanges();
         }
+        using (new EditorGUI.DisabledScope(!Dirty))
+            if (GUILayout.Button("Revert", EditorStyles.toolbarButton, GUILayout.Width(60))) RevertChanges();
 
         GUILayout.FlexibleSpace();
 
@@ -454,9 +505,9 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 GUIUtility.keyboardControl = 0;   // a focused X / Y field would keep showing the previous node's number
                 EditorGUIUtility.PingObject(hit.Asset);
                 Selection.activeObject = hit.Asset;
-                if (_editMode)   // begin a potential position drag
+                if (_editMode && ROW * _zoom >= DRAG_MIN_ROW)   // begin a potential position drag
                 {
-                    _dragNode = hit;
+                    _dragNode = hit; _dragMoved = false;
                     _dragStartMouse = e.mousePosition;
                     _dragStartX = EffX(hit);
                     _dragStartY = EffY(hit);
@@ -466,11 +517,13 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         }
         else if (e.type == EventType.MouseDrag && _dragNode != null)
         {
+            // a click that slips a pixel or two is a click
+            if (!_dragMoved && (e.mousePosition - _dragStartMouse).sqrMagnitude < DRAG_START * DRAG_START) { e.Use(); return; }
+            _dragMoved = true;
             int dx = Mathf.RoundToInt((e.mousePosition.x - _dragStartMouse.x) / (COL * _zoom));
             int dy = Mathf.RoundToInt((e.mousePosition.y - _dragStartMouse.y) / (ROW * _zoom));
-            // floor at 0 on the axis that moved only: a coordinate that is already negative is not changed by the other
-            int nx = dx == 0 ? _dragStartX : Mathf.Max(0, _dragStartX + dx);
-            int ny = dy == 0 ? _dragStartY : Mathf.Max(0, _dragStartY + dy);
+            int nx = Mathf.Max(FloorOf(_dragNode.BaseX, _dragStartX), _dragStartX + dx);
+            int ny = Mathf.Max(FloorOf(_dragNode.BaseY, _dragStartY), _dragStartY + dy);
             var p = Stage(_dragNode);
             p.X = nx != _dragNode.BaseX ? (int?)nx : null;   // snap; equal to base = no change
             p.Y = ny != _dragNode.BaseY ? (int?)ny : null;
@@ -536,12 +589,12 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         float z = Mathf.Min(_zoom, 1.6f);
         var titleStyle = new GUIStyle(EditorStyles.label)
         {
-            alignment = TextAnchor.MiddleLeft, fontSize = Mathf.Clamp(Mathf.RoundToInt(12f * z), 6, 19),
+            alignment = TextAnchor.MiddleLeft, fontSize = Mathf.Clamp(Mathf.RoundToInt(15f * z), 6, 22),
             wordWrap = false, clipping = TextClipping.Clip, normal = { textColor = GOLD }
         };
         var infoStyle = new GUIStyle(EditorStyles.miniLabel)
         {
-            alignment = TextAnchor.MiddleLeft, fontSize = Mathf.Clamp(Mathf.RoundToInt(9f * z), 6, 14),
+            alignment = TextAnchor.MiddleLeft, fontSize = Mathf.Clamp(Mathf.RoundToInt(11f * z), 6, 16),
             wordWrap = false, clipping = TextClipping.Clip, normal = { textColor = new Color(1, 1, 1, 0.7f) }
         };
         var nameStyle = new GUIStyle(infoStyle) { normal = { textColor = new Color(1, 1, 1, 0.38f) } };
@@ -556,8 +609,8 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 
             bool selected = n == _selected;
             bool hidden = Hidden(n);
-            float fade = hidden ? HIDDEN_ALPHA : 1f;   // a technology the game does not show is faint, and says HIDDEN
-            float radius = 4f * _zoom;
+            float fade = hidden ? HIDDEN_ALPHA : 1f;   // a technology without a card in the game is faint, and says OFF or HIDDEN
+            float radius = 5f * _zoom;
             // the card: fill, then the thin gold edge (brighter and thicker on the selected one)
             Color fill = selected ? CARD_SELECTED : CARD, edge = selected ? GOLD : CARD_EDGE;
             fill.a *= fade; if (!selected) edge.a *= fade;
@@ -569,7 +622,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             if (Event.current.type == EventType.Repaint && TryArt(n, out var art, out var artUv, out float artAspect))
                 GUI.DrawTextureWithTexCoords(FitInside(artRect, artAspect), art, artUv, true);
 
-            float pad = 8f * _zoom;
+            float pad = 10f * _zoom;
             float titleH = 0.29f * r.height;   // the game's title band: the divider sits at 29% of the card's height
 
             // markers: modded on disk (blue bar inside the left edge) + unsaved edit (amber dot, top right)
@@ -646,14 +699,14 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     }
 
     /// <summary>
-    /// Where a card's artwork goes: a square one and a half card heights high, centred on the card's height and just
-    /// inside its right edge, so it stands out above, below and to the right of the card as it does in the game.
-    /// Measured from a screenshot of the game (2026-11-21, three researched cards); the game's own values are in a prefab.
+    /// Where a card's artwork goes, as the game's card prefab places its "Artwork": a 200 x 200 square on a 310 x 116
+    /// card, from 200 right of the card's left edge and 60 above its top. So it stands 90 beyond the card's right
+    /// edge, 60 above it and 24 below it.
     /// </summary>
     internal static Rect ArtRect(Rect card)
     {
-        float side = 1.5f * card.height;
-        return new Rect(card.xMax - 0.06f * card.width - side * 0.5f, card.center.y - side * 0.5f, side, side);
+        float s = card.width / NODE_W;
+        return new Rect(card.x + 200f * s, card.y - 60f * s, 200f * s, 200f * s);
     }
 
     readonly List<Vector2> _linkPath = new List<Vector2>();
@@ -730,7 +783,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             EditorGUILayout.LabelField(ArtLine(n, gameImage ? shown.Output : null, artProblem), EditorStyles.wordWrappedMiniLabel);
 
             if (!_editMode)
-                EditorGUILayout.HelpBox("Edit is OFF, so the position, the rule and the prerequisites are greyed out. Switch on \"Edit\" at the top left to change them.", MessageType.Info);
+                EditorGUILayout.HelpBox("Edit is OFF, so the position, the game switch, the rule and the prerequisites are greyed out. Switch on \"Edit\" at the top left to change them.", MessageType.Info);
 
             // the position as numbers (grid cells), staged exactly like a drag on the canvas
             using (new EditorGUI.DisabledScope(!_editMode))
@@ -753,17 +806,13 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 EditorGUILayout.EndHorizontal();
                 if (statePicked != stateNow) SetVisibility(n, SwitchedVisibility(n.BaseVisibility, statePicked == 0));
             }
-            int shownVisibility = EffVisibility(n);
-            var dependents = shownVisibility == TechTreeData.VisibilityNever
-                ? _nodes.Where(o => o != n && EffPrereqs(o).Contains(n.Name)).Select(o => o.Label ?? o.Name).OrderBy(t => t, StringComparer.Ordinal).ToList()
-                : null;
-            string visibilityNote = VisibilityNote(n.Label, shownVisibility, dependents);
-            if (visibilityNote != "") EditorGUILayout.HelpBox(visibilityNote, dependents != null && dependents.Count > 0 ? MessageType.Warning : MessageType.Info);
+            string visibilityNote = SideVisibilityNote(out bool othersDepend);
+            if (visibilityNote != "") EditorGUILayout.HelpBox(visibilityNote, othersDepend ? MessageType.Warning : MessageType.Info);
 
             EditorGUILayout.Space(6);
             bool all = EffRequireAll(n);
             var prereqs = EffPrereqs(n);
-            EditorGUILayout.LabelField(RuleHeader(_rulesUnreadable, all), EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(SideHeader(), EditorStyles.boldLabel);
             if (_rulesUnreadable)
                 EditorGUILayout.HelpBox("The Tech Requires All list could not be read, so the rule (OR / AND) is not shown and cannot be switched here. " +
                                         "Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites says why; Reload (top left) reads it again.", MessageType.Warning);
@@ -818,6 +867,23 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         : !string.IsNullOrEmpty(gameProblem) ? "Image: not in this project, and the game's own cannot be read: " + gameProblem
         : "Image: not found, neither in this project nor among the game's own";
 
+    // What the side strip shows for the selected technology, as the window's state makes it. Separate from the
+    // wording functions below so that a check can hold the WIRING too (which state goes into which text).
+    internal string SideHeader() => RuleHeader(_rulesUnreadable, _selected != null && EffRequireAll(_selected));
+
+    internal string SideVisibilityNote(out bool othersDepend)
+    {
+        othersDepend = false;
+        if (_selected == null) return "";
+        var n = _selected;
+        int visibility = EffVisibility(n);
+        List<string> dependents = null;
+        if (visibility == TechTreeData.VisibilityNever)
+            dependents = _nodes.Where(o => o != n && EffPrereqs(o).Contains(n.Name)).Select(o => o.Label ?? o.Name).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        othersDepend = dependents != null && dependents.Count > 0;
+        return VisibilityNote(n.Label, visibility, dependents);
+    }
+
     internal static string RuleHeader(bool unreadable, bool requireAll) =>
         unreadable ? "Prerequisites:" : requireAll ? "Prerequisites (AND):" : "Prerequisites (OR):";
 
@@ -839,7 +905,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         if (visibility == TechTreeData.VisibilityAlways) return "";
         if (visibility == TechTreeData.VisibilityNever)
         {
-            string note = title + " is SWITCHED OFF (Visibility = Never): the game does not create it for any empire. It is not on the tech screen and cannot be researched, traded or granted.";
+            string note = title + " is SWITCHED OFF (Visibility = Never): the game does not create it for any empire. It is not on the tech screen and, by the game's own rules, cannot be researched, traded or granted.";
             int n = dependents?.Count ?? 0;
             if (n > 0)
                 note += " " + n + " technolog" + (n == 1 ? "y names" : "ies name") + " it as a prerequisite (" + string.Join(", ", dependents.Take(4)) + (n > 4 ? ", ..." : "")
@@ -868,13 +934,18 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         Repaint();
     }
 
+    /// <summary>
+    /// How low one coordinate may go: 0, or as low as it already is (its saved value, or where it stands now). A card
+    /// that sits at a negative coordinate can be moved along it and typed back to it; nothing else goes below 0.
+    /// </summary>
+    internal static int FloorOf(int saved, int current) => Mathf.Min(0, Mathf.Min(saved, current));
+
     void SetPosition(TechTreeData.Node n, int x, int y)
     {
-        // The floor a drag has, on the axis that is being changed only: a coordinate that is already negative stays
-        // as it is when the other one is typed. A floored field loses the focus, or it would go on showing the
-        // typed number.
-        if (x != EffX(n) && x < 0 && x != n.BaseX) { x = 0; GUIUtility.keyboardControl = 0; }   // its saved value can be typed back
-        if (y != EffY(n) && y < 0 && y != n.BaseY) { y = 0; GUIUtility.keyboardControl = 0; }
+        // A floored field loses the focus, or it would go on showing the typed number.
+        int floorX = FloorOf(n.BaseX, EffX(n)), floorY = FloorOf(n.BaseY, EffY(n));
+        if (x < floorX) { x = floorX; _dropFocus = true; }
+        if (y < floorY) { y = floorY; _dropFocus = true; }
         var p = Stage(n);
         p.X = x != n.BaseX ? (int?)x : null;   // equal to base = no change
         p.Y = y != n.BaseY ? (int?)y : null;
@@ -1019,7 +1090,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         if (outcome == RegistryRules.SaveOutcome.Refused)
             return $" · {what} REFUSED — nothing of {(count == 1 ? "it" : "them")} was written (the Console says why); KEPT staged";
         if (outcome != RegistryRules.SaveOutcome.Saved)
-            return $" · {what} could NOT be confirmed — the list may or may not hold {(count == 1 ? "it" : "them")} (see the Console); KEPT staged";
+            return $" · {what} could NOT be confirmed — the list may or may not hold {(count == 1 ? "it" : "them")} (see the Console); kept staged unless the reload that follows finds {(count == 1 ? "it" : "them")} there";
         if (!changed)
             return $", {what}: the list already held {(count == 1 ? "it" : "them")}, so nothing was written or deployed";
         return (deployPending
@@ -1030,7 +1101,8 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     void RevertChanges()
     {
         if (_pending.Count == 0) return;
-        if (EditorUtility.DisplayDialog("Revert", $"Discard {_pending.Count} unsaved change(s)?", "Discard", "Cancel"))
+        int gone = _pending.Keys.Count(k => !_byName.ContainsKey(k));
+        if (EditorUtility.DisplayDialog("Revert", $"Discard {_pending.Count} unsaved change(s)?" + (gone > 0 ? $"\n\n{gone} of them belong to technologies that are not in the tree right now." : ""), "Discard", "Cancel"))
         { _pending.Clear(); Reload(keepView: true, rules: false); }
     }
 
