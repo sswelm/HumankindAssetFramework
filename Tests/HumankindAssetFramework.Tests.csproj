@@ -74,6 +74,10 @@
     <Compile Include="..\editor\FbxArmature.cs" Link="FbxArmature.cs" />
     <Compile Include="..\editor\FbxActions.cs" Link="FbxActions.cs" />
     <Compile Include="..\editor\HafModelLoader.cs" Link="HafModelLoader.cs" />
+    <!-- The native 3ds Max reader (2026-11-21): container, scene, model - pure C#, driven against files built byte by byte. -->
+    <Compile Include="..\editor\MaxDocument.cs" Link="MaxDocument.cs" />
+    <Compile Include="..\editor\MaxScene.cs" Link="MaxScene.cs" />
+    <Compile Include="..\editor\MaxModel.cs" Link="MaxModel.cs" />
     <Compile Include="..\editor\PngCodec.cs" Link="PngCodec.cs" />
     <Compile Include="..\editor\VehicleProbe.PolygonNormals.cs" Link="VehicleProbe.PolygonNormals.cs" />
     <Compile Include="..\editor\FbxTriangulate.cs" Link="FbxTriangulate.cs" />

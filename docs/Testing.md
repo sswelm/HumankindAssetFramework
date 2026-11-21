@@ -223,6 +223,20 @@ oracle comparisons; ordinary direct connection cycles retain ufbx's own fallback
 Sixteen planted deviations each changed a dump (the first layer blending instead of assigning: 10,022 real lines; the last value winning a shared property; constant-previous and -next swapped; a weight of exactly one third instead of ufbx's 0.333333f: 1,686 real lines; the Bezier solve stopped after three Newton steps; the mirror parity skipped; the packed weights swapped; the reference range ignored; a synthesised scale of zeros; a connection cycle left connected; the time code ignored; the auto tangent always time-independent; the additive rotation added instead of composed; a tangent's negative zero lost; the max of a tie taken from the last; the property flags never set). Two of them (the negative zero and the tie) changed nothing on the fixtures and 286 and 284 lines on the real
 files until a curve of signed zeros joined the scenes.
 
+**`tools/max_drill.sh`** (the native 3ds Max reader, 2026-11-21): compiles `editor/MaxDocument.cs`, `MaxScene.cs` and
+`MaxModel.cs` outside Unity and holds them to an independent Python reader of the same files
+(`tools/max-drill/max_world.py`, written first, as the probe the C# was then written beside). Per mesh part it compares the
+name, the triangle count, and — in world space — the area, the bounding box and the signed volume, which changes sign
+with the winding; the totals compare parts, triangles, parts with UVs and hidden faces. Each file is then converted as the
+tools' pickers convert it and the written `.glb` is read back. Run 2026-11-21: 4 files, 257 parts, 244,337 triangles,
+all equal. **Not in the push gate**: the population is four files of one 3ds Max generation on the author's disk
+(`D:/3DModels`, `D:/3dmax`; `HAF_MAX_ROOTS` names other folders). What the drill cannot see: both readers share one
+author's reading of the format, so the renders of the converted files (compared by eye with the artists' own pictures)
+are the check of that reading, and `Tests/MaxReaderTests.cs` (19 tests on files built byte by byte) the check of each
+rule. Thirteen defects planted one at a time (the rotation read without its inverse, a mirrored part not re-wound, the object offset inherited, the mask inverted, ...) each failed at least one test. One rule was decided by measurement: a scale chunk carries a
+quaternion documented as the axis system of the scale; applied either way round it leaves none of the torpedo boat's
+anchor's 339 edges with a right angle between its faces, left out 74 keep one — it is not applied.
+
 **`tools/fbx_model_drill.sh`** (step 6a of the native FBX reader, 2026-11-01: the FBX path into the Factory): Blender imports
 every static FBX source and fixture with its FBX importer's defaults and exports a GLB (`tools/fbx-drill/fbx_to_glb.py`);
 `editor/FbxImport.cs` reads the same file as that importer builds it (the global matrix from the file's axes and unit, every

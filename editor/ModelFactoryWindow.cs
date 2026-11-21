@@ -1102,7 +1102,8 @@ public class ModelFactoryWindow : EditorWindow
                 string start = string.IsNullOrWhiteSpace(cur.modelFile) ? "" : System.IO.Path.GetDirectoryName(cur.modelFile);
                 while (!string.IsNullOrEmpty(start) && !System.IO.Directory.Exists(start))
                     start = System.IO.Path.GetDirectoryName(start);
-                var p = EditorUtility.OpenFilePanel("Select 3D model", start ?? "", "glb,gltf,obj,fbx,blend");
+                var p = EditorUtility.OpenFilePanel("Select 3D model", start ?? "", "glb,gltf,obj,fbx,blend,max");
+                p = MaxImport.Picked(p);   // a 3ds Max file is converted to name_max.glb beside it; null = not converted (the user was told)
                 if (!string.IsNullOrEmpty(p))
                 {
                     cur.modelFile = p;
@@ -1116,8 +1117,11 @@ public class ModelFactoryWindow : EditorWindow
                     if (sz > 0f) { cur.animUnitFix = guess; browseUnitFixGuess = guess ? 1 : 0; status = $"Auto-set 'Fix 100× oversize' = {(guess ? "ON" : "off")} (model true size ≈ {sz:0.###}u). Override if the bake comes out wrong. " +
                         "(Sticks until the next Bake or 'Save settings' writes it; the Animation Lab's checkbox owns it after that.)"; }
                 }
+                MaxImport.ExitGuiAfterDialogs();
             }
         }
+        // a typed .max path: a Convert button under the field
+        { var entry = cur; MaxImport.TypedPathGui(entry.modelFile, glb => { entry.modelFile = glb; Repaint(); }); }
         // BROKEN-LINK REPORT: a referenced model file that isn't on disk (source moved/renamed) — warn as soon as the
         // entry is shown, not only when Bake fails.
         if (!string.IsNullOrWhiteSpace(cur.modelFile) && !System.IO.File.Exists(cur.modelFile))

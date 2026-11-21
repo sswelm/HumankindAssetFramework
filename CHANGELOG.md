@@ -10,6 +10,19 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **3ds Max files are read natively (2026-11-21).** The Model Cutter, the Model Fuser, the Vehicle Lab and the Model
+  Factory take a `.max` in their file pickers: a C# reader (`editor/MaxDocument.cs` the compound-file container and chunk
+  tree, `MaxScene.cs` the objects and references, `MaxModel.cs` the model) converts it to `name_max.glb` beside the file
+  and the tool goes on with that copy, so every later step — and every Blender fallback — sees an ordinary GLB. Read:
+  Editable Mesh parts with smoothing groups, material ids and UVs; each part's place (mirrored parts re-wound);
+  Standard and Multi/Sub-Object materials with the diffuse picture; decals (a Mask map, tiling off) composed onto a
+  canvas of the plain colour. Named in the report and not read: modifiers (a `.max` stores their settings, not their
+  result), parametric objects, Editable Poly, skin and animation, the other map slots. Checked: `tools/max_drill.sh` —
+  the user's four models (257 parts, 244,337 triangles) equal to an independent Python reader per part in area, signed
+  volume and bounds; the four converted files rendered and compared by eye; 19 unit tests on files built byte by byte.
+  Thirteen defects planted one at a time (the rotation read without its inverse, a mirrored part not re-wound, the object offset inherited, the mask inverted, ...) each failed at least one test. The editor assembly compiles headlessly. **Not run by me
+  inside Unity**: the pickers themselves and Unity's JPEG decoder (the drill decodes JPEG through System.Drawing; the
+  composition code is the same). All four sample files are of the 3ds Max 2/3 generation.
 - **F8 Units table review fixes (2026-11-19).** Adjustment-only retextures now have the same type/status as PNG
   retextures. The Units frame retains dimensions requested by the resize grip while keeping the returned title-bar
   position, and its summary wraps so narrow sizes remain narrow. Checked: seven regression cases and twelve layout

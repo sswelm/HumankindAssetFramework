@@ -304,6 +304,52 @@ animated bake → game sequence.
 
 ---
 
+### 3ds Max files (`.max`) — read natively, converted at the door
+
+The **Model Cutter**, the **Model Fuser**, the **Vehicle Lab** (both source fields) and the **Model Factory** take a
+`.max` file in their file pickers. Picking one converts it: the reader (`editor/MaxDocument.cs`, `MaxScene.cs`,
+`MaxModel.cs` — C#, no 3ds Max and no Blender involved) writes `name_max.glb` beside the file, and the tool works on
+that copy from then on. A `.max` path typed into the field shows a **Convert .max** button under it. A report says what
+was read and names everything that was not; the same report is in the Console.
+
+Why a copy: nothing else in the pipeline can open a `.max` (Blender and Unity cannot), so every later step — including
+the Blender fallbacks of the in-process routes — needs an ordinary GLB. A `name_max.glb` the reader wrote earlier is
+replaced without asking; any other file of that name asks first.
+
+**What is read** (held on four models — two armoured cars, a torpedo boat, a stealth ship: 257 parts, 244,337 visible
+triangles):
+
+- **Editable Mesh parts:** vertices, triangles, smoothing groups (written as normals), material ids, one UV channel.
+- **Each part's place:** position, rotation and scale, parents, the object offset; a mirrored part is re-wound so its
+  faces still face out. Axes are converted from 3ds Max's Z-up to a GLB's Y-up; units stay as the file has them.
+- **Standard and Multi/Sub-Object materials:** the diffuse colour, the two-sided switch, and the diffuse slot's picture
+  (JPEG, PNG, TGA, BMP), looked for beside the `.max`, one folder down and one folder up.
+- **Decals:** a picture behind a mask, or one with tiling switched off, is shown once in 3ds Max with the plain colour
+  around it. The reader composes it onto a larger canvas of that colour and scales the UVs to match, so nothing
+  downstream has to honour a sampler setting. A map below 100 % amount is mixed with the colour; a map's own offset and
+  tiling are folded into the UVs.
+
+**What is not read** — each is named in the report when a file has it, never dropped silently:
+
+- **Modifiers.** A `.max` stores the base object and each modifier's settings, not the result; only 3ds Max can evaluate
+  them. The part is read as it was before the modifier.
+- **Parametric objects** (Box, Cylinder, …): stored as their parameters, not as a mesh.
+- **Editable Poly**, and transform controllers other than Position/Rotation/Scale with Bezier position, TCB rotation,
+  Bezier scale and list controllers: no sample file yet to hold a reader to.
+- **Skin, bones and animation; lights and cameras; every map slot but diffuse; procedural maps.** A transparent material
+  is written opaque.
+- A node keeps its name, its parent and the **place** of its pivot, not its rotation or scale: a part's vertices are
+  written in world axes relative to that pivot.
+
+**Tested on:** all four files come from the 3ds Max 2/3 generation. Newer versions gzip their streams; the reader
+unpacks those, but only files built by the tests have exercised that path. Collapse the model to Editable Mesh in 3ds Max
+before saving when you can.
+
+**Check:** `tools/max_drill.sh` (see [Testing.md](Testing.md)). **Format sources:** the files themselves, read with a
+Python probe first, and the public descriptions of the format; two open-source readers served as references for the
+chunk ids — the Blender extension `io_scene_max` (GPL) and Ryzom Core's `pipeline_max` (AGPL). No code of theirs is in
+HAF, which is MIT.
+
 ## The injection-axis tools
 
 ### District Factory — `Tools ▸ HAF ▸ District Factory`
