@@ -25,6 +25,68 @@ namespace HumankindAssetFramework.Tests
 
         static string Edges(R.Plan p) => string.Join(" ", p.Edges.Select(e => e.Key + ">" + e.Value).OrderBy(s => s, StringComparer.Ordinal));
 
+        // ---- the tech screen's hint ----
+
+        [Fact]
+        public void TheMarkGoesInFrontOfTheTitleAndNoMarkLeavesTheTitleAlone()
+        {
+            Assert.Equal("& Masonry", R.MarkedTitle("&", "Masonry"));
+            Assert.Equal("[Technology] Masonry", R.MarkedTitle("  [Technology] ", "Masonry"));
+            Assert.Equal("Masonry", R.MarkedTitle("", "Masonry"));
+            Assert.Equal("Masonry", R.MarkedTitle("   ", "Masonry"));
+            Assert.Equal("Masonry", R.MarkedTitle(null, "Masonry"));
+            Assert.Equal("&", R.MarkedTitle("&", null).Trim());
+        }
+
+        [Fact]
+        public void TheTooltipLineNamesEveryPrerequisiteAndSurvivesAStrayBrace()
+        {
+            // the user's wording (2026-11-21): "Requires both Multimedia Computer and Ethernet", in italics
+            // ... and then with the title's icon in front of it (the mark fills {2})
+            Assert.Equal("[SharedProject] <i>Requires both Multimedia Computer and Ethernet</i>",
+                         R.TooltipLine(R.DefaultTooltip, R.DefaultTooltipMany, new[] { "Multimedia Computer", "Ethernet" }, R.DefaultMark));
+            Assert.Equal("& <i>Requires both A and B</i>", R.TooltipLine(R.DefaultTooltip, R.DefaultTooltipMany, new[] { "A", "B" }, " & "));
+            // no mark: the line starts at the sentence, with no stray space
+            Assert.Equal("<i>Requires both A and B</i>", R.TooltipLine(R.DefaultTooltip, R.DefaultTooltipMany, new[] { "A", "B" }, ""));
+            Assert.Equal("<i>Requires both A and B</i>", R.TooltipLine(R.DefaultTooltip, R.DefaultTooltipMany, new[] { "A", "B" }));
+            Assert.Equal("[SharedProject] <i>Requires all of A, B and C</i>",
+                         R.TooltipLine(R.DefaultTooltip, R.DefaultTooltipMany, new[] { "A", "B", "C" }, R.DefaultMark));
+            // "both" is wrong for three: the other format, the last one joined by "and"
+            Assert.Equal("<i>Requires all of A, B and C</i>", R.TooltipLine(R.DefaultTooltip, R.DefaultTooltipMany, new[] { "A", "B", "C" }));
+            Assert.Equal("<i>Requires all of A, B, C and D</i>", R.TooltipLine(R.DefaultTooltip, R.DefaultTooltipMany, new[] { "A", "B", "C", "D" }));
+            // each count uses its own format
+            Assert.Equal("two: A+B", R.TooltipLine("two: {0}+{1}", "many: {0}+{1}", new[] { "A", "B" }));
+            Assert.Equal("many: A, B+C", R.TooltipLine("two: {0}+{1}", "many: {0}+{1}", new[] { "A", "B", "C" }));
+            // a format without {1} must not drop the last prerequisite: the whole list goes into {0}
+            Assert.Equal("Needs A, B, C.", R.TooltipLine("unused", "Needs {0}.", new[] { "A", "B", "C" }));
+            Assert.Equal("Requires ALL of: A, B", R.TooltipLine("Requires ALL of: {0}", "unused", new[] { "A", "B" }));
+            // string.Format would throw on these; and a title that holds a slot is not filled in a second time
+            Assert.Equal("{ A {3} B }", R.TooltipLine("{ {0} {3} {1} }", "unused", new[] { "A", "B" }));
+            Assert.Equal("{1} then B", R.TooltipLine("{0} then {1}", "unused", new[] { "{1}", "B" }));
+            Assert.Equal("ends {0", R.TooltipLine("ends {0", "unused", new[] { "A", "B" }));
+            // no format, or fewer than two prerequisites (the rule changes nothing then): no line
+            Assert.Equal("", R.TooltipLine("", R.DefaultTooltipMany, new[] { "A", "B" }));
+            Assert.Equal("", R.TooltipLine(null, R.DefaultTooltipMany, new[] { "A", "B" }));
+            Assert.Equal("", R.TooltipLine(R.DefaultTooltip, "", new[] { "A", "B", "C" }));
+            Assert.Equal("", R.TooltipLine(R.DefaultTooltip, R.DefaultTooltipMany, new[] { "A" }));
+            Assert.Equal("", R.TooltipLine(R.DefaultTooltip, R.DefaultTooltipMany, null));
+        }
+
+        [Fact]
+        public void TheTooltipLineIsAddedOnce()
+        {
+            string line = "Requires ALL of: A, B";
+            string once = R.WithTooltipLine("Unlocks the web. (1,200 [Science])", line);
+            Assert.Equal("Unlocks the web. (1,200 [Science])\n" + line, once);
+            Assert.Equal(once, R.WithTooltipLine(once, line));
+            Assert.Equal(line, R.WithTooltipLine("", line));
+            Assert.Equal(line, R.WithTooltipLine(null, line));
+            Assert.Equal(line, R.WithTooltipLine(line, line));
+            Assert.Equal("text", R.WithTooltipLine("text", ""));
+            // a description that merely ENDS with the same words is not the line: it still gets its own
+            Assert.Equal("see Requires ALL of: A, B\n" + line, R.WithTooltipLine("see " + line, line));
+        }
+
         // ---- the list file ----
 
         [Fact]

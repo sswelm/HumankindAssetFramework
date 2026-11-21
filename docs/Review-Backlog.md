@@ -1802,10 +1802,14 @@ dismissed.
 
 ## Tech Requires All — open after PR #298 (2026-11-20)
 
-Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`). Nothing here was seen in a game.
+Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
 
-- **Never run in a game session.** The tech screen, a real research queue, the AI and multiplayer are unexercised; the
-  drills call the game's methods on objects built without their constructors. First thing to do before relying on it.
+- **Seen in ONE game session, in part (2026-11-21, ENC, a turn-180 save, the user playing).** World-Wide Web was
+  listed. With Multimedia Computer researched and Ethernet not, it stayed locked; clicking it queued Covert Ops (which
+  Ethernet needs), Ethernet and then it, and the log carried `queued behind 2 prerequisite(s), 2 ordering
+  constraint(s)` and no error from the hooks. Loading an existing save after adding a name to the list worked. **Not
+  seen in a game:** removing a queued prerequisite, dragging in the queue, a deliberate look at the AI's turns,
+  multiplayer, and an early-game entry (Masonry needs a new game).
 - **Dragging in the research queue is not run against the game's code.** `tools/tech_requires_all_game_drill.sh`
   replaces `MoveTechnologyInQueue` with a list operation. A hand port of the game's move, fuzzed over 40,000 random
   queues with several parents per technology, always ended and kept parents in front — a port, not the method. The
@@ -1820,7 +1824,15 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`). Nothin
   not warn. ENC on 2026-11-20: two era-exclusive technologies, neither a prerequisite of a two-prerequisite technology.
 - **A technology already queued behind one prerequisite keeps its place** when the list is added mid-game: the queue is
   only planned when something is added, and research is paid into the queue without looking at the lock.
-- **The tech screen gives no hint** that a technology needs all its prerequisites.
+- **The tech screen's mark covers the tech screen only** (added 2026-11-21, `Hk_TechRequireAllMark`): the node's title
+  and its tooltip. The search results, the research widget outside the tech screen and the "technology researched"
+  notification show the plain title. The tooltip line is English unless `TechRequireAllTooltip` and
+  `TechRequireAllTooltipMany` are set. The mark shows after the first research update of the process (the list's census
+  publishes what to mark). Seen in the game the same day, on World-Wide Web: the `[SharedProject]` symbol in front of
+  the title (the user: "the icon looks good") and a tooltip line with the prerequisites' titles; the game's font has
+  `&` and `»` but shows `?` for `⋀` and `⇉`. The wording was then changed at the user's request to *Requires both A
+  and B*, in italics. **Not seen in a game:** the three-or-more wording (no listed technology has three), and Masonry,
+  whose two prerequisites have no title in the editor's Tech Requires All window (the game's own titles are used here).
 - **The planner walks up to 32 levels where the game stops at 5** (`TryFillParentTechnologiesToCompleteBefore`), in a
   tree that holds a listed technology. Deliberate; noted because it is a difference from the game.
 - **The new window depends on a local change to the Tech Tree viewer.** `TechRequireAllWindow` reuses the viewer's

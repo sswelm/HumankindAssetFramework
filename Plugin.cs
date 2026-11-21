@@ -154,6 +154,9 @@ namespace HumankindAssetFramework
         internal static ConfigEntry<bool>   FormationOverrideOn;  // FORMATION axis: haf_formations.json (Formation Override window) — inject custom formations + repoint units (pawn count per unit)
         internal static ConfigEntry<bool>   FormationReinstantiateOn; // FORMATION axis: after apply, re-instantiate already-spawned units of a repointed type so they reach the new pawn count (fixes the load-race undercount)
         internal static ConfigEntry<bool>   TechRequireAllOn;     // TECHNOLOGIES: haf_tech_requires_all.json (Tech Requires All window) — listed technologies unlock only when ALL their prerequisites are completed
+        internal static ConfigEntry<string> TechRequireAllMark;    // TECHNOLOGIES: the tech screen's mark in front of a listed technology's title (display only)
+        internal static ConfigEntry<string> TechRequireAllTooltip; // TECHNOLOGIES: the line added to a listed technology's tooltip when it has two prerequisites, {0} and {1} (display only)
+        internal static ConfigEntry<string> TechRequireAllTooltipMany; // TECHNOLOGIES: the same line for three or more prerequisites, {0} = all but the last, {1} = the last (display only)
 
         private bool show;
         private Rect winRect = new Rect(60, 60, 520, 420);
@@ -221,6 +224,7 @@ namespace HumankindAssetFramework
                 typeof(Hk_TechRequireAllCheck),  // TECHNOLOGIES: a listed technology stays locked until ALL its prerequisites are completed (vanilla: any one) (2026-11-20)
                 typeof(Hk_TechRequireAllQueue),  // TECHNOLOGIES: queueing a locked technology puts EVERY missing prerequisite of a listed one in front (vanilla: one chain) (2026-11-20)
                 typeof(Hk_TechRequireAllRemove), // TECHNOLOGIES: the game's removal cascade survives a technology queued behind two prerequisites; NOT gated on the list, the constraints are in the save (2026-11-20)
+                typeof(Hk_TechRequireAllMark),   // TECHNOLOGIES: the tech screen marks a listed technology and its tooltip names the prerequisites it waits for; display only, main thread (2026-11-21)
         };
 
         private void Awake()
@@ -483,9 +487,20 @@ namespace HumankindAssetFramework
                                   "List-driven prerequisite rule (the Tech Requires All editor window): reads haf_tech_requires_all.json. " +
                                   "A technology named there becomes available only when ALL its prerequisites are completed (the game's own " +
                                   "rule is ANY ONE), and queueing it while locked queues every missing prerequisite in front of it. Changes " +
-                                  "the simulation: in multiplayer every player needs the same list. No baked assets, nothing in the save: " +
-                                  "remove a name and that technology is vanilla on the next launch. Inert when the file is absent or empty. " +
-                                  "false = ignore the file.");
+                                  "the simulation: in multiplayer every player needs the same list. No baked assets: remove a name and that " +
+                                  "technology is vanilla on the next launch (a research queue planned with the list keeps its order in the " +
+                                  "save). Inert when the file is absent or empty. false = ignore the file.");
+            TechRequireAllMark = Config.Bind("Technologies", "TechRequireAllMark", TechRequireAllRules.DefaultMark,
+                                  "What the tech screen puts in front of the title of a technology that needs ALL its prerequisites. Plain " +
+                                  "text or the game's own text markup: an inline symbol such as [Technology], a colour as <c=FFCC66>&</c>. " +
+                                  "Empty = no mark. Display only.");
+            TechRequireAllTooltip = Config.Bind("Technologies", "TechRequireAllTooltip", TechRequireAllRules.DefaultTooltip,
+                                  "The line added to the tooltip of such a technology on the tech screen when it has exactly TWO " +
+                                  "prerequisites: {0} is the first one's title, {1} the second's, {2} the mark above. The game's text markup works (<i>, <b>, " +
+                                  "<c=RRGGBB>). Empty = no line. Display only.");
+            TechRequireAllTooltipMany = Config.Bind("Technologies", "TechRequireAllTooltipMany", TechRequireAllRules.DefaultTooltipMany,
+                                  "The same line for a technology with THREE OR MORE prerequisites: {0} is every title but the last, " +
+                                  "comma-separated, {1} the last, {2} the mark. Without {1} the whole list goes into {0}. Empty = no line. Display only.");
 
             // Patch each hook independently so a single missing Amplitude target (a game update renaming one type) only
             // disables THAT hook -- instead of a null TargetMethod throwing out of PatchAll and failing the whole plugin.
