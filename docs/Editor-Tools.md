@@ -658,6 +658,11 @@ windows. **Deep dive:**
     replaced by a warning; the list's own window says why, and **Reload** reads it again.
   - **Position X / Y.** The selected card's position in grid cells, as two number fields (type, or drag the `X` / `Y`
     label). Same staged values as a drag on the canvas. A coordinate stops at 0, or as low as it already is.
+  - **Shift.** A number of columns and a button under the position: every card whose column is right of the
+    selected card's moves by that many columns (negative = to the left), to make room in the tree or to close a
+    gap. The selected card and the cards in its own column stay. Each moved card is a staged position like a
+    drag's, so Save writes them and the opposite number takes the shift back. A shift to the left stops where the
+    nearest card would reach the selected card's column; the line under the button says what was moved.
   - **In the game / Switched off** (`TechnologyDefinition.Visibility`). `Never` does more than hide a technology: the
     game creates a technology for an empire only when its Visibility is not `Never`, so by the game's own rules a
     `Never` technology is not on the tech screen and cannot be researched, traded or granted, and a technology that

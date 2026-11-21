@@ -10,6 +10,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Tech Tree viewer: shift everything right of a card (2026-11-21).** Asked for by the user: making room in the
+  tree meant moving every later card by hand. The side strip has a number of columns and a button; every card
+  whose column is right of the selected card's moves by that number (negative = left), each as a staged position,
+  so Save writes them and the opposite number takes the shift back. The selected card and its own column stay. A
+  shift to the left stops where the nearest card would reach the selected card's column. Checked: 7 drill checks
+  (131 in all), three planted defects caught. Not checked: a click on the button, and a shift saved in the real
+  project (it stages positions the way a drag does, and that path was run on the real data in PR #301's third
+  review round).
 - **The Tech Tree viewer edits the tree (2026-11-21, PR #301).** Asked for by the user in one sitting, after the
   Tech Requires All list went into the game. What the viewer does now:
   - **OR / AND.** The side strip said `Prerequisites (OR)` for every technology, also for one in the Tech Requires

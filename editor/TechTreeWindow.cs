@@ -36,6 +36,8 @@ using UnityEngine;
 ///  - Frame All may zoom below the wheel's floor (MIN_ZOOM); a drag starts after a few pixels and not on a card
 ///    that is only a pixel or two high.
 ///  - Seams and hooks for the list's window and the drill: BuildTreeImpl, RepaintOpenWindows.
+///  - Shift: every card right of the selected one moved by a number of columns, as one staged edit per card
+///    (ShiftRightOf; asked for by the user, 2026-11-21, to make room in the tree without moving cards one by one).
 /// </summary>
 public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 {
@@ -64,6 +66,9 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     [SerializeField] List<PendingRecord> _pendingRecords = new List<PendingRecord>();
     [SerializeField] string _selectedName;   // the selection across a script reload
     [SerializeField] string _stagedSession;  // the editor session the staged edits belong to (see OnEnable)
+    [SerializeField] int _shiftBy = 5;       // the side strip's Shift field: columns, negative = to the left
+    string _shiftNote = "";                  // what the last Shift did, shown under its row until the selection changes
+    string _shiftNoteFor;                    // the technology that note belongs to
 
     void ISerializationCallbackReceiver.OnBeforeSerialize()
     {
@@ -821,6 +826,22 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 EditorGUILayout.EndHorizontal();
                 if (x != EffX(n) || y != EffY(n)) SetPosition(n, x, y);
 
+                // everything right of this card, moved as one: to make room for new technologies, or to close a gap
+                int rightOf = _nodes.Count(o => o != n && EffX(o) > EffX(n));
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Label(new GUIContent("Shift", "Moves EVERY card whose column is right of this card's by that many columns (negative = to the left). This card and the cards in its own column stay. Staged like a drag: Save writes it, the opposite number takes it back."), GUILayout.Width(54));
+                _shiftBy = EditorGUILayout.IntField(_shiftBy, GUILayout.Width(46));
+                using (new EditorGUI.DisabledScope(rightOf == 0 || _shiftBy == 0))
+                    if (GUILayout.Button(ShiftLabel(rightOf, _shiftBy), EditorStyles.miniButton))
+                    {
+                        int asked = _shiftBy;
+                        int moved = ShiftRightOf(n, asked, out int applied);
+                        _shiftNote = ShiftNote(moved, asked, applied); _shiftNoteFor = n.Name;
+                        GUIUtility.keyboardControl = 0;
+                    }
+                EditorGUILayout.EndHorizontal();
+                if (_shiftNote != "" && _shiftNoteFor == n.Name) EditorGUILayout.LabelField(_shiftNote, EditorStyles.wordWrappedMiniLabel);
+
                 // in the game or switched off (TechnologyDefinition.Visibility), staged like the rest
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.Label(new GUIContent("Game", "Whether the game has this technology at all. Switched off = Visibility Never: no empire gets it."), GUILayout.Width(54));
@@ -955,6 +976,51 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         p.Visibility = visibility != n.BaseVisibility ? (int?)visibility : null;   // equal to base = no change
         DropIfClean(n);
         Repaint();
+    }
+
+    // ── Shift: every card right of one card, moved together ───────────────────
+    /// <summary>
+    /// Moves every card whose column is right of `anchor`'s by `columns` (negative = left), each as a staged position
+    /// like a drag's. The anchor and the cards in its own column stay. A move to the left stops where the nearest
+    /// card would reach the anchor's column (ShiftLimit), so the cards stay right of the anchor and the opposite
+    /// number always takes the move back. Returns how many cards are right of the anchor; `applied` = the columns
+    /// they were moved by.
+    /// </summary>
+    internal int ShiftRightOf(TechTreeData.Node anchor, int columns, out int applied)
+    {
+        int anchorX = EffX(anchor);
+        var right = _nodes.Where(o => o != anchor && EffX(o) > anchorX).ToList();   // decided before anything moves
+        applied = ShiftLimit(anchorX, right.Select(EffX), columns);
+        if (applied != 0)
+            foreach (var o in right) SetPosition(o, EffX(o) + applied, EffY(o));
+        return right.Count;
+    }
+
+    /// <summary>The columns a shift may move by: all of them to the right; to the left, up to the column after the anchor's.</summary>
+    internal static int ShiftLimit(int anchorX, IEnumerable<int> rightColumns, int columns)
+    {
+        if (columns >= 0) return columns;
+        int nearest = int.MaxValue;
+        foreach (int x in rightColumns) nearest = Math.Min(nearest, x);
+        if (nearest == int.MaxValue) return 0;
+        return Math.Max(columns, -(nearest - anchorX - 1));
+    }
+
+    internal static string ShiftLabel(int cards, int columns) =>
+        cards == 0 ? "No card is right of this one"
+        : $"Move the {cards} card{(cards == 1 ? "" : "s")} right of this by {columns}";
+
+    internal static string ShiftNote(int cards, int asked, int applied)
+    {
+        if (cards == 0) return "No card is right of this one.";
+        string side = applied < 0 ? "left" : "right";
+        int by = Math.Abs(applied);
+        string what = applied == 0
+            ? $"Nothing moved: the nearest of the {cards} card{(cards == 1 ? "" : "s")} right of this one is already in the next column."
+            : $"Moved {cards} card{(cards == 1 ? "" : "s")} {by} column{(by == 1 ? "" : "s")} to the {side}. Staged: Save writes it, {(-applied).ToString("+0;-0")} takes it back.";
+        if (applied != asked && applied != 0)
+            what += $" ({asked} was asked: the nearest card stops in the column after this one.)";
+        return what;
     }
 
     /// <summary>
