@@ -73,9 +73,19 @@ public static class MaxImport
             EditorUtility.DisplayProgressBar("3ds Max file", "Reading " + Path.GetFileName(maxPath) + " ...", 0.3f);
             report = MaxModel.ConvertToGlb(maxPath, target, Decode);
         }
-        catch (Exception e) when (e is InvalidDataException || e is NotSupportedException || e is IOException || e is UnauthorizedAccessException)
+        // EVERY failure ends in the dialog: this is the user's door, and a file the reader's own guards did not foresee
+        // (an exception of another kind) must not surface as a bare Console error with the picker doing nothing.
+        // The message then carries the exception's type, so a report of it names the gap.
+        catch (Exception e)
         {
             EditorUtility.ClearProgressBar();
+            bool foreseen = e is InvalidDataException || e is NotSupportedException || e is IOException || e is UnauthorizedAccessException;
+            if (!foreseen)
+            {
+                Debug.LogError("[HAF] the .max reader failed in a way it does not name (please report this file): " + maxPath + "\n" + e);
+                EditorUtility.DisplayDialog("3ds Max file not read", Path.GetFileName(maxPath) + " could not be converted - the reader failed in a way it does not name (" + e.GetType().Name + "):\n\n" + e.Message + "\n\nThe Console holds the details.", "OK");
+                return null;
+            }
             Debug.LogError("[HAF] the .max file could not be converted: " + maxPath + "\n" + e);
             EditorUtility.DisplayDialog("3ds Max file not read", Path.GetFileName(maxPath) + " could not be converted:\n\n" + e.Message, "OK");
             return null;

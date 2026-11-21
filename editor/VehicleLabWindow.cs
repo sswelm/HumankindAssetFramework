@@ -607,7 +607,7 @@ public class VehicleLabWindow : EditorWindow
             }
         }
         // a typed .max path: a Convert button under the field
-        MaxImport.TypedPathGui(srcFile, glb =>
+        if (MaxModel.IsMax(srcFile)) MaxImport.TypedPathGui(srcFile, glb =>
         {
             srcFile = glb;
             status = parts.Count > 0 ? $"Source converted; {parts.Count} marked part(s) KEPT — press Probe parts to re-list against the new file." : "3ds Max file converted — press Probe parts.";

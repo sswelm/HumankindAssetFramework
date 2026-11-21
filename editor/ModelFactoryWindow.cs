@@ -1121,7 +1121,7 @@ public class ModelFactoryWindow : EditorWindow
             }
         }
         // a typed .max path: a Convert button under the field
-        { var entry = cur; MaxImport.TypedPathGui(entry.modelFile, glb => { entry.modelFile = glb; Repaint(); }); }
+        if (MaxModel.IsMax(cur.modelFile)) { var entry = cur; MaxImport.TypedPathGui(entry.modelFile, glb => { entry.modelFile = glb; Repaint(); }); }
         // BROKEN-LINK REPORT: a referenced model file that isn't on disk (source moved/renamed) — warn as soon as the
         // entry is shown, not only when Bake fails.
         if (!string.IsNullOrWhiteSpace(cur.modelFile) && !System.IO.File.Exists(cur.modelFile))

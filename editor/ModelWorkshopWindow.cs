@@ -228,7 +228,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             }
         }
         // a typed .max path: a Convert button under the field
-        MaxImport.TypedPathGui(srcFile, glb => { srcFile = glb; outGlbAuto = true; rows.Clear(); groupLabels.Clear(); DestroyPreview(); Repaint(); });
+        if (MaxModel.IsMax(srcFile)) MaxImport.TypedPathGui(srcFile, glb => { srcFile = glb; outGlbAuto = true; rows.Clear(); groupLabels.Clear(); DestroyPreview(); Repaint(); });
         // AUTO-DERIVED OUTPUT that TRACKS the source (external review of PR #22, 2026-09-07): the old
         // fill-when-empty derived exactly once — typing a source path derived from the FIRST keystroke's
         // fragment and then stuck (the reset below fires only while rows exist), so Split could write the
