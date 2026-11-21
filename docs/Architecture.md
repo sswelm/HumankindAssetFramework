@@ -43,7 +43,8 @@ on it. The rule that guards this (and the failure it came from — two confirmed
 | `Hk_AnimatedBonePoolHeadroom` | `PawnManager.Load` (per session, possibly off-thread) | **sets** `reloadRearmPending` (volatile) |
 | Sandbox.Load hook | `Sandbox.Load` (save-load, possibly off-thread) | **sets** `districtResetPending` + `reloadRearmPending` (volatile) |
 | `FacingPersist` save/load | game save/load (may be off-thread) | reads a main-thread snapshot under `lock`; arms a file for the tick |
-| `Hk_TechRequireAllCheck` / `Hk_TechRequireAllQueue` / `Hk_TechRequireAllRemove` | `DepartmentOfScience` (sim: order processing, turn end) | no Unity object. Own state (the list, the bind) behind one `lock`; the list is published once and never mutated, and so is the map of what the tech screen marks, which the first census builds here and the main-thread display hook `Hk_TechRequireAllMark` only reads. Reads the game's technologies by reflection; the queue hook **writes simulation state on purpose**, through the game's own `AddTechnologyToQueue` / `MoveTechnologyInQueue` and the queue's constraint list — the only HAF hooks that do |
+| `Hk_TechRequireAllCheck` / `Hk_TechRequireAllQueue` / `Hk_TechRequireAllRemove` | `DepartmentOfScience` (sim: order processing, turn end) | Reads the game's technologies by reflection. The configured list is published once and shared read-only under the same lifecycle as the simulation bindings. The queue hook writes through the game's `AddTechnologyToQueue` / `MoveTechnologyInQueue` and the queue's constraint list. |
+| `Hk_TechRequireAllMark` | `TechnologyItem.RefreshTooltips` (main thread) | Reads the configured list and the game's current `TechnologyInfo` snapshot. Title and tooltip writes stay on the main thread. |
 
 Everything else — `Plugin.Update`, every `Process*`/`Poll*`/`Tick*`, the pose hook, the district handlers — is
 main-thread.

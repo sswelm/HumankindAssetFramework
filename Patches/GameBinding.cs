@@ -152,6 +152,7 @@ namespace HumankindAssetFramework
         internal static Type TechItemLabel              => CachedDerived("TechItemLabel",       () => FieldOrPropType(TechnologyItem, "title"));           // the title's label widget
         internal static Type TechItemTooltipTarget      => CachedDerived("TechItemTooltipTarget", () => FieldOrPropType(TechnologyItem, "tooltipTarget"));  // what the node's tooltip reads its texts from
         internal static Type TechnologyItem             => Cached("Amplitude.Mercury.UI.TechnologyItem");                        // one node of the tech screen (TechRequireAllHint: the mark and the tooltip line)
+        internal static Type TechnologyInfo             => Cached("Amplitude.Mercury.Interop.TechnologyInfo");                    // the current tech screen snapshot
         internal static Type ArrayWithFrame             => Cached("Amplitude.Mercury.Interop.ArrayWithFrame`1");               // DepartmentOfScience.Technologies: the array sits in its Data field
 
         // ---- A5, the STRUCT BATCH (2026-08-19): game structs HAF reaches STRUCTURALLY — as array elements and
@@ -570,6 +571,7 @@ namespace HumankindAssetFramework
             new Dep(TechnologyDefinition, nameof(TechnologyDefinition), "TechnologyPrerequisite", "Name"),
             new Dep(TechnologyPrerequisite, nameof(TechnologyPrerequisite), "TechnologyNames"),
             new Dep(TechnologyItem, nameof(TechnologyItem), "RefreshTooltips", "TechnologyDefinitionName", "Title", "title", "tooltipTarget"),   // the tech screen's mark (TechRequireAllHint)
+            new Dep(TechnologyInfo, nameof(TechnologyInfo), "PrerequisiteTechnologyNames"),
             new Dep(TechItemLabel, nameof(TechItemLabel), "Text"),
             new Dep(TechItemTooltipTarget, nameof(TechItemTooltipTarget), "Description"),
             new Dep(ArrayWithFrame, nameof(ArrayWithFrame), "Data"),

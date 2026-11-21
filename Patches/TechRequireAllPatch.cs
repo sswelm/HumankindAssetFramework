@@ -50,12 +50,7 @@ namespace HumankindAssetFramework
         [ProcessLived("the list from haf_tech_requires_all.json: read once, replaced whole, never mutated")]
         static volatile HashSet<string> listed = new HashSet<string>(StringComparer.Ordinal);
         static Bind bind;   // resolved under `gate`, read-only afterwards
-        // What the tech screen's hint reads (Hk_TechRequireAllMark, MAIN thread): each listed technology that has two
-        // or more prerequisites -> their names. Built by the first census on the simulation thread and published
-        // whole; null until then, so a screen opened before the first research update shows no mark.
-        [ProcessLived("listed technology -> prerequisite names: published whole by the first census, never mutated")]
-        static volatile Dictionary<string, string[]> hinted;
-        internal static Dictionary<string, string[]> Hinted => hinted;
+        internal static bool IsListed(string name) => listed.Contains(name);
 
         internal static bool Active
         {
@@ -189,20 +184,14 @@ namespace HumankindAssetFramework
             var v = new View(b, dept);
             var seen = new HashSet<string>(StringComparer.Ordinal);
             var single = new List<string>();
-            var hints = new Dictionary<string, string[]>(StringComparer.Ordinal);
             for (int i = 0; i < v.Count; i++)
             {
                 var def = v.Def(i);
                 string name = b.NameOf(def);
                 if (!listed.Contains(name)) continue;
                 seen.Add(name);
-                var prerequisites = b.NamesOf(def);
-                if ((prerequisites?.Length ?? 0) < 2) { single.Add(name); continue; }
-                var names = new string[prerequisites.Length];
-                for (int k = 0; k < names.Length; k++) names[k] = prerequisites.GetValue(k)?.ToString() ?? "";
-                hints[name] = names;
+                if ((b.NamesOf(def)?.Length ?? 0) < 2) single.Add(name);
             }
-            hinted = hints;
             var missing = listed.Where(n => !seen.Contains(n)).OrderBy(n => n, StringComparer.Ordinal).ToArray();
             if (missing.Length > 0) Plugin.Log.LogWarning($"[TechAll] {missing.Length} listed name(s) are not technologies in this game (no effect): {string.Join(", ", missing)}");
             if (single.Count > 0) Plugin.Log.LogWarning($"[TechAll] {single.Count} listed technolog{(single.Count == 1 ? "y has" : "ies have")} fewer than two prerequisites (no effect): {string.Join(", ", single)}");
@@ -361,7 +350,7 @@ namespace HumankindAssetFramework
         sealed class UiBind
         {
             public readonly PropertyInfo DefinitionName, Title, Text;
-            public readonly FieldInfo Label, Target, Description;
+            public readonly FieldInfo Label, Target, Description, Prerequisites;
             public UiBind(Type item)
             {
                 DefinitionName = UiProperty(item, "TechnologyDefinitionName");
@@ -370,6 +359,7 @@ namespace HumankindAssetFramework
                 Text = UiProperty(Label.FieldType, "Text");
                 Target = UiField(item, "tooltipTarget");
                 Description = UiField(Target.FieldType, "Description");
+                Prerequisites = UiField(GameBinding.TechnologyInfo, "PrerequisiteTechnologyNames");
                 if (Text.PropertyType != typeof(string) || Description.FieldType != typeof(string) || Title.PropertyType != typeof(string))
                     throw new InvalidOperationException("the tech item's title, label text or tooltip description is no longer a string");
             }
@@ -384,22 +374,20 @@ namespace HumankindAssetFramework
         static UiBind ui;
         [MainThread("the tech screen's refresh")] [ProcessLived("set when the tech item's members did not resolve: the hint stays off, said once")]
         static bool unusable;
-        [MainThread("the tech screen's refresh")] [ProcessLived("the hint map `wanted` was built from")]
-        static Dictionary<string, string[]> wantedFor;
-        [MainThread("the tech screen's refresh")] [ProcessLived("every prerequisite name of a hinted technology")]
-        static HashSet<string> wanted = new HashSet<string>(StringComparer.Ordinal);
-        [MainThread("the tech screen's refresh")] [ProcessLived("prerequisite name -> the title its own tech item showed last")]
+        [MainThread("the tech screen's refresh")] [ProcessLived("technology name -> the localized title last supplied by its tech item")]
         static readonly Dictionary<string, string> titles = new Dictionary<string, string>(StringComparer.Ordinal);
+        sealed class TitleMark { public string Text; }
+        [MainThread("the tech screen's refresh")] [ProcessLived("title marks for live widgets, with weak object keys")]
+        static readonly WeakKeyed<TitleMark> marks = new WeakKeyed<TitleMark>();
 
         internal static string Mark => Plugin.TechRequireAllMark != null ? Plugin.TechRequireAllMark.Value : TechRequireAllRules.DefaultMark;
         internal static string Tooltip => Plugin.TechRequireAllTooltip != null ? Plugin.TechRequireAllTooltip.Value : TechRequireAllRules.DefaultTooltip;
         internal static string TooltipMany => Plugin.TechRequireAllTooltipMany != null ? Plugin.TechRequireAllTooltipMany.Value : TechRequireAllRules.DefaultTooltipMany;
 
-        /// <summary>Called after the game refreshed one tech item's tooltip (it has just set the plain title and description).</summary>
-        internal static void Apply(object item)
+        /// <summary>Called after the game refreshed the tooltip from the current technology snapshot.</summary>
+        internal static void Apply(object item, object technologyInfo)
         {
-            var map = TechRequireAll.Hinted;
-            if (unusable || item == null || map == null || map.Count == 0) return;
+            if (unusable || item == null || technologyInfo == null) return;
             UiBind b = ui;
             if (b == null)
             {
@@ -411,39 +399,49 @@ namespace HumankindAssetFramework
                     return;
                 }
             }
-            if (!ReferenceEquals(wantedFor, map))
-            {
-                var all = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var names in map.Values) foreach (var n in names) all.Add(n);
-                wanted = all; wantedFor = map;
-            }
             string name = b.DefinitionName.GetValue(item, null)?.ToString() ?? "";
-            bool isPrerequisite = wanted.Contains(name);
-            bool isHinted = map.TryGetValue(name, out var prerequisites);
-            if (!isPrerequisite && !isHinted) return;
             string title = b.Title.GetValue(item, null) as string ?? "";
-            if (isPrerequisite && title.Length > 0) titles[name] = title;
-            if (!isHinted) return;
+            if (name.Length > 0 && title.Length > 0) titles[name] = title;
+            var prerequisites = TechRequireAll.IsListed(name) ? b.Prerequisites.GetValue(technologyInfo) as Array : null;
+            bool needsHint = prerequisites != null && prerequisites.Length >= 2;
+            string mark = needsHint ? (Mark ?? "").Trim() : "";
+            ApplyTitleMark(b, item, title, mark);
+            if (!needsHint) return;
 
-            string mark = (Mark ?? "").Trim();
-            if (mark.Length > 0)
-            {
-                object label = b.Label.GetValue(item);
-                string marked = TechRequireAllRules.MarkedTitle(mark, title);
-                // only when it differs: setting a label's text makes the game lay it out again
-                if (label != null && !string.Equals(b.Text.GetValue(label, null) as string, marked, StringComparison.Ordinal))
-                    b.Text.SetValue(label, marked, null);
-            }
             object target = b.Target.GetValue(item);
             if (target == null) return;
             var shown = new string[prerequisites.Length];
             for (int k = 0; k < shown.Length; k++)
-                shown[k] = titles.TryGetValue(prerequisites[k], out var t) ? t : prerequisites[k];
+            {
+                string prerequisite = prerequisites.GetValue(k)?.ToString() ?? "";
+                shown[k] = titles.TryGetValue(prerequisite, out var t) ? t : prerequisite;
+            }
             string line = TechRequireAllRules.TooltipLine(Tooltip, TooltipMany, shown, mark);
             if (line.Length == 0) return;
             string description = b.Description.GetValue(target) as string;
             string with = TechRequireAllRules.WithTooltipLine(description, line);
             if (!string.Equals(description, with, StringComparison.Ordinal)) b.Description.SetValue(target, with);
+        }
+
+        static void ApplyTitleMark(UiBind b, object item, string title, string mark)
+        {
+            // RefreshTooltips rebuilds the description, but only Bind resets the label. Track marks we wrote
+            // so an already-bound item can return to its plain title when the mark is no longer needed.
+            if (mark.Length == 0)
+            {
+                if (!marks.TryGetValue(item, out var previous)) return;
+                object oldLabel = b.Label.GetValue(item);
+                if (oldLabel != null && string.Equals(b.Text.GetValue(oldLabel, null) as string, previous.Text, StringComparison.Ordinal))
+                    b.Text.SetValue(oldLabel, title, null);
+                marks.Remove(item);
+                return;
+            }
+
+            object label = b.Label.GetValue(item);
+            string marked = TechRequireAllRules.MarkedTitle(mark, title);
+            if (label == null || string.Equals(b.Text.GetValue(label, null) as string, marked, StringComparison.Ordinal)) return;
+            b.Text.SetValue(label, marked, null);
+            marks.GetValue(item, _ => new TitleMark()).Text = marked;
         }
     }
 
@@ -459,10 +457,10 @@ namespace HumankindAssetFramework
         }
 
         // Runs for every visible tech item on every refresh of the tech screen: without a list it returns at once.
-        static void Postfix(object __instance)
+        static void Postfix(object __instance, object __0)
         {
             if (!TechRequireAll.Active) return;
-            try { TechRequireAllHint.Apply(__instance); }
+            try { TechRequireAllHint.Apply(__instance, __0); }
             catch (Exception ex) { Plugin.LogOnceWarning("techall:mark:" + ex.GetType().Name, "[TechAll] marking a tech item failed — the game's own title and tooltip stand (first occurrence): " + ex); }
         }
     }

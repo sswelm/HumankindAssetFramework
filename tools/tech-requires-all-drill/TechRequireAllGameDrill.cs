@@ -228,8 +228,15 @@ static class TechRequireAllGameDrill
         fCollab.SetValue(item, FormatterServices.GetUninitializedObject(fCollab.FieldType));
         return item;
     }
-    static void RefreshItem(object item) =>
-        mRefreshTooltips.Invoke(item, new[] { Activator.CreateInstance(mRefreshTooltips.GetParameters()[0].ParameterType.GetElementType()) });
+    static void RefreshItem(object item, params string[] prerequisites)
+    {
+        var infoType = mRefreshTooltips.GetParameters()[0].ParameterType.GetElementType();
+        var info = Activator.CreateInstance(infoType);
+        var names = Array.CreateInstance(tSS, prerequisites.Length);
+        for (int i = 0; i < prerequisites.Length; i++) names.SetValue(SS(prerequisites[i]), i);
+        infoType.GetField("PrerequisiteTechnologyNames").SetValue(info, names);
+        mRefreshTooltips.Invoke(item, new[] { info });
+    }
     static string LabelOf(object item) => labelText[tItem.GetField("title", ALL).GetValue(item)];
     static string DescriptionOf(object item)
     {
@@ -348,21 +355,40 @@ static class TechRequireAllGameDrill
         Check("shared array: unlisted U unlocks when the listed definition comes last", GameCheck("U"));
         Check("shared array: listed T still waits for B", !GameCheck("T"));
 
-        // The tech screen: the census of the state updates above has published T -> A, B.
+        // The tech screen receives T -> A, B through TechnologyInfo.
         Console.WriteLine("--- the tech screen's mark and tooltip line ---");
         var itemT = Item("T", "Tee"); var itemU = Item("U", "You"); var itemA = Item("A", "Alpha"); var itemB = Item("B", "Beta");
         labelSets = 0;
-        RefreshItem(itemT);
+        RefreshItem(itemT, "A", "B");
         Check("listed T: marked, and the tooltip names its prerequisites (internal names until their items are seen)",
               Shown(itemT) == "[SharedProject] Tee | desc\\n[SharedProject] <i>Requires both A and B</i>", Shown(itemT));
         RefreshItem(itemA); RefreshItem(itemB);
         Check("prerequisites A and B themselves: untouched", Shown(itemA) == "Alpha | desc" && Shown(itemB) == "Beta | desc", Shown(itemA) + " || " + Shown(itemB));
-        RefreshItem(itemT);
+        RefreshItem(itemT, "A", "B");
         Check("listed T: the tooltip now uses the titles the screen showed for A and B", Shown(itemT) == "[SharedProject] Tee | desc\\n[SharedProject] <i>Requires both Alpha and Beta</i>", Shown(itemT));
-        RefreshItem(itemT);
+        RefreshItem(itemT, "A", "B");
         Check("listed T: three refreshes wrote its label once", labelSets == 1, "label writes " + labelSets);
-        RefreshItem(itemU);
+        RefreshItem(itemU, "A", "B");
         Check("unlisted U (same prerequisites): plain title and description, label never written", Shown(itemU) == "You | desc" && labelSets == 1, Shown(itemU) + " | label writes " + labelSets);
+
+        // Loading another tech tree can replace a definition's prerequisites while the config list stays active.
+        Build(("A", new string[0], 3), ("C", new string[0], 2), ("T", new[] { "A", "C" }, 1));
+        GameCheck("T");
+        var itemC = Item("C", "Charlie");
+        RefreshItem(itemC);
+        RefreshItem(itemT, "A", "C");
+        Check("after changing trees, T shows the current prerequisites",
+              Shown(itemT) == "[SharedProject] Tee | desc\\n[SharedProject] <i>Requires both Alpha and Charlie</i>", Shown(itemT));
+
+        Build(("A", new string[0], 3), ("T", new[] { "A" }, 1));
+        GameCheck("T");
+        RefreshItem(itemT, "A");
+        Check("T with only one prerequisite restores its plain title and tooltip", Shown(itemT) == "Tee | desc", Shown(itemT));
+
+        RefreshItem(itemT, "A", "B");
+        labelText[tItem.GetField("title", ALL).GetValue(itemT)] = "Custom title";
+        RefreshItem(itemT, "A");
+        Check("removing the hint preserves a label changed elsewhere", Shown(itemT) == "Custom title | desc", Shown(itemT));
 
         Tree(2, 2, 1);
         GameQueue("C", 1);

@@ -39,11 +39,13 @@ The planner also refuses a locked technology whose prerequisite names are all un
 for a listed technology with only one prerequisite. Three cases hold the tech screen's hint: the marked title, the
 tooltip line (a config text with a stray brace must not throw) and that the line is added once.
 `bash tools/tech_requires_all_game_drill.sh` runs the hooks against the **installed game's own assemblies**. The
-32 checks cover state updates, locked enqueue, cascading removal and the tech screen's mark. For the mark the game's
+35 checks cover state updates, locked enqueue, cascading removal and the tech screen's mark. For the mark the game's
 own `TechnologyItem.RefreshTooltips` runs on items built without Unity, with three UI leaves stubbed (the description
 builder and the two widget setters): a listed technology gets the mark and the tooltip line, first with internal
 names and then with the titles the screen showed for its prerequisites, three refreshes write its label once, and an
 unlisted technology with the same prerequisites is untouched; the control shows the plain title without the hook.
+The drill changes the current prerequisite snapshot for an already-bound node. Its tooltip updates to the new names,
+and reducing the list to one prerequisite removes HAF's mark while preserving a title written elsewhere.
 No pixel is drawn in the drill: how the mark looks is judged in the game. Four assertions share a prerequisite array
 between a listed and an unlisted definition in both registration orders. Before the fix, whichever definition came
 last supplied the rule for both. The game drill runs the original state update loop with the era check, Sandbox frame
