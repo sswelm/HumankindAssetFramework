@@ -179,6 +179,72 @@ static class TechRequireAllGameDrill
         catch (TargetInvocationException ex) { return ex.InnerException ?? ex; }
     }
 
+    // ---- the tech screen's mark: the game's own TechnologyItem.RefreshTooltips runs, with its three UI leaves stubbed
+    // (the description builder, which reads the live game's formatters, and the two widget setters, which draw) ----
+    sealed class ByReference : IEqualityComparer<object>   // a widget built without Unity has no identity of its own
+    {
+        public new bool Equals(object a, object b) => ReferenceEquals(a, b);
+        public int GetHashCode(object o) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(o);
+    }
+    static readonly Dictionary<object, string> labelText = new Dictionary<object, string>(new ByReference());
+    static int labelSets;
+    static bool LabelSetStub(object __instance, string value) { labelText[__instance] = value; labelSets++; return false; }
+    static bool LabelGetStub(object __instance, ref string __result) { labelText.TryGetValue(__instance, out __result); return false; }
+    static bool DescriptionStub(ref string itemTooltipDescription, ref string scienceCollaborationTooltipDescription)
+    { itemTooltipDescription = "desc"; scienceCollaborationTooltipDescription = ""; return false; }
+    static bool SkipStub() => false;
+
+    static Type tItem;
+    static MethodInfo mRefreshTooltips;
+    static void StubTechScreen(Harmony h)
+    {
+        tItem = Assembly.LoadFrom(Path.Combine(Managed, "Assembly-CSharp.dll")).GetType("Amplitude.Mercury.UI.TechnologyItem", true);
+        mRefreshTooltips = AccessTools.Method(tItem, "RefreshTooltips");
+        var me = typeof(TechRequireAllGameDrill);
+        var tLabel = tItem.GetField("title", ALL).FieldType;
+        h.Patch(AccessTools.PropertySetter(tLabel, "Text"), prefix: new HarmonyMethod(me.GetMethod(nameof(LabelSetStub), ALL)));
+        h.Patch(AccessTools.PropertyGetter(tLabel, "Text"), prefix: new HarmonyMethod(me.GetMethod(nameof(LabelGetStub), ALL)));
+        h.Patch(AccessTools.Method(tItem, "GetTooltipsDescriptions"), prefix: new HarmonyMethod(me.GetMethod(nameof(DescriptionStub), ALL)));
+        var message = AccessTools.PropertySetter(tItem.GetField("scienceCollaborationTooltip", ALL).FieldType, "Message");
+        if (message != null) h.Patch(message, prefix: new HarmonyMethod(me.GetMethod(nameof(SkipStub), ALL)));
+    }
+    // One tech item as the screen holds it after Bind: its cache names the technology, its label shows the plain title.
+    static object Item(string name, string title)
+    {
+        var item = FormatterServices.GetUninitializedObject(tItem);
+        var fCache = tItem.GetField("cache", ALL);
+        var cache = Activator.CreateInstance(fCache.FieldType);
+        fCache.FieldType.GetField("DefinitionName", ALL).SetValue(cache, SS(name));
+        fCache.FieldType.GetField("LocalizedTitle", ALL).SetValue(cache, title);
+        fCache.FieldType.GetField("LocalizedDescription", ALL).SetValue(cache, "");
+        fCache.SetValue(item, cache);
+        var fLabel = tItem.GetField("title", ALL);
+        var label = FormatterServices.GetUninitializedObject(fLabel.FieldType);
+        fLabel.SetValue(item, label);
+        labelText[label] = title;
+        var fTarget = tItem.GetField("tooltipTarget", ALL);
+        fTarget.SetValue(item, Activator.CreateInstance(fTarget.FieldType));
+        var fCollab = tItem.GetField("scienceCollaborationTooltip", ALL);
+        fCollab.SetValue(item, FormatterServices.GetUninitializedObject(fCollab.FieldType));
+        return item;
+    }
+    static void RefreshItem(object item, params string[] prerequisites)
+    {
+        var infoType = mRefreshTooltips.GetParameters()[0].ParameterType.GetElementType();
+        var info = Activator.CreateInstance(infoType);
+        var names = Array.CreateInstance(tSS, prerequisites.Length);
+        for (int i = 0; i < prerequisites.Length; i++) names.SetValue(SS(prerequisites[i]), i);
+        infoType.GetField("PrerequisiteTechnologyNames").SetValue(info, names);
+        mRefreshTooltips.Invoke(item, new[] { info });
+    }
+    static string LabelOf(object item) => labelText[tItem.GetField("title", ALL).GetValue(item)];
+    static string DescriptionOf(object item)
+    {
+        var target = tItem.GetField("tooltipTarget", ALL).GetValue(item);
+        return (string)target.GetType().GetField("Description").GetValue(target);
+    }
+    static string Shown(object item) => LabelOf(item) + " | " + DescriptionOf(item).Replace("\n", "\\n");
+
     // A,B roots; T=A+B (LISTED); U=A+B (not listed); C=T; X root. States: 1 locked by technology, 2 available, 3 completed.
     static void Tree(int a, int b, int t) => Build(("A", new string[0], a), ("B", new string[0], b), ("T", new[] { "A", "B" }, t), ("U", new[] { "A", "B" }, 1), ("C", new[] { "T" }, 1), ("X", new string[0], 2));
 
@@ -240,8 +306,13 @@ static class TechRequireAllGameDrill
         var thrown = RemoveCascadeAt(0);
         Check("vanilla: a saved queue with T behind two constraints THROWS when A is removed", thrown is ArgumentOutOfRangeException, thrown == null ? "no exception | " + Queue() : thrown.GetType().Name);
 
+        StubTechScreen(h);
+        var plainT = Item("T", "Tee");
+        RefreshItem(plainT);
+        Check("vanilla: the tech screen shows T's plain title and description", Shown(plainT) == "Tee | desc", Shown(plainT));
+
         Console.WriteLine("--- the HAF hooks, applied as the plugin applies them ---");
-        foreach (var t in new[] { typeof(Hk_TechRequireAllCheck), typeof(Hk_TechRequireAllQueue), typeof(Hk_TechRequireAllRemove) })
+        foreach (var t in new[] { typeof(Hk_TechRequireAllCheck), typeof(Hk_TechRequireAllQueue), typeof(Hk_TechRequireAllRemove), typeof(Hk_TechRequireAllMark) })
         { var applied = h.CreateClassProcessor(t).Patch(); Check(t.Name + " patched a method", applied != null && applied.Count > 0); }
 
         if (noList)
@@ -254,6 +325,9 @@ static class TechRequireAllGameDrill
             thrown = RemoveCascadeAt(0);
             Check("no list file: removing A from the saved queue removes B and T once and keeps X",
                   thrown == null && Queue() == "X" && Constraints() == "", thrown != null ? thrown.ToString() : Queue() + " | " + Constraints());
+            var unmarked = Item("T", "Tee");
+            RefreshItem(unmarked);
+            Check("no list file: the tech screen shows T's plain title and description", Shown(unmarked) == "Tee | desc" && labelSets == 0, Shown(unmarked) + " | label writes " + labelSets);
             Console.WriteLine(fails == 0 ? "DRILL PASS" : "DRILL FAIL (" + fails + ")");
             try { Directory.Delete(cfg, true); } catch { }
             return fails == 0 ? 0 : 1;
@@ -280,6 +354,41 @@ static class TechRequireAllGameDrill
         SharePrerequisites("U", "T");
         Check("shared array: unlisted U unlocks when the listed definition comes last", GameCheck("U"));
         Check("shared array: listed T still waits for B", !GameCheck("T"));
+
+        // The tech screen receives T -> A, B through TechnologyInfo.
+        Console.WriteLine("--- the tech screen's mark and tooltip line ---");
+        var itemT = Item("T", "Tee"); var itemU = Item("U", "You"); var itemA = Item("A", "Alpha"); var itemB = Item("B", "Beta");
+        labelSets = 0;
+        RefreshItem(itemT, "A", "B");
+        Check("listed T: marked, and the tooltip names its prerequisites (internal names until their items are seen)",
+              Shown(itemT) == "[SharedProject] Tee | desc\\n[SharedProject] <i>Requires both A and B</i>", Shown(itemT));
+        RefreshItem(itemA); RefreshItem(itemB);
+        Check("prerequisites A and B themselves: untouched", Shown(itemA) == "Alpha | desc" && Shown(itemB) == "Beta | desc", Shown(itemA) + " || " + Shown(itemB));
+        RefreshItem(itemT, "A", "B");
+        Check("listed T: the tooltip now uses the titles the screen showed for A and B", Shown(itemT) == "[SharedProject] Tee | desc\\n[SharedProject] <i>Requires both Alpha and Beta</i>", Shown(itemT));
+        RefreshItem(itemT, "A", "B");
+        Check("listed T: three refreshes wrote its label once", labelSets == 1, "label writes " + labelSets);
+        RefreshItem(itemU, "A", "B");
+        Check("unlisted U (same prerequisites): plain title and description, label never written", Shown(itemU) == "You | desc" && labelSets == 1, Shown(itemU) + " | label writes " + labelSets);
+
+        // Loading another tech tree can replace a definition's prerequisites while the config list stays active.
+        Build(("A", new string[0], 3), ("C", new string[0], 2), ("T", new[] { "A", "C" }, 1));
+        GameCheck("T");
+        var itemC = Item("C", "Charlie");
+        RefreshItem(itemC);
+        RefreshItem(itemT, "A", "C");
+        Check("after changing trees, T shows the current prerequisites",
+              Shown(itemT) == "[SharedProject] Tee | desc\\n[SharedProject] <i>Requires both Alpha and Charlie</i>", Shown(itemT));
+
+        Build(("A", new string[0], 3), ("T", new[] { "A" }, 1));
+        GameCheck("T");
+        RefreshItem(itemT, "A");
+        Check("T with only one prerequisite restores its plain title and tooltip", Shown(itemT) == "Tee | desc", Shown(itemT));
+
+        RefreshItem(itemT, "A", "B");
+        labelText[tItem.GetField("title", ALL).GetValue(itemT)] = "Custom title";
+        RefreshItem(itemT, "A");
+        Check("removing the hint preserves a label changed elsewhere", Shown(itemT) == "Custom title | desc", Shown(itemT));
 
         Tree(2, 2, 1);
         GameQueue("C", 1);

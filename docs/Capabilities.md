@@ -255,7 +255,8 @@ the mechanics are detailed in [Animated-Runtime §3b](Animated-Runtime.md#3b-run
   different list is a different simulation); a research queue planned under a list is written into the save with
   extra ordering constraints; and such a save, loaded with the plugin **uninstalled**, can throw in the game's own
   code when a queued prerequisite shared by two queued branches is removed — clear the research queue before
-  uninstalling. Not yet run in a game session. See
+  uninstalling. Seen in one game session (2026-11-21: the lock and the queue plan, one technology); removing and
+  dragging in the queue, the AI and multiplayer are not. See
   [Editor Tools → Tech Requires All](Editor-Tools.md#utilities-diagnostics--safety).
 - **Game updates fail loud, not silent.** HAF binds to the game's types by name via reflection (the cost of no source
   access), so a game update *could* rename one. Rather than misbehave silently, a startup **compatibility report**

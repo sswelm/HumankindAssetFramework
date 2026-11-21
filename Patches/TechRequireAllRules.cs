@@ -63,6 +63,73 @@ namespace HumankindAssetFramework
             return true;
         }
 
+        // ---- the tech screen's hint (2026-11-21): a mark in front of a listed technology's title, a line in its tooltip ----
+
+        // [SharedProject] is the game's own branching symbol (one point joined to two). Chosen in the game on 2026-11-21 from
+        // eleven candidates shown in a tooltip; of the plain characters tried, the game's font has & and » but not ⋀ or ⇉.
+        /// <summary>Default mark. Plain text or the game's own text markup: an inline symbol "[Name]", a colour "&lt;c=RRGGBB&gt;..&lt;/c&gt;".</summary>
+        internal const string DefaultMark = "[SharedProject]";
+        /// <summary>
+        /// Default tooltip lines, for exactly two prerequisites and for three or more ("both" is wrong for three).
+        /// {0} = every prerequisite title but the last, comma-separated; {1} = the last; {2} = the mark, so the icon
+        /// in front of the title and the one in front of this line are ONE setting. The wording, the italics and the
+        /// icon in front are the user's, from looking at it in the game (2026-11-21); the game's own texts use
+        /// &lt;i&gt; too.
+        /// </summary>
+        internal const string DefaultTooltip = "{2} <i>Requires both {0} and {1}</i>";
+        internal const string DefaultTooltipMany = "{2} <i>Requires all of {0} and {1}</i>";
+
+        /// <summary>The title the tech screen shows: the mark, a space, the game's title. No mark = the game's title.</summary>
+        internal static string MarkedTitle(string mark, string title)
+        {
+            mark = (mark ?? "").Trim();
+            title = title ?? "";
+            return mark.Length == 0 ? title : mark + " " + title;
+        }
+
+        /// <summary>
+        /// The tooltip's line, or "" for none (no format, or fewer than two prerequisites: the rule changes nothing
+        /// then). <paramref name="formatTwo"/> is used for exactly two prerequisites, <paramref name="formatMany"/>
+        /// for more. {0} = every title but the last, comma-separated; {1} = the last; {2} = <paramref name="mark"/>
+        /// (with no mark the slot is empty and the space around it is trimmed). A format WITHOUT {1} gets the
+        /// whole list in {0}, so no prerequisite is ever left out of the sentence. One pass by hand, not
+        /// string.Format: the format is a person's config text, a stray brace in it must not throw on the UI thread,
+        /// and a title that itself holds "{1}" must not be filled in a second time.
+        /// </summary>
+        internal static string TooltipLine(string formatTwo, string formatMany, IList<string> prerequisiteTitles, string mark = "")
+        {
+            if (prerequisiteTitles == null || prerequisiteTitles.Count < 2) return "";
+            int n = prerequisiteTitles.Count;
+            string format = ((n == 2 ? formatTwo : formatMany) ?? "").Trim();
+            if (format.Length == 0) return "";
+            mark = (mark ?? "").Trim();
+            bool namesLast = format.IndexOf("{1}", StringComparison.Ordinal) >= 0;
+            var head = new List<string>(n);
+            for (int i = 0; i < (namesLast ? n - 1 : n); i++) head.Add(prerequisiteTitles[i] ?? "");
+            string first = string.Join(", ", head.ToArray()), last = prerequisiteTitles[n - 1] ?? "";
+            var sb = new System.Text.StringBuilder(format.Length + first.Length + last.Length + mark.Length);
+            for (int i = 0; i < format.Length; i++)
+            {
+                char which = i + 2 < format.Length && format[i] == '{' && format[i + 2] == '}' ? format[i + 1] : '\0';
+                if (which != '0' && which != '1' && which != '2') { sb.Append(format[i]); continue; }
+                sb.Append(which == '0' ? first : which == '1' ? last : mark);
+                i += 2;
+            }
+            return sb.ToString().Trim();
+        }
+
+        /// <summary>
+        /// The description with the line as its last line, ONCE: the game rebuilds the description on every refresh,
+        /// and a second pass over one it did not rebuild must not add the line again.
+        /// </summary>
+        internal static string WithTooltipLine(string description, string line)
+        {
+            description = description ?? "";
+            if (string.IsNullOrEmpty(line)) return description;
+            if (description == line || description.EndsWith("\n" + line, StringComparison.Ordinal)) return description;
+            return description.Length == 0 ? line : description + "\n" + line;
+        }
+
         internal sealed class Plan
         {
             public bool Ok = true;             // false: nothing may be queued (Why says what stopped it)
