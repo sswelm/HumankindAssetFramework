@@ -512,14 +512,28 @@ windows. **Deep dive:**
 - **Database Browser** — `Tools ▸ HAF ▸ Database Browser`. Browse/search the game's definition assets (vanilla + mod) with
   an embedded inspector. Read-only viewer; persists UI prefs in EditorPrefs.
 - **Tech Tree** — `Tools ▸ HAF ▸ Tech Tree ▸ Open Viewer` (+ `Diagnose Mod Split`, `Dump Data`). View/edit the tech tree;
-  in edit mode drag node positions and remove prereqs, committed on Save (edits in place under `Databases/`, else
-  copy-on-write into "New Additions"). New-tech creation / +prereq are noted not-yet-implemented.
+  in edit mode drag node positions and add or remove prereqs, committed on Save (edits in place under `Databases/`, else
+  copy-on-write into "New Additions"). New-tech creation is noted not-yet-implemented. Three additions of 2026-11-21,
+  all in the side strip or beside the canvas:
+  - **OR / AND.** The heading over the selected technology's prerequisites names its rule: `Prerequisites (OR)` is the
+    game's own (any one unlocks it), `Prerequisites (AND)` means it is in the Tech Requires All list (all are needed).
+    The two buttons under it switch the rule in edit mode. The switch is staged like every other edit; **Save** adds
+    the technology to that list or removes it, and deploys `haf_tech_requires_all.json` (relaunch the game to apply).
+    Only that one name is changed in the list, so entries made in the list's own window meanwhile are kept. A node
+    under the AND rule with two or more prerequisites carries `AND` in its lower left corner. When the list cannot be
+    read the heading names no rule and the buttons are replaced by a warning; the list's own window says why.
+  - **Position X / Y.** The selected node's position in grid cells, as two number fields (type, or drag the `X` / `Y`
+    label). Same staged values as a drag on the canvas, same floor of 0.
+  - **Scroll bars** under and to the right of the canvas. They move the same pan as the middle-mouse drag; their range
+    is the tree's extent, widened to wherever the view is, so a view panned past the tree is not pulled back.
 - **Tech Requires All** — `Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites`. A list of technologies, nothing else.
   The game unlocks a technology when **any one** of its prerequisites is researched, and its data has no field to say
   otherwise; a technology in this list unlocks only when **all** of them are. **+ Add technology** picks from the
   technologies that have two or more prerequisites; each row shows what "all" means for it (`Needs all of: A + B`) and
   warns when an entry can have no effect (unknown name, fewer than two prerequisites). The prerequisites themselves are
-  not edited here — that stays in the Tech Tree viewer. **Save** writes the project's
+  not edited here — that stays in the Tech Tree viewer, which can also switch one technology between the two rules
+  (its OR / AND buttons write this same list; a window of this list that is open without unsaved changes then shows
+  the new list at once, and one with unsaved changes has its next Save refused and says to reload). **Save** writes the project's
   `haf_tech_requires_all.backup.json` and deploys `haf_tech_requires_all.json`; relaunch the game to apply. The file is
   one list of `TechnologyDefinition` names, `{"technologies": ["Technology_Era4_LandClearance", …]}`. The plugin
   (`Patches/TechRequireAllPatch.cs`) then keeps a listed technology locked until every prerequisite is completed, and

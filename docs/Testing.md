@@ -63,9 +63,18 @@ script compares its exit code with a load-only control (139). On 2026-11-21, wit
 beside it, one run of three exited 127 after `DRILL PASS` and was reported as a failure; two reruns exited 139. A
 failure of that shape (every check passed, only the exit code differs) is the runtime's exit, not the hooks: rerun.
 `bash tools/tech_requires_all_unity_drill.sh` drives the real window in a
-temporary Unity project (add, save, reopen, remove; 14 checks) and reads every deployed file back with the plugin's
-parser; the tech tree is injected, so the picker's list over a real modding project is not exercised. Neither drill is
-in the push gate. In a game (2026-11-21, one session): the lock and the queue plan held for one listed technology on
+temporary Unity project (add, save, reopen, remove) and reads every deployed file back with the plugin's
+parser; the tech tree is injected, so the picker's list over a real modding project is not exercised. Since
+2026-11-21 the same run drives the Tech Tree viewer beside it (39 checks in all, 14 before): its OR / AND switch is
+staged and written to the list on Save, an open list window without unsaved changes follows, one with unsaved changes
+keeps them and has its save refused, the viewer picks up the list window's save on its next draw, and a save over a
+broken list writes nothing and keeps the switch staged. A typed position is staged with the drag's floor and stays
+staged when there is no asset to write it to (the drill's nodes have none, so writing a position to an asset is not
+exercised). Three checks hold the scroll bars' range, and one that drawing them does not move the view. No button is
+clicked and no pixel is read: the viewer's staging and save methods are called and its `OnGUI` is drawn between the
+steps. Planted once (2026-11-21): without the refresh of open list windows, without the viewer's re-read after
+another window's save, and without the guard that keeps staged switches when the list is unreadable, the checks for
+exactly those fail. Neither drill is in the push gate. In a game (2026-11-21, one session): the lock and the queue plan held for one listed technology on
 a turn-180 save. Removing and dragging in the queue, the AI and multiplayer still need live game coverage
 (Review-Backlog, "Tech Requires All").
 

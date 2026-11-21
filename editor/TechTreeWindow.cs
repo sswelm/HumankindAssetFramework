@@ -11,6 +11,14 @@ using UnityEngine;
 /// each change: edit-in-place when the asset is under Databases/, copy-on-write into
 /// New Additions when it's reference-only (TechTreeData.EnsureWritable). The +prereq
 /// picker (step 4) and new-tech creation (step 5) are the remaining pieces.
+///
+/// LOCAL CHANGES to this file (it came from another modder's tool, see the note at TechPickerDropdown), 2026-11-21:
+///  - The prerequisite RULE per technology. The game unlocks a technology on ANY ONE prerequisite (OR); HAF's Tech
+///    Requires All list (TechRequireAllRegistry, applied by the plugin) names the ones that wait for ALL (AND). The
+///    side strip shows which rule the selected technology has and switches it; the switch is staged like every other
+///    edit and written to that list on Save. A node under the AND rule carries "AND" in its lower left corner.
+///  - Scroll bars under and beside the canvas. They move the same pan as the middle-mouse drag.
+///  - X and Y fields in the side strip: the selected node's position as numbers, staged like a drag.
 /// </summary>
 public class TechTreeWindow : EditorWindow
 {
@@ -19,13 +27,19 @@ public class TechTreeWindow : EditorWindow
     {
         public int? X, Y;                // staged position (null = unchanged)
         public List<string> Prereqs;     // staged prereq list (null = unchanged)
-        public bool IsEmpty => X == null && Y == null && Prereqs == null;
+        public bool? RequireAll;         // staged rule: true = ALL prerequisites (AND), false = any one (OR); null = unchanged
+        public bool IsEmpty => X == null && Y == null && Prereqs == null && RequireAll == null;
     }
     readonly Dictionary<string, Pending> _pending = new();
 
     List<TechTreeData.Node> _nodes;
     Dictionary<string, TechTreeData.Node> _byName;
     TechTreeData.Node _selected;
+
+    // The Tech Requires All list as this window last read it: the technologies under the AND rule.
+    HashSet<string> _requireAll = new(StringComparer.Ordinal);
+    bool _rulesUnreadable;    // the list could not be read: the rule is not shown and cannot be switched
+    string _rulesVersion;     // TechRequireAllRegistry.LoadedVersion when _requireAll was read (null after a failed read)
 
     // mod path (editable, persisted)
     string _modPath = TechTreeData.DefaultModPath;
@@ -50,9 +64,18 @@ public class TechTreeWindow : EditorWindow
     const float NODE_W = 150f, NODE_H = 34f;
     const float LABEL_MIN_ZOOM = 0.45f;
     const float SIDE_W = 300f;
+    const float BAR = 15f;             // thickness of the canvas scroll bars
+    const float SCROLL_MARGIN = 60f;   // empty space the bars allow around the tree, in pixels
 
     static readonly Color EDIT_DOT = new Color(1f, 0.65f, 0.1f);     // amber: unsaved
     static readonly Color MOD_BADGE = new Color(0.4f, 0.7f, 1f);     // blue: modded on disk
+    static readonly Color AND_MARK = new Color(1f, 0.85f, 0.45f);    // the "AND" in a node's corner
+
+    static readonly GUIContent[] RuleChoices =
+    {
+        new GUIContent("OR — any one", "The game's own rule: the technology unlocks when ANY ONE of its prerequisites is researched."),
+        new GUIContent("AND — all", "The technology unlocks only when ALL its prerequisites are researched. HAF's plugin applies this to the technologies in the Tech Requires All list; Save writes the switch to that list. Relaunch the game to apply."),
+    };
 
     [MenuItem("Tools/HAF/Tech Tree/Open Viewer")]
     static void Open()
@@ -85,14 +108,41 @@ public class TechTreeWindow : EditorWindow
         Repaint();
     }
 
+    // Seam for the drill (tools/tech_requires_all_unity_drill.sh): its temporary project holds no technology assets.
+    internal static Func<string, List<TechTreeData.Node>> BuildTreeImpl = modPath => TechTreeData.Build(modPath);
+
     void Reload(bool keepView = false)
     {
-        _nodes = TechTreeData.Build(_modPath);
+        _nodes = BuildTreeImpl(_modPath);
         _byName = _nodes.GroupBy(n => n.Name).ToDictionary(g => g.Key, g => g.First());
         // keep pending across reload only for names that still exist
         foreach (var k in _pending.Keys.Where(k => !_byName.ContainsKey(k)).ToList()) _pending.Remove(k);
+        LoadRules();
         if (!keepView) _framed = false;   // re-frame only on first load / explicit Frame All
         Repaint();
+    }
+
+    // Read the Tech Requires All list. A staged switch that the list now already holds is no longer a change.
+    void LoadRules()
+    {
+        try
+        {
+            _requireAll = new HashSet<string>(TechRequireAllRegistry.Load(), StringComparer.Ordinal);
+            _rulesUnreadable = TechRequireAllRegistry.Snapshot().Failed;
+        }
+        catch (Exception e)
+        {
+            _requireAll = new HashSet<string>(StringComparer.Ordinal); _rulesUnreadable = true;
+            Debug.LogError("[TechTree] the Tech Requires All list could not be read: " + e);
+        }
+        _rulesVersion = TechRequireAllRegistry.LoadedVersion;
+        if (_rulesUnreadable) return;   // what the list holds is unknown: every staged switch stays
+        foreach (var kv in _pending.ToList())
+            if (kv.Value.RequireAll == _requireAll.Contains(kv.Key))
+            {
+                kv.Value.RequireAll = null;
+                if (kv.Value.IsEmpty) _pending.Remove(kv.Key);
+            }
     }
 
     // ── Effective (pending-over-base) accessors ───────────────────────────────
@@ -100,6 +150,9 @@ public class TechTreeWindow : EditorWindow
     int EffY(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Y.HasValue ? p.Y.Value : n.BaseY;
     IReadOnlyList<string> EffPrereqs(TechTreeData.Node n) =>
         _pending.TryGetValue(n.Name, out var p) && p.Prereqs != null ? p.Prereqs : (IReadOnlyList<string>)n.BasePrereqs;
+    // true = the technology waits for ALL its prerequisites (AND); false = the game's rule, any one (OR)
+    bool EffRequireAll(TechTreeData.Node n) =>
+        _pending.TryGetValue(n.Name, out var p) && p.RequireAll.HasValue ? p.RequireAll.Value : _requireAll.Contains(n.Name);
 
     bool IsEdited(TechTreeData.Node n) => _pending.ContainsKey(n.Name);
     bool Dirty => _pending.Count > 0;
@@ -131,6 +184,8 @@ public class TechTreeWindow : EditorWindow
     void OnGUI()
     {
         if (Event.current.type == EventType.MouseMove) Repaint();
+        // The Tech Requires All window (or this one) saved the list since this window read it: show the list as it is now.
+        if (Event.current.type == EventType.Layout && TechRequireAllRegistry.LoadedVersion != _rulesVersion) LoadRules();
 
         // ── Toolbar ──
         EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
@@ -178,13 +233,44 @@ public class TechTreeWindow : EditorWindow
             EditorGUILayout.HelpBox("Reference folder not found — showing Databases content only (no vanilla fallback).", MessageType.Info);
 
         float top = EditorStyles.toolbar.fixedHeight > 0 ? EditorStyles.toolbar.fixedHeight : 21f;
-        Rect canvas = new Rect(0, top, position.width - SIDE_W, position.height - top);
-        Rect side   = new Rect(canvas.xMax, top, SIDE_W, position.height - top);
+        Rect canvas = new Rect(0, top, position.width - SIDE_W - BAR, position.height - top - BAR);
+        Rect side   = new Rect(position.width - SIDE_W, top, SIDE_W, position.height - top);
 
         if (!_framed) FrameAll(canvas);
+        DrawScrollBars(canvas);
         HandleInput(canvas);
         DrawCanvas(canvas);
         DrawSide(side);
+    }
+
+    // ── Scroll bars ───────────────────────────────────────────────────────────
+    /// <summary>
+    /// The range one scroll bar covers: the tree's extent, widened to wherever the view is now. Panning past the tree
+    /// (middle-mouse drag, zooming at the cursor) therefore never makes the bar pull the view back.
+    /// </summary>
+    internal static void ScrollRange(float contentMin, float contentMax, float view, float viewSize, out float lo, out float hi)
+    {
+        lo = Mathf.Min(contentMin, view);
+        hi = Mathf.Max(contentMax, view + viewSize);
+    }
+
+    void DrawScrollBars(Rect canvas)
+    {
+        if (_nodes == null || _nodes.Count == 0 || canvas.width <= 0 || canvas.height <= 0) return;
+        // The view's top-left corner and the tree's extent, both in the tree's own pixels at this zoom.
+        float viewX = canvas.x - _pan.x, viewY = canvas.y - _pan.y;
+        ScrollRange(Mathf.Min(0, _nodes.Min(EffX)) * CELL * _zoom - SCROLL_MARGIN, (_nodes.Max(EffX) * CELL + NODE_W) * _zoom + SCROLL_MARGIN,
+                    viewX, canvas.width, out float loX, out float hiX);
+        ScrollRange(Mathf.Min(0, _nodes.Min(EffY)) * CELL * _zoom - SCROLL_MARGIN, (_nodes.Max(EffY) * CELL + NODE_H) * _zoom + SCROLL_MARGIN,
+                    viewY, canvas.height, out float loY, out float hiY);
+        float newX = GUI.HorizontalScrollbar(new Rect(canvas.x, canvas.yMax, canvas.width, BAR), viewX, canvas.width, loX, hiX);
+        float newY = GUI.VerticalScrollbar(new Rect(canvas.xMax, canvas.y, BAR, canvas.height), viewY, canvas.height, loY, hiY);
+        // only a real move: the round trip through the bar may differ in the last bit, and that must not drift the view
+        if (Mathf.Abs(newX - viewX) > 0.01f || Mathf.Abs(newY - viewY) > 0.01f)
+        {
+            _pan = new Vector2(canvas.x - newX, canvas.y - newY);
+            Repaint();
+        }
     }
 
     // ── Input ─────────────────────────────────────────────────────────────────
@@ -219,6 +305,7 @@ public class TechTreeWindow : EditorWindow
             if (hit != null)
             {
                 _selected = hit;
+                GUIUtility.keyboardControl = 0;   // a focused X / Y field would keep showing the previous node's number
                 EditorGUIUtility.PingObject(hit.Asset);
                 Selection.activeObject = hit.Asset;
                 if (_editMode)   // begin a potential position drag
@@ -332,6 +419,13 @@ public class TechTreeWindow : EditorWindow
                     GUI.Label(new Rect(r.x + 5, r.y + 1, r.width - 8, ch), ShortEra(n.Era), corner);
                     corner.alignment = TextAnchor.UpperRight;
                     GUI.Label(new Rect(r.x + 2, r.y + 1, r.width - 12, ch), ShortTier(n.Tier), corner);
+                    // the AND rule, where it has an effect (two or more prerequisites): lower left, where the edges arrive
+                    if (!_rulesUnreadable && EffRequireAll(n) && EffPrereqs(n).Count >= 2)
+                    {
+                        corner.alignment = TextAnchor.LowerLeft;
+                        corner.normal.textColor = AND_MARK;
+                        GUI.Label(new Rect(r.x + 5, r.yMax - ch - 1, r.width - 8, ch), "AND", corner);
+                    }
                 }
             }
         }
@@ -362,9 +456,38 @@ public class TechTreeWindow : EditorWindow
             EditorGUILayout.LabelField($"{state}   ({detail})", EditorStyles.miniLabel);
             EditorGUILayout.LabelField($"{n.Era} · {n.Tier} · ({EffX(n)},{EffY(n)})", EditorStyles.miniLabel);
 
+            // the position as numbers (grid cells), staged exactly like a drag on the canvas
+            using (new EditorGUI.DisabledScope(!_editMode))
+            {
+                float labelWidth = EditorGUIUtility.labelWidth;
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Label(new GUIContent("Position", "The node's place on the tech screen, in grid cells. Type a number or drag the X / Y label; dragging the node on the canvas changes the same values."), GUILayout.Width(54));
+                EditorGUIUtility.labelWidth = 14;
+                int x = EditorGUILayout.IntField("X", EffX(n));
+                int y = EditorGUILayout.IntField("Y", EffY(n));
+                EditorGUIUtility.labelWidth = labelWidth;
+                EditorGUILayout.EndHorizontal();
+                if (x != EffX(n) || y != EffY(n)) SetPosition(n, x, y);
+            }
+
             EditorGUILayout.Space(6);
-            EditorGUILayout.LabelField("Prerequisites (OR):", EditorStyles.boldLabel);
+            bool all = EffRequireAll(n);
             var prereqs = EffPrereqs(n);
+            EditorGUILayout.LabelField(RuleHeader(_rulesUnreadable, all), EditorStyles.boldLabel);
+            if (_rulesUnreadable)
+                EditorGUILayout.HelpBox("The Tech Requires All list could not be read, so the rule (OR / AND) is not shown and cannot be switched here. " +
+                                        "Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites says why.", MessageType.Warning);
+            else
+            {
+                using (new EditorGUI.DisabledScope(!_editMode))
+                {
+                    int now = all ? 1 : 0;
+                    int picked = GUILayout.Toolbar(now, RuleChoices, EditorStyles.miniButton);
+                    if (picked != now) SetRule(n, picked == 1);
+                }
+                if (all && prereqs.Count < 2)
+                    EditorGUILayout.LabelField("AND changes nothing while there are fewer than two prerequisites.", EditorStyles.wordWrappedMiniLabel);
+            }
             if (prereqs.Count == 0)
                 EditorGUILayout.LabelField("  (none — root)", EditorStyles.miniLabel);
             else
@@ -373,7 +496,7 @@ public class TechTreeWindow : EditorWindow
                     EditorGUILayout.BeginHorizontal();
                     string label = _byName.TryGetValue(pr, out var s) ? $"{s.Label}" : pr;
                     if (GUILayout.Button(label, EditorStyles.miniButton) && _byName.TryGetValue(pr, out var sn))
-                    { _selected = sn; EditorGUIUtility.PingObject(sn.Asset); Selection.activeObject = sn.Asset; }
+                    { _selected = sn; GUIUtility.keyboardControl = 0; EditorGUIUtility.PingObject(sn.Asset); Selection.activeObject = sn.Asset; }
                     using (new EditorGUI.DisabledScope(!_editMode))
                         if (GUILayout.Button("−", EditorStyles.miniButton, GUILayout.Width(22)))
                             RemovePrereq(n, pr);   // step 3 fills the body; staging works now
@@ -393,7 +516,28 @@ public class TechTreeWindow : EditorWindow
         GUILayout.EndArea();
     }
 
+    internal static string RuleHeader(bool unreadable, bool requireAll) =>
+        unreadable ? "Prerequisites:" : requireAll ? "Prerequisites (AND):" : "Prerequisites (OR):";
+
     // ── Edit operations (staging into the overlay; disk write is at Save) ──────
+    void SetRule(TechTreeData.Node n, bool requireAll)
+    {
+        var p = Stage(n);
+        p.RequireAll = requireAll != _requireAll.Contains(n.Name) ? (bool?)requireAll : null;   // back to the list's own = no change
+        DropIfClean(n);
+        Repaint();
+    }
+
+    void SetPosition(TechTreeData.Node n, int x, int y)
+    {
+        x = Mathf.Max(0, x); y = Mathf.Max(0, y);   // the same floor a drag has
+        var p = Stage(n);
+        p.X = x != n.BaseX ? (int?)x : null;   // equal to base = no change
+        p.Y = y != n.BaseY ? (int?)y : null;
+        DropIfClean(n);
+        Repaint();
+    }
+
     void RemovePrereq(TechTreeData.Node n, string prereq)
     {
         var p = Stage(n);
@@ -492,9 +636,37 @@ public class TechTreeWindow : EditorWindow
         }
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        Debug.Log($"[TechTree] Saved: {pos} position, {pre} prerequisite change(s)"
+
+        // The rule switches go to the Tech Requires All list in one write: each as an operation on the list as it is
+        // now (add or remove that one name), so entries made in that list's own window meanwhile are kept.
+        var rules = _pending.Where(kv => kv.Value.RequireAll.HasValue && _byName.ContainsKey(kv.Key))
+                            .ToDictionary(kv => kv.Key, kv => kv.Value.RequireAll.Value);
+        string ruleNote = "";
+        if (rules.Count > 0)
+        {
+            var outcome = TechRequireAllRegistry.SetRules(rules, out _);
+            if (outcome == RegistryRules.SaveOutcome.Saved)
+            {
+                foreach (var k in rules.Keys) _pending[k].RequireAll = null;
+                ruleNote = TechRequireAllRegistry.DeployPending
+                    ? $", {rules.Count} rule switch(es) (OR / AND) — written to the project, but the game's {TechRequireAllRegistry.ArtifactName} is not refreshed yet (see the Console)"
+                    : $", {rules.Count} rule switch(es) (OR / AND) -> {TechRequireAllRegistry.ArtifactName}; relaunch the game to apply";
+                TechRequireAllWindow.RefreshOpenWindows();
+            }
+            else
+                ruleNote = outcome == RegistryRules.SaveOutcome.Refused
+                    ? $" · {rules.Count} rule switch(es) (OR / AND) REFUSED — nothing of them was written (the Console says why); they are KEPT staged"
+                    : $" · {rules.Count} rule switch(es) (OR / AND) could NOT be confirmed — the list may or may not hold them (see the Console); they are KEPT staged";
+        }
+
+        Debug.Log($"[TechTree] Saved: {pos} position, {pre} prerequisite change(s)" + ruleNote
                 + (skipped > 0 ? $" · {skipped} skipped (no writable target — see step 5; those edits are KEPT staged)" : "") + ".");
-        foreach (var k in committed) _pending.Remove(k);
+        foreach (var k in committed)
+        {
+            // everything else of this entry is written; a rule switch that was not stays staged on its own
+            if (_pending.TryGetValue(k, out var left) && left.RequireAll.HasValue && _byName.ContainsKey(k)) { left.X = left.Y = null; left.Prereqs = null; }
+            else _pending.Remove(k);
+        }
         Reload(keepView: true);
     }
 

@@ -10,6 +10,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **The Tech Tree viewer shows and switches OR / AND, takes a typed position, and has scroll bars (2026-11-21).** The
+  side strip said `Prerequisites (OR)` for every technology, also for one in the Tech Requires All list. The heading
+  now names the rule the technology really has, and two buttons under it switch it in edit mode; Save adds or removes
+  that one name in the list (an operation on the list as it is at write time, `TechRequireAllRegistry.SetRules`), so
+  the list's own window and the viewer no longer contradict each other. A node under the AND rule carries `AND` in
+  its corner. Also asked for the same day: `X` / `Y` number fields for the selected node's position (staged like a
+  drag) and scroll bars under and beside the canvas. Checked: the Unity window drill drives both windows against
+  each other (39 checks, 14 before); three planted defects fail their checks. Not checked by any test: how it looks,
+  a real click on the buttons or the bars, and writing a position to an asset (the drill's nodes have none).
 - **The tech screen marks a technology that needs ALL its prerequisites (2026-11-21).** A technology in the Tech
   Requires All list now carries a mark in front of its title on the tech screen, and its tooltip ends with a line that
   names the prerequisites it waits for, in italics behind the same mark: *Requires both Multimedia Computer and

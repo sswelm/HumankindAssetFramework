@@ -64,6 +64,17 @@ public class TechRequireAllWindow : EditorWindow
 
     bool Dirty => !TechRequireAllRegistry.Clean(entries).SequenceEqual(loadedEntries);
 
+    /// <summary>
+    /// The Tech Tree viewer wrote the list (its OR / AND switch). An open window without unsaved changes shows the new
+    /// list at once. One WITH unsaved changes keeps them: its Save is then refused, because the list changed since it
+    /// loaded, and its status line says to reload and redo them.
+    /// </summary>
+    internal static void RefreshOpenWindows()
+    {
+        foreach (var w in Resources.FindObjectsOfTypeAll<TechRequireAllWindow>())
+            if (!w.Dirty) { w.Reload(); w.Repaint(); }
+    }
+
     string Title(string name) => byName.TryGetValue(name, out var n) ? n.Label : name;
 
     void OnGUI()
