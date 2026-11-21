@@ -17,11 +17,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   the list's own window and the viewer no longer contradict each other. A node under the AND rule carries `AND` in
   its corner. Also asked for the same day: `X` / `Y` number fields for the selected node's position (staged like a
   drag) and scroll bars under and beside the canvas. Checked: the Unity window drill drives both windows against
-  each other (40 checks, 14 before); four planted defects fail their checks. One older fault of the viewer is fixed
+  each other (40 checks, 14 before); four planted defects fail their checks. Seen in Unity the same day (the user's screenshot, view
+  mode): the AND heading, the buttons, the position fields, both bars and the corner mark. One older fault of the viewer is fixed
   on the way, because the position fields would have built on it: after a Save the selection was still the node
   object from before the reload, so the side strip showed the previous position and prerequisites and the node lost
-  its highlight; the selection is now kept by name. Not checked by any test: how it looks,
-  a real click on the buttons or the bars, and writing a position to an asset (the drill's nodes have none).
+  its highlight; the selection is now kept by name. Not checked by any test and not seen yet:
+  a real click on the buttons or the bars, a rule switch saved from the viewer in a real project, and writing a
+  position to an asset (the drill's nodes have none).
 - **The tech screen marks a technology that needs ALL its prerequisites (2026-11-21).** A technology in the Tech
   Requires All list now carries a mark in front of its title on the tech screen, and its tooltip ends with a line that
   names the prerequisites it waits for, in italics behind the same mark: *Requires both Multimedia Computer and

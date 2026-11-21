@@ -1827,11 +1827,14 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
 - **The tech screen's mark covers the tech screen only** (added 2026-11-21, `Hk_TechRequireAllMark`): the node's title
   and its tooltip. The search results, the research widget outside the tech screen and the "technology researched"
   notification show the plain title. The tooltip line is English unless `TechRequireAllTooltip` and
-  `TechRequireAllTooltipMany` are set. The mark shows after the first research update of the process (the list's census
-  publishes what to mark). Seen in the game the same day, on World-Wide Web: the `[SharedProject]` symbol in front of
+  `TechRequireAllTooltipMany` are set. What to mark is read from the snapshot the game hands each node (since the
+  review fix `6e782cc4`; before it, a census published it once per process). Seen in the game the same day, on
+  World-Wide Web: the `[SharedProject]` symbol in front of
   the title (the user: "the icon looks good") and a tooltip line with the prerequisites' titles; the game's font has
   `&` and `»` but shows `?` for `⋀` and `⇉`. The wording was then changed at the user's request to *Requires both A
-  and B*, in italics. **Not seen in a game:** the three-or-more wording (no listed technology has three), and Masonry,
+  and B*, in italics, and the same symbol put in front of it; that final form was seen too (the user's screenshot of
+  11:39, taken with the build of `36ece610`, the commit before the review fix). **Not seen in a game:** the build
+  with the review fix, the three-or-more wording (no listed technology has three), and Masonry,
   whose two prerequisites have no title in the editor's Tech Requires All window (the game's own titles are used here).
 - **The planner walks up to 32 levels where the game stops at 5** (`TryFillParentTechnologiesToCompleteBefore`), in a
   tree that holds a listed technology. Deliberate; noted because it is a difference from the game.
@@ -1844,8 +1847,10 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   **More local changes since 2026-11-21 (asked for by the user):** the OR / AND heading and switch, the `AND` corner
   mark, the `X` / `Y` position fields, the scroll bars, the selection kept by name across a reload, and a seam for the drill (`BuildTreeImpl`). They are listed in
   the file's header comment. A newer copy of the other tool would now drop all of them, so the "own picker" cut no
-  longer makes the file untouched. **Not seen in Unity by any test:** the layout of the side strip and the bars, a
-  click on either, and a typed position written to a real asset.
+  longer makes the file untouched. **Seen in Unity (the user's screenshot, 2026-11-21, ENC project,
+  view mode):** the heading `Prerequisites (AND)` on World-Wide Web, the two rule buttons, the `X` / `Y` fields, both
+  scroll bars and the `AND` corner mark. **Not seen yet, and held by no test:** a click on the buttons or the bars, a
+  rule switch saved from the viewer in a real project, and a typed position written to a real asset.
 - **A save with a planned queue, loaded with the plugin uninstalled, is not guarded** against the double visit in
   `RemoveTechnologyAndChildrenFromQueueAt`. Documented in Editor-Tools and Capabilities; no fix is possible from a
   plugin that is not there.
