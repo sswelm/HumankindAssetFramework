@@ -517,6 +517,7 @@ public static class TechRequireAllWindowDrill
                         shiftArgs = new object[] { N(T), 5, 0 };
                         moved = (int)typeof(TechTreeWindow).GetMethod("ShiftRightOf", Private).Invoke(viewer, shiftArgs);
                         Check("shift: a card in the anchor's own column is not right of it", moved == 0 && Staged == 0 && (int)VCall("EffX", N("Technology_S")) == 16);
+                        Check("shift: the field starts at 6 columns, one card's step in the tree", TechTreeWindow.DefaultShift == 6 && VGet<int>("_shiftBy") == 6);
                         Check("shift: the limit as a function",
                               TechTreeWindow.ShiftLimit(8, new[] { 16, 16 }, -20) == -7 && TechTreeWindow.ShiftLimit(8, new[] { 9, 30 }, -3) == 0 && TechTreeWindow.ShiftLimit(8, new int[0], -3) == 0
                               && TechTreeWindow.ShiftLimit(8, new[] { 16 }, 5) == 5 && TechTreeWindow.ShiftLimit(8, new[] { 16 }, -4) == -4);

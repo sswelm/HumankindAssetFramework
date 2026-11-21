@@ -66,7 +66,10 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     [SerializeField] List<PendingRecord> _pendingRecords = new List<PendingRecord>();
     [SerializeField] string _selectedName;   // the selection across a script reload
     [SerializeField] string _stagedSession;  // the editor session the staged edits belong to (see OnEnable)
-    [SerializeField] int _shiftBy = 5;       // the side strip's Shift field: columns, negative = to the left
+    // The side strip's Shift field: columns, negative = to the left. 6 to start with (the user, 2026-11-21): the
+    // step between two neighbouring cards in ENC's tree, so one shift makes room for one card.
+    [SerializeField] int _shiftBy = DefaultShift;
+    internal const int DefaultShift = 6;
     string _shiftNote = "";                  // what the last Shift did, shown under its row until the selection changes
     string _shiftNoteFor;                    // the technology that note belongs to
 
