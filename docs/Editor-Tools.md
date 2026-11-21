@@ -636,15 +636,65 @@ windows. **Deep dive:**
   guarded restore (auto-snapshots current state first). **Deep dive:** [Backup.md](Backup.md).
 - **Database Browser** — `Tools ▸ HAF ▸ Database Browser`. Browse/search the game's definition assets (vanilla + mod) with
   an embedded inspector. Read-only viewer; persists UI prefs in EditorPrefs.
-- **Tech Tree** — `Tools ▸ HAF ▸ Tech Tree ▸ Open Viewer` (+ `Diagnose Mod Split`, `Dump Data`). View/edit the tech tree;
-  in edit mode drag node positions and remove prereqs, committed on Save (edits in place under `Databases/`, else
-  copy-on-write into "New Additions"). New-tech creation / +prereq are noted not-yet-implemented.
+- **Tech Tree** — `Tools ▸ HAF ▸ Tech Tree ▸ Open Viewer` (+ `Diagnose Mod Split`, `Dump Data`). View and edit the tech
+  tree: drag a card or type its position, add or remove prerequisites, switch its rule and whether it is in the game.
+  Every edit is **staged** and written on **Save** (in place when the asset is under `Databases/`, else
+  copy-on-write into the mod path). New-tech creation is noted not-yet-implemented.
+  - **Editing** is switched by the toolbar's first button (`● Edit: ON` / `Edit: OFF`); it is ON when the window opens
+    and the choice is remembered. With it OFF the side strip's controls are greyed out and a line there says why.
+  - **Staged is not saved.** `Save (N)` is amber while edits are staged; they reach the assets when it is pressed.
+    Staged edits are kept across a script reload (a recompile, entering Play mode) with the selection and the view,
+    and across a reload of the tree that does not find their technology (the button then reads `Save (N) · M
+    missing`). They are dropped, with a Console line, after an editor restart. Save removes each part from the
+    staged set when that part is written, so an edit that could not be written stays and says why in the Console.
+  - **A Save is not part of Undo.** Ctrl+Z does not take a Save back, and does not take back a staged edit either;
+    **Revert** discards the staged edits. An undo from elsewhere that changes a technology in memory (an Inspector
+    edit) is shown, and said in the Console and in the window, because the project's next save writes that state.
+  - **OR / AND.** The heading over the selected technology's prerequisites names its rule: `Prerequisites (OR)` is the
+    game's own (any one unlocks it), `Prerequisites (AND)` means it is in the Tech Requires All list (all are needed).
+    The two buttons under it switch the rule. Save adds the technology to that list or removes it, and deploys
+    `haf_tech_requires_all.json` (relaunch the game to apply). Only that one name is changed in the list, so entries
+    made in the list's own window meanwhile are kept. A card under the AND rule with two or more prerequisites
+    carries `AND` under its title. When the list cannot be read the heading names no rule and the buttons are
+    replaced by a warning; the list's own window says why, and **Reload** reads it again.
+  - **Position X / Y.** The selected card's position in grid cells, as two number fields (type, or drag the `X` / `Y`
+    label). Same staged values as a drag on the canvas. A coordinate stops at 0, or as low as it already is.
+  - **In the game / Switched off** (`TechnologyDefinition.Visibility`). `Never` does more than hide a technology: the
+    game creates a technology for an empire only when its Visibility is not `Never`, so by the game's own rules a
+    `Never` technology is not on the tech screen and cannot be researched, traded or granted, and a technology that
+    names only it as a prerequisite never unlocks (read from the game's code, not run in a game). **Switched off**
+    writes `Never`; **In the game** turns `Never` into `Always` and leaves any other value as it is. For a
+    technology that is not simply `Always`, a note says what state it is in, and for a switched-off one which
+    technologies name it as a prerequisite. On the canvas a switched-off technology's card and links are faint and
+    the card says `OFF`; one that is in the game without a card on the tech screen says `HIDDEN`. In ENC one
+    technology is switched off (Future Technology).
+  - **Scroll bars** under and to the right of the canvas. They move the same pan as the middle-mouse drag; their range
+    is the tree's extent, widened to wherever the view is, so a view panned past the tree is not pulled back.
+  - **The canvas looks like the game's tech screen.** Cards and spacing use the game's own numbers, read from its
+    prefabs (a card 310 x 116, a column step 74, a row step 22), so cards that overlap or line up here are placed the
+    same way in the game. Links are routed by the game's own rule: two cards that share some height get one
+    horizontal line; otherwise the link leaves the first card's top or bottom edge, turns one rounded elbow and
+    enters the second card's left edge. A card shows the title in upper case, then era, tier and the marks, then
+    the internal name. The view opens on the tree's full height at its left end; **Frame All** shows the whole tree.
+  - **Artwork.** A card shows its image as the game does, standing out of its right end. A mod's own image is the
+    project file the mapper's `TechnologyScreenItemBackground` reference resolves to. One of the game's own is
+    taken from the game's UI bundle (`AssetBundles/Mercury.Data.UI`); nothing is copied into the project. Of ENC's
+    216 technologies 124 show a project image, 88 one of the game's and 4 none (they have no mapper). The side
+    strip's `Image:` line names the file or the atlas, or says why there is no image; **Reload** tries a failed
+    read again.
+  - **Reference folder and mod path** (the two fields at the right of the toolbar). A technology whose mapper or
+    definition exists only in the reference folder is copied into a collection under the mod path when it is first
+    saved; without a matching collection there the Save is refused with a Console line and the edit stays staged.
+    In ENC the reference copy is `Assets/~References` and the collections are in `Assets/Databases/Technologies`.
+  - Not shown: the unlock icons, the researched / locked states and the era headers.
 - **Tech Requires All** — `Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites`. A list of technologies, nothing else.
   The game unlocks a technology when **any one** of its prerequisites is researched, and its data has no field to say
   otherwise; a technology in this list unlocks only when **all** of them are. **+ Add technology** picks from the
   technologies that have two or more prerequisites; each row shows what "all" means for it (`Needs all of: A + B`) and
   warns when an entry can have no effect (unknown name, fewer than two prerequisites). The prerequisites themselves are
-  not edited here — that stays in the Tech Tree viewer. **Save** writes the project's
+  not edited here — that stays in the Tech Tree viewer, which can also switch one technology between the two rules
+  (its OR / AND buttons write this same list; a window of this list that is open without unsaved changes then shows
+  the new list at once, and one with unsaved changes has its next Save refused and says to reload). **Save** writes the project's
   `haf_tech_requires_all.backup.json` and deploys `haf_tech_requires_all.json`; relaunch the game to apply. The file is
   one list of `TechnologyDefinition` names, `{"technologies": ["Technology_Era4_LandClearance", …]}`. The plugin
   (`Patches/TechRequireAllPatch.cs`) then keeps a listed technology locked until every prerequisite is completed, and

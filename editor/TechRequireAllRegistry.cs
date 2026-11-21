@@ -12,6 +12,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 
 [Serializable]
@@ -45,6 +46,12 @@ public static class TechRequireAllRegistry
     /// <summary>The version of the list the last successful Load returned; null after a failed one (see Save).</summary>
     public static string LoadedVersion => Store.LoadedVersion;
 
+    /// <summary>The last Load, by whichever window, could not use the list (see RegistryLoadVerdict.Failed).</summary>
+    public static bool LastLoadFailed => Store.LastLoadFailed;
+
+    /// <summary>The last Load found the list changed outside the editor, with the game still reading an older copy.</summary>
+    public static bool LastLoadStale => Store.LastLoadStale;
+
     /// <summary>Trimmed, without blanks or duplicates, sorted by name: the form the file is written in.</summary>
     public static List<string> Clean(IEnumerable<string> names)
     {
@@ -68,4 +75,29 @@ public static class TechRequireAllRegistry
     /// </summary>
     public static RegistryRules.SaveOutcome Save(IEnumerable<string> names, string loadedVersion) =>
         Store.ReplaceAll(new TechRequireAllFile { technologies = Clean(names) }, loadedVersion, "the technologies that require all prerequisites");
+
+    /// <summary>
+    /// Switch single technologies between the two rules: true = requires ALL its prerequisites (in the list),
+    /// false = the game's own rule, any one (not in the list). For the Tech Tree viewer, which edits one technology at
+    /// a time and never holds the whole list: an OPERATION on the list as it is at write time, so a name added or
+    /// removed elsewhere since (the list's own window, git) is kept. <paramref name="changed"/> = something was written.
+    /// </summary>
+    public static RegistryRules.SaveOutcome SetRules(IDictionary<string, bool> requireAll, out bool changed) =>
+        Store.Change(f => ApplyRules(f, requireAll), "the prerequisite rule (any one / all) of " + (requireAll?.Count ?? 0) + " technolog" + ((requireAll?.Count ?? 0) == 1 ? "y" : "ies"), out changed);
+
+    internal static bool ApplyRules(TechRequireAllFile file, IDictionary<string, bool> requireAll)
+    {
+        var before = Clean(file.technologies);
+        var names = new HashSet<string>(before, StringComparer.Ordinal);
+        foreach (var kv in requireAll ?? new Dictionary<string, bool>())
+        {
+            string name = (kv.Key ?? "").Trim();
+            if (name.Length == 0) continue;
+            if (kv.Value) names.Add(name); else names.Remove(name);
+        }
+        var after = Clean(names);
+        if (after.Count == before.Count && !after.Except(before).Any()) return false;   // both are cleaned: same names = same list
+        file.technologies = after;
+        return true;
+    }
 }
