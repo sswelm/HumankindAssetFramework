@@ -5,8 +5,10 @@
 // recipes, and every Blender fallback of the in-process ports - sees an ordinary GLB.
 //
 // The report (parts, triangles, textures found or missing, and every thing the reader left by name) is shown once and
-// written to the Console. A `name_max.glb` this reader wrote before is replaced without asking; any other file of that
-// name asks first.
+// written to the Console in full. A `name_max.glb` whose generator line names this reader is replaced without asking;
+// any other file of that name asks first. Picking a .max whose copy already holds exactly the bytes the conversion
+// gives leaves that file untouched and shows no report.
+// In Unity: tools/max_unity_drill.sh runs Picked / Convert on copies of real files in a batch-mode editor.
 using System;
 using System.IO;
 using UnityEditor;
@@ -37,7 +39,9 @@ public static class MaxImport
     }
 
     /// <summary>For a text field that holds a typed .max path: a line with a Convert button under it. The conversion runs
-    /// after the GUI pass; `onConverted` then receives the .glb's path (set the field there, reset what depends on it).</summary>
+    /// after the GUI pass; `onConverted` then receives the .glb's path and sets the field. What a window does on a
+    /// PICKED file beyond setting the field (the Lab's suggested output name, the Factory's unit-fix guess) is the
+    /// caller's to repeat there or not - a typed path gets none of it for a .glb either.</summary>
     public static void TypedPathGui(string path, Action<string> onConverted)
     {
         if (!MaxModel.IsMax(path) || !File.Exists(path.Trim())) return;
@@ -47,14 +51,23 @@ public static class MaxImport
             if (GUILayout.Button("Convert .max", GUILayout.Width(100), GUILayout.Height(38)))
             {
                 string max = path.Trim();
-                EditorApplication.delayCall += () =>
-                {
-                    string glb = Convert(max);
-                    dialogShown = false;
-                    if (glb != null) { GUI.FocusControl(null); onConverted(glb); }
-                };
+                EditorApplication.delayCall += () => ConvertTyped(max, onConverted);
             }
         }
+    }
+
+    /// <summary>What the Convert button runs once the GUI pass is over (public for tools/max_unity_drill.sh, which calls
+    /// it as the editor does: outside any GUI pass).</summary>
+    public static void ConvertTyped(string max, Action<string> onConverted)
+    {
+        string glb = Convert(max);
+        if (glb == null) return;
+        onConverted(glb);
+        // A text field shows its own edit buffer while it has the keyboard, so the field would go on showing the typed
+        // .max: take the keyboard away - AFTER the field is set, so nothing here can cost the caller its new path.
+        // (The Unity drill calls this outside a GUI pass, as the editor does; it also records that GUI.FocusControl
+        // does not throw there in batch mode. Whether the field visibly lets go in a live window is not drilled.)
+        GUIUtility.keyboardControl = 0;
     }
 
     /// <summary>Converts a .max to `name_max.glb` beside it and returns that path; null on failure or when the user keeps an existing file.</summary>
@@ -67,11 +80,11 @@ public static class MaxImport
             && !EditorUtility.DisplayDialog("Overwrite existing file?",
                 "The converted copy would be written to\n" + target + "\n\nA file of that name exists and was NOT written by the .max reader. Overwrite it?", "Overwrite", "Cancel"))
             return null;
-        MaxReport report;
+        MaxReport report; bool unchanged;
         try
         {
             EditorUtility.DisplayProgressBar("3ds Max file", "Reading " + Path.GetFileName(maxPath) + " ...", 0.3f);
-            report = MaxModel.ConvertToGlb(maxPath, target, Decode);
+            report = MaxModel.ConvertToGlb(maxPath, target, Decode, out unchanged);
         }
         // EVERY failure ends in the dialog: this is the user's door, and a file the reader's own guards did not foresee
         // (an exception of another kind) must not surface as a bare Console error with the picker doing nothing.
@@ -91,9 +104,18 @@ public static class MaxImport
             return null;
         }
         finally { EditorUtility.ClearProgressBar(); }
+        // The Console gets the whole report (every part that was not read, by name); the dialog a copy that fits it.
+        if (unchanged)
+        {
+            // The same .max picked again: the copy beside it already holds exactly these bytes and was NOT written
+            // (a tool that has it open - the Model Cutter with unsaved marks - sees no change), and the report the user
+            // read the first time is not put in front of them again.
+            Debug.Log("[HAF] 3ds Max file already converted, the copy is up to date and was not rewritten: " + maxPath + " -> " + target + "\n" + report.Summary(true));
+            return target;
+        }
         string summary = report.Summary();
-        Debug.Log("[HAF] 3ds Max file converted: " + maxPath + " -> " + target + "\n" + summary);
-        EditorUtility.DisplayDialog("3ds Max file converted",
+        Debug.Log("[HAF] 3ds Max file converted: " + maxPath + " -> " + target + "\n" + report.Summary(true));
+        EditorUtility.DisplayDialog(report.PartsUnplaced * 2 > report.Parts ? "3ds Max file converted - but NOT assembled" : "3ds Max file converted",
             "Written as\n" + target + "\nThe tool works on this copy from here on.\n\n" + (summary.Length > 1800 ? summary.Substring(0, 1800) + "\n... (the whole report is in the Console)" : summary), "OK");
         return target;
     }

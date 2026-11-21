@@ -611,6 +611,9 @@ public class VehicleLabWindow : EditorWindow
         {
             srcFile = glb;
             status = parts.Count > 0 ? $"Source converted; {parts.Count} marked part(s) KEPT — press Probe parts to re-list against the new file." : "3ds Max file converted — press Probe parts.";
+            // as a picked file does: suggest the output beside the new source (fully editable below), so the field does
+            // not keep the name a previous model left in it
+            outGlb = Path.Combine(Path.GetDirectoryName(glb), Path.GetFileNameWithoutExtension(glb) + "_Spin.glb").Replace('\\', '/');
             Repaint();
         });
         using (new EditorGUILayout.HorizontalScope())
@@ -651,6 +654,13 @@ public class VehicleLabWindow : EditorWindow
                 if (!string.IsNullOrWhiteSpace(srcFile2) && GUILayout.Button("Clear", GUILayout.Width(50)))
                 { srcFile2 = ""; status = "Second model cleared — press Probe parts to re-list; its B_ parts drop out on their own."; }
             }
+            // a typed .max path: a Convert button under this field too
+            if (MaxModel.IsMax(srcFile2)) MaxImport.TypedPathGui(srcFile2, glb =>
+            {
+                srcFile2 = glb;
+                status = "Second model converted — press Probe parts to list the merged pair (B_ prefix).";
+                Repaint();
+            });
             using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(srcFile2)))
             {
                 model2Off = EditorGUILayout.Vector3Field(new GUIContent("Offset (X, Y, Z)",
@@ -1600,6 +1610,13 @@ public class VehicleLabWindow : EditorWindow
 
     void Probe()
     {
+        // A typed or recipe-loaded .max that was never converted: no probe (ours or Blender's) can open one, and the
+        // Blender one answered with an import error that does not name the way out.
+        if (MaxModel.IsMax(srcFile) || MaxModel.IsMax(srcFile2))
+        {
+            status = "A 3ds Max file must be converted first: press 'Convert .max' under the " + (MaxModel.IsMax(srcFile) ? "Raw model" : "Second model") + " field, then Probe parts.";
+            return;
+        }
         // Re-probing MERGES, never wipes: roles already assigned (by hand or a loaded recipe) are re-applied by
         // part name. This is also how a minimal recipe expands for review — Load recipe, then Probe to surface
         // every unmarked part around the kept markings.

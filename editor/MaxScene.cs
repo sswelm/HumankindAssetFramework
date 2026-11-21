@@ -16,9 +16,11 @@
 // (their first entry); the object offset; Standard materials (diffuse colour, opacity, two-sided, the diffuse slot's
 // Bitmap or Mask-of-two-Bitmaps with its amount, offset, tiling and the tile switches); Multi/Sub-Object.
 // WHAT IS NOT, said by name in the notes and never guessed: modifiers (a .max stores the base object and the list of
-// modifiers, not the result - only 3ds Max can evaluate them), parametric primitives (stored as their parameters),
-// Editable Poly (no sample file yet to hold a reader to), skin / bones / animation keys, procedural maps, every map slot
-// but diffuse, lights and cameras.
+// modifiers, not the result - only 3ds Max can evaluate them; a Skin is one of them and is counted with them),
+// parametric primitives (stored as their parameters), Editable Poly (no sample file yet to hold a reader to),
+// controllers of other classes, procedural maps, every map slot but diffuse (named by slot), lights and cameras.
+// NOT READ AND NOT DETECTED, so the report cannot name it: animation. A part stands where the value stored in each of
+// its controllers puts it; whether that controller also holds keys is not looked at.
 //
 // Pure C#: no Unity. Numbers are doubles here; MaxModel casts to the float32 a GLB holds.
 using System;
@@ -40,6 +42,7 @@ public sealed class MaxBitmap
     public bool TileU = true, TileV = true;  // the Placement's tile switches
     public double OffsetU, OffsetV, TilingU = 1, TilingV = 1, Angle;
     public bool HasPlacement => OffsetU != 0 || OffsetV != 0 || TilingU != 1 || TilingV != 1;
+    public bool PlacementLeft;               // the file's offset / tiling / angle held an unusable number: none is applied
 }
 
 public sealed class MaxMaterial
@@ -53,6 +56,8 @@ public sealed class MaxMaterial
     public MaxBitmap Mask;                   // a Mask map's second picture (white shows the map), or null
     public double Amount = 1;                // the diffuse slot's amount: below 1 the map mixes with the colour
     public string MapLeft;                   // why the diffuse slot's map is not read (a procedural map, ...), or null
+    public bool DiffuseRead;                 // false: the colour was not found where this reader looks (the grey above stands in)
+    public readonly List<(string slot, string what)> OtherMaps = new List<(string, string)>();   // maps in slots other than diffuse: not read, named
 }
 
 public sealed class MaxMeshData
@@ -63,7 +68,8 @@ public sealed class MaxMeshData
     public int[] MatId;                      // per face
     public double[] TVerts;                  // 3 per UV vertex (u, v, w), or null
     public int[] TFaces;                     // 3 UV indices per face, or null
-    public int Hidden;                       // faces the file marks hidden (3ds Max does not draw them): left out, counted
+    public string UvLeft;                    // why the file's UVs are not read (a list that does not fit its faces, a UV that is no number), or null
+    public int Hidden;                      // faces the file marks hidden (3ds Max does not draw them): left out, counted
     public int FaceCount => Faces.Length / 3;
 }
 
@@ -133,22 +139,51 @@ public sealed class MaxScene
         => c == null ? "nothing" : c.Id == DerivedObject || c.Id == WsmDerivedObject ? "a derived object" : c.Id < Classes.Count ? Classes[c.Id].Name : $"class {c.Id:X4}";
     public MaxChunk Get(long index) => index >= 0 && index < Objects.Count ? Objects[(int)index] : null;
 
-    /// <summary>An object's references: slot -> object index. Empty slots (0xFFFFFFFF) are left out.</summary>
+    /// <summary>References that name an object the scene does not have (a damaged file): each is read as "none", and
+    /// MaxModel says how many there were.</summary>
+    public int DanglingReferences;
+    static readonly SortedDictionary<int, int> NoRefs = new SortedDictionary<int, int>();
+    readonly Dictionary<MaxChunk, SortedDictionary<int, int>> refsOf = new Dictionary<MaxChunk, SortedDictionary<int, int>>();
+    readonly Dictionary<MaxChunk, int> slotsOf = new Dictionary<MaxChunk, int>();
+
+    /// <summary>An object's references: slot -> object index. Empty slots (0xFFFFFFFF) are left out. Built once per
+    /// object and kept (callers only read it): rebuilt on every call, one object with 200,000 references named by 20
+    /// nodes took 17 seconds (review 2026-11-21).</summary>
     public SortedDictionary<int, int> Refs(MaxChunk c)
     {
-        var r = new SortedDictionary<int, int>();
-        if (c == null || !c.IsContainer) return r;
+        if (c == null || !c.IsContainer) return NoRefs;
+        if (refsOf.TryGetValue(c, out var have)) return have;
+        var r = new SortedDictionary<int, int>(); int slots = 0;
         var a = c.First(0x2034);
         if (a != null && !a.IsContainer)
         {
-            for (int i = 0; i + 4 <= a.Length; i += 4) { uint v = a.U32(i); if (v != 0xFFFFFFFF && v < Objects.Count) r[i / 4] = (int)v; }
-            return r;
+            slots = a.Length / 4;
+            for (int i = 0; i + 4 <= a.Length; i += 4)
+            {
+                uint v = a.U32(i);
+                if (v == 0xFFFFFFFF) continue;
+                if (v < Objects.Count) r[i / 4] = (int)v; else DanglingReferences++;
+            }
         }
-        var p = c.First(0x2035);
-        if (p != null && !p.IsContainer)
-            for (int i = 4; i + 8 <= p.Length; i += 8) { uint key = p.U32(i), v = p.U32(i + 4); if (v != 0xFFFFFFFF && v < Objects.Count && key <= int.MaxValue) r[(int)key] = (int)v; }
+        else
+        {
+            var p = c.First(0x2035);
+            if (p != null && !p.IsContainer)
+                for (int i = 4; i + 8 <= p.Length; i += 8)
+                {
+                    uint key = p.U32(i), v = p.U32(i + 4);
+                    if (key > int.MaxValue - 1) continue;
+                    if ((int)key + 1 > slots) slots = (int)key + 1;
+                    if (v == 0xFFFFFFFF) continue;
+                    if (v < Objects.Count) r[(int)key] = (int)v; else DanglingReferences++;
+                }
+        }
+        refsOf[c] = r; slotsOf[c] = slots;
         return r;
     }
+    /// <summary>How many reference slots an object has, the empty ones included (a Multi/Sub-Object's material ids
+    /// count its slots, not its filled slots).</summary>
+    public int RefSlots(MaxChunk c) { Refs(c); return c != null && slotsOf.TryGetValue(c, out int n) ? n : 0; }
     MaxChunk Ref(MaxChunk c, int slot) => Refs(c).TryGetValue(slot, out int i) ? Objects[i] : null;
 
     static double[] Floats(MaxChunk c, int id, int n)
@@ -161,8 +196,8 @@ public sealed class MaxScene
     }
 
     // ---------------------------------------------------------------------------------------------- matrices
-    // 4x4, row-major, column vectors: world = M * v. Every product is written out in one fixed order so that an
-    // independent reader doing the same arithmetic in doubles gets the same bits (tools/max-drill/max_dump.py).
+    // 4x4, row-major, column vectors: world = M * v. Every product is written out in one fixed order, the order the
+    // drill's second reader (tools/max-drill/max_world.py) uses for the same arithmetic in doubles.
     public static double[] Identity() => new double[] { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
     public static double[] Mul(double[] a, double[] b)
     {
@@ -191,14 +226,34 @@ public sealed class MaxScene
         m[8] = 2 * (x * z - y * w); m[9] = 2 * (y * z + x * w); m[10] = 1 - 2 * (x * x + y * y);
         return m;
     }
-    /// <summary>Translate * Rotate * Scale, the three scale factors along the part's own axes. A scale chunk holds four
-    /// more numbers, a quaternion documented as the axis system the factors apply in; it is NOT applied. Measured
-    /// 2026-11-21 on the parts whose factors differ and whose quaternion is turned (the torpedo boat's anchor: factors
-    /// -9.5 / -38.6 / -27.3): applied either way round, none of the anchor's 339 edges keeps a right angle between its
-    /// two faces; left out, 74 do - and the renders that matched the artists' pictures were made without it.</summary>
+    /// <summary>Translate * Rotate * Scale. A scale chunk holds three factors and, where it is seven numbers long, a
+    /// quaternion: the axis system the factors apply in (a part scaled along the WORLD's axes after it was turned is
+    /// stretched along directions that are not its own). The scale is then U * diag(factors) * U-transposed, with U
+    /// that quaternion's rotation read like every other one in the file.
+    /// Measured 2026-11-21 on the twelve parts of the four models where the rule changes anything (factors that
+    /// differ, a turned axis): how far the part's stretch in the world sits from the world's axes (the largest
+    /// off-diagonal of A*A-transposed over its largest diagonal entry). With the axis applied this way nine of them
+    /// lie on the world's axes (0.015 or less; the torpedo boat's PIEZA-156 goes from 0.891 to 0.015) and a tenth
+    /// close to them (0.093 from 0.814); with it left out, or applied the other way round, none of the boat's eleven
+    /// does. Two (its anchor and PIEZA-75) lie on them under no reading. PIEZA-74 and PIEZA-75 are the same fitting on
+    /// the boat's two sides: with the axis applied their boxes are 30 x 167 x 54 and 35 x 163 x 54, without it
+    /// 46 x 50 x 54 and 39 x 206 x 54 - two different things where the boat has a pair.
+    /// Why nine land on the axes: a part turned by R and then scaled along its PARENT's axes has the matrix
+    /// K*R = R*(R-transposed*K*R), so its stored axis system is the inverse of its rotation - which is what the file
+    /// holds for those parts, and what only this reading turns back into a stretch along the parent's axes.
+    /// The first version of this reader left the axis out on the anchor's evidence (more right angles survive without
+    /// it); a diagonal scale keeps every right angle of the part's own axes whatever the file means, so that test
+    /// could not tell the readings apart (review 2026-11-21).</summary>
     public static double[] Trs(double[] p, double[] q, double[] s)
     {
         var sm = Identity(); sm[0] = s[0]; sm[5] = s[1]; sm[10] = s[2];
+        if (s.Length >= 7 && (s[0] != s[1] || s[1] != s[2]))       // three equal factors: the axis system changes nothing
+        {
+            var u = Rotation(new[] { s[3], s[4], s[5], s[6] });
+            var ut = Identity();
+            for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) ut[i * 4 + j] = u[j * 4 + i];
+            sm = Mul(Mul(u, sm), ut);
+        }
         var m = Mul(Rotation(q), sm);
         m[3] = p[0]; m[7] = p[1]; m[11] = p[2];
         return m;
@@ -212,13 +267,17 @@ public sealed class MaxScene
         if (c == null) return null;
         var v = Floats(c, valueChunk, n);
         if (v != null) return v;
+        string what = valueChunk == 0x2503 ? "position" : valueChunk == 0x2504 ? "rotation" : "scale";
         if (IsList(ClassOf(c)) && depth < 8)
         {
+            // a list controller: its first entry. 3ds Max combines all of a list's entries, so a list of more than one
+            // (or of none) is said - no sample file has a list at all.
             var r = Refs(c);
-            foreach (var kv in r) return ControllerValue(Objects[kv.Value], valueChunk, n, ref note, depth + 1);   // a list controller: its first entry
+            if (r.Count != 1 && note == null) note = "its " + what + " is a list controller with " + r.Count + " entries, of which only the first is read";
+            foreach (var kv in r) return ControllerValue(Objects[kv.Value], valueChunk, n, ref note, depth + 1);
             return null;
         }
-        if (note == null) note = "its " + (valueChunk == 0x2503 ? "position" : valueChunk == 0x2504 ? "rotation" : "scale") + " controller '" + ClassName(c) + "' is not read";
+        if (note == null) note = "its " + what + " controller '" + ClassName(c) + "' is not read";
         return null;
     }
 
@@ -274,7 +333,7 @@ public sealed class MaxScene
             if (o != null && o.IsContainer && o.First(0x08FE) != null)
             {
                 try { n.Mesh = ReadMesh(o.First(0x08FE)); }
-                catch (InvalidDataException e) { n.MeshLeft = e.Message; }
+                catch (InvalidDataException e) { n.MeshLeft = e.Message + (IsEditablePoly(cls) ? " (an Editable Poly object is not read yet: no sample file to hold the reader to)" : ""); }
             }
             else if (IsEditablePoly(cls)) n.MeshLeft = "an Editable Poly object is not read yet (no sample file to hold the reader to)";
             else if (cls != null && cls.Super == SuperGeom && !IsTargetLike(cls)) n.MeshLeft = "'" + cls.Name + "' is stored as its parameters, not as a mesh (only 3ds Max can build it)";
@@ -282,7 +341,7 @@ public sealed class MaxScene
         }
         // world transforms, parents first (a cycle of parents is refused)
         var state = new int[Nodes.Count];
-        for (int i = 0; i < Nodes.Count; i++) World(i, state, 0);
+        for (int i = 0; i < Nodes.Count; i++) World(i, state);
     }
 
     // a camera's or light's target is a geometry-superclass helper with nothing to draw
@@ -291,22 +350,35 @@ public sealed class MaxScene
     double[] ScaleValue(MaxChunk c, ref string note)
     {
         string n2 = null;
-        var v = ControllerValue(c, 0x2505, 7, ref n2) ?? ControllerValue(c, 0x2505, 3, ref note);
-        return v;
+        var v = ControllerValue(c, 0x2505, 7, ref n2);
+        if (v != null) { if (note == null) note = n2; return v; }
+        return ControllerValue(c, 0x2505, 3, ref note);
     }
 
-    double[] World(int i, int[] state, int depth)
+    /// <summary>World transforms, parents first, without recursion: a chain of any length is read (the first version
+    /// refused a chain deeper than 4,096 as a cycle), and a real cycle of parents is refused by name.</summary>
+    void World(int i, int[] state)
     {
-        var n = Nodes[i];
-        if (state[i] == 2) return n.World;
-        if (state[i] == 1 || depth > 4096) throw new InvalidDataException($"node '{n.Name}' is its own ancestor - the hierarchy has a cycle");
-        state[i] = 1;
-        n.World = n.Parent >= 0 ? Mul(World(n.Parent, state, depth + 1), n.Local) : n.Local;
-        state[i] = 2;
-        return n.World;
+        if (state[i] == 2) return;
+        var chain = new List<int>();
+        for (int at = i; at >= 0 && state[at] != 2; at = Nodes[at].Parent)
+        {
+            if (state[at] == 1) throw new InvalidDataException($"node '{Nodes[at].Name}' is its own ancestor - the hierarchy has a cycle");
+            state[at] = 1; chain.Add(at);
+        }
+        for (int k = chain.Count - 1; k >= 0; k--)
+        {
+            var n = Nodes[chain[k]];
+            n.World = n.Parent >= 0 ? Mul(Nodes[n.Parent].World, n.Local) : n.Local;
+            state[chain[k]] = 2;
+        }
     }
 
     // ---------------------------------------------------------------------------------------------- meshes
+    /// <summary>A UV, an offset or a tiling beyond this is not a placement on a picture but a damaged number; their
+    /// product must also stay inside a 32-bit float (a GLB's UVs), and 1e6 * 1e6 does.</summary>
+    public const double MaxUv = 1e6;
+
     static MaxMeshData ReadMesh(MaxChunk g)
     {
         var v = g.First(0x0914); var f = g.First(0x0912);
@@ -324,6 +396,7 @@ public sealed class MaxScene
         {
             nt = tv.U32(0);
             uv = tv.Length == 4 + 12 * nt && tf.Length == 12 * nf && nt > 0;
+            if (!uv && nt > 0) m.UvLeft = tv.Length != 4 + 12 * nt ? $"its UV list declares {nt} entries in {tv.Length} bytes" : $"its UV faces fill {tf.Length} bytes where {nf} faces need {12 * nf}";
         }
         var keep = new List<int>();
         for (int i = 0; i < nf; i++)
@@ -350,7 +423,16 @@ public sealed class MaxScene
                     m.TFaces[o * 3 + k] = (int)t;
                 }
         }
-        if (uv) for (int i = 0; i < m.TVerts.Length; i++) if (double.IsNaN(m.TVerts[i]) || double.IsInfinity(m.TVerts[i])) { m.TVerts = null; m.TFaces = null; break; }
+        // a UV that is no number, or so far out that a tiling could push it past a 32-bit float: the part is read without UVs, and says so
+        if (uv)
+            for (int i = 0; i < m.TVerts.Length; i++)
+            {
+                double t = m.TVerts[i];
+                if (!double.IsNaN(t) && Math.Abs(t) <= MaxUv) continue;
+                m.TVerts = null; m.TFaces = null;
+                m.UvLeft = "a UV is not a usable number (" + t.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + ")";
+                break;
+            }
         return m;
     }
 
@@ -371,21 +453,30 @@ public sealed class MaxScene
             if (!IsMultiSub(cls)) { why = "a material of class '" + ClassName(m) + "' is not read"; return null; }
             var r = Refs(m);
             if (r.Count == 0) { why = "a Multi/Sub-Object material without sub-materials"; return null; }
-            var subs = new List<int>(r.Values);
-            at = subs[matId % subs.Count];
+            // the id counts the material's SLOTS, the empty ones too: counted over the filled slots only, one empty
+            // slot moved every later sub-material one id down (review 2026-11-21)
+            int slots = RefSlots(m), slot = matId % slots;
+            if (!r.TryGetValue(slot, out at)) { why = "its Multi/Sub-Object material '" + MaterialName(m) + "' has no sub-material in slot " + (slot + 1); return null; }
             matId = 0;
         }
         why = "materials nested deeper than 8";
         return null;
     }
 
+    static string MaterialName(MaxChunk m)
+    {
+        var nc = m.First(0x4000);
+        return nc != null && nc.First(0x4001) != null ? nc.First(0x4001).Text() : "Material";
+    }
+
+    // the Standard material's map slots in the order of its map table (3ds Max 2 and 3; the diffuse slot is 1)
+    static readonly string[] SlotNames = { "ambient", "diffuse", "specular", "shininess", "shininess strength", "self-illumination", "opacity", "filter colour", "bump", "reflection", "refraction", "displacement" };
+
     MaxMaterial Standard(int index)
     {
         if (materials.TryGetValue(index, out var have)) return have;
         var m = Objects[index];
-        var mat = new MaxMaterial { Object = index, Name = "Material" };
-        var nc = m.First(0x4000);
-        if (nc != null && nc.First(0x4001) != null) mat.Name = nc.First(0x4001).Text();
+        var mat = new MaxMaterial { Object = index, Name = MaterialName(m) };
         var fl = m.First(0x5000);
         if (fl != null && !fl.IsContainer && fl.Length >= 4) mat.TwoSided = (fl.U32(0) & 0x8) != 0;
         var r = Refs(m);
@@ -395,7 +486,7 @@ public sealed class MaxScene
             {
                 var ix = k.First(0x0003);
                 if (ix == null || ix.IsContainer || ix.Length < 4) continue;
-                if (ix.U32(0) == 1) { var c = Floats(k, 0x0102, 3); if (c != null) mat.Diffuse = c; }
+                if (ix.U32(0) == 1) { var c = Floats(k, 0x0102, 3); if (c != null) { mat.Diffuse = c; mat.DiffuseRead = true; } }
                 if (ix.U32(0) == 6) { var c = Floats(k, 0x0100, 1); if (c != null) mat.Opacity = c[0]; }
             }
         var tm = r.TryGetValue(1, out int tmi) ? Objects[tmi] : null;
@@ -417,6 +508,16 @@ public sealed class MaxScene
             }
             else mat.MapLeft = "a '" + ClassName(map) + "' map is not read (plain colour instead)";
             if (mat.Map != null && mat.Map.File == "") { mat.Map = null; mat.Mask = null; mat.MapLeft = "its bitmap names no file"; }
+        }
+        // every other slot that holds a map: not read, and said by slot (an opacity map cuts holes in 3ds Max; here the
+        // faces are written whole)
+        foreach (var kv in tr)
+        {
+            if (kv.Key % 2 == 0 || kv.Key == 3) continue;
+            int slot = kv.Key / 2;
+            var other = Objects[kv.Value];
+            string file = IsBitmap(ClassOf(other)) ? Bitmap(other).File : "";
+            mat.OtherMaps.Add((slot < SlotNames.Length ? SlotNames[slot] : "slot " + slot, file != "" ? "'" + file + "'" : "a " + ClassName(other) + " map"));
         }
         materials[index] = mat;
         return mat;
@@ -454,6 +555,11 @@ public sealed class MaxScene
                     }
                 }
         }
+        // an offset or tiling that is no number (or an absurd one) would make every UV of the material one: the
+        // picture is then placed as if it had none, and the report says so - one bad number must not refuse the file
+        foreach (double v in new[] { bm.OffsetU, bm.OffsetV, bm.TilingU, bm.TilingV, bm.Angle })
+            if (double.IsNaN(v) || Math.Abs(v) > MaxUv) bm.PlacementLeft = true;
+        if (bm.PlacementLeft) { bm.OffsetU = bm.OffsetV = bm.Angle = 0; bm.TilingU = bm.TilingV = 1; }
         return bm;
     }
 }

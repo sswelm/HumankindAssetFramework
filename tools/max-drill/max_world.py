@@ -1,8 +1,9 @@
-# max_world.py - an independent reader of a 3ds Max .max file, for tools/max_drill.sh: the compound-file container, the
+# max_world.py - a SECOND reader of a 3ds Max .max file, for tools/max_drill.sh: the compound-file container, the
 # chunk tree, the scene's references, each node's world transform and the triangles of each Editable Mesh, printed as one
 # PART line per mesh part in WORLD space and 3ds Max axes - the same lines `MaxDrill stats` prints from the C# reader's
-# model (editor/MaxDocument.cs, MaxScene.cs, MaxModel.cs). Written first, as the probe the C# reader was then written
-# beside; it shares no code with it. Standard library only.
+# model (editor/MaxDocument.cs, MaxScene.cs, MaxModel.cs). It shares no CODE with the C# reader and every READING of
+# the format with it (which chunk is what, the inverse quaternion, the scale's axis system, hidden faces, the re-wind
+# of a mirrored part): it catches a slip in one implementation, never a shared misreading. Standard library only.
 #   usage: python -I max_world.py <file.max>
 import sys, struct, zlib, math
 
@@ -155,7 +156,11 @@ def main(path):
         sm = ident()
         for i in range(3):
             sm[i][i] = s[i]
-        m = mul(rot(q), sm)                                 # the scale chunk's axis quaternion (s[3:7]) is not applied: see MaxScene.Trs
+        if len(s) >= 7 and not (s[0] == s[1] == s[2]):      # the scale's axis system (see MaxScene.Trs): U * diag * U-transposed
+            u = rot(s[3:7])
+            ut = [[u[j][i] for j in range(4)] for i in range(4)]
+            sm = mul(mul(u, sm), ut)
+        m = mul(rot(q), sm)
         for i in range(3):
             m[i][3] = p[i]
         return m
@@ -220,7 +225,7 @@ def main(path):
         tv, tf = g.first(0x0916), g.first(0x0918)
         uv = tv is not None and tf is not None and len(tv.data) >= 4 and struct.unpack_from('<I', tv.data, 0)[0] > 0 \
             and len(tv.data) == 4 + 12 * struct.unpack_from('<I', tv.data, 0)[0] and len(tf.data) == 12 * nf
-        tris = 0; area = 0.0; vol = 0.0; lo = [1e300] * 3; hi = [-1e300] * 3
+        tris = 0; area = 0.0; vol = 0.0; va = [0.0, 0.0, 0.0]; lo = [1e300] * 3; hi = [-1e300] * 3; kept = []
         for i in range(nf):
             a, b, c, sg, flags, mid = struct.unpack_from('<IIIIHH', f.data, 4 + 20 * i)
             if flags & 0x8:
@@ -235,14 +240,21 @@ def main(path):
             u = [tri[1][k] - tri[0][k] for k in range(3)]; w = [tri[2][k] - tri[0][k] for k in range(3)]
             n = (u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0])
             area += 0.5 * math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2])
-            p0, p1, p2 = tri
-            vol += (p0[0] * (p1[1] * p2[2] - p1[2] * p2[1]) - p0[1] * (p1[0] * p2[2] - p1[2] * p2[0]) + p0[2] * (p1[0] * p2[1] - p1[1] * p2[0])) / 6
+            va = [va[k] + 0.5 * n[k] for k in range(3)]
+            kept.append(tri)
             tris += 1
         if tris == 0:
             continue
+        # the signed volume about the part's OWN centre (the middle of its box): about the world's origin a small part
+        # far from it has a volume term so large that turning the part inside out drowned in the tolerance
+        mid = [(lo[k] + hi[k]) / 2 for k in range(3)]
+        for tri in kept:
+            p0, p1, p2 = ([p[k] - mid[k] for k in range(3)] for p in tri)
+            vol += (p0[0] * (p1[1] * p2[2] - p1[2] * p2[1]) - p0[1] * (p1[0] * p2[2] - p1[2] * p2[0]) + p0[2] * (p1[0] * p2[1] - p1[1] * p2[0])) / 6
         nm = node.first(0x0962)
-        lines.append('PART %s tris=%d uv=%d area=%.6e vol=%.6e lo=%.6e,%.6e,%.6e hi=%.6e,%.6e,%.6e'
-                     % ((text(nm.data).strip().replace(' ', '_') if nm else ''), tris, 1 if uv else 0, area, vol, lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]))
+        name = text(nm.data).strip().replace(' ', '_') if nm else ''
+        lines.append('PART %s tris=%d uv=%d area=%.6e vol=%.6e varea=%.6e,%.6e,%.6e lo=%.6e,%.6e,%.6e hi=%.6e,%.6e,%.6e'
+                     % (name or 'Object', tris, 1 if uv else 0, area, vol, va[0], va[1], va[2], lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]))
         total[0] += 1; total[1] += tris; total[2] += 1 if uv else 0
     for l in sorted(lines):
         print(l)

@@ -248,18 +248,43 @@ Sixteen planted deviations each changed a dump (the first layer blending instead
 files until a curve of signed zeros joined the scenes.
 
 **`tools/max_drill.sh`** (the native 3ds Max reader, 2026-11-21): compiles `editor/MaxDocument.cs`, `MaxScene.cs` and
-`MaxModel.cs` outside Unity and holds them to an independent Python reader of the same files
-(`tools/max-drill/max_world.py`, written first, as the probe the C# was then written beside). Per mesh part it compares the
-name, the triangle count, and — in world space — the area, the bounding box and the signed volume, which changes sign
-with the winding; the totals compare parts, triangles, parts with UVs and hidden faces. Each file is then converted as the
-tools' pickers convert it and the written `.glb` is read back. Run 2026-11-21: 4 files, 257 parts, 244,337 triangles,
-all equal. **Not in the push gate**: the population is four files of one 3ds Max generation on the author's disk
-(`D:/3DModels`, `D:/3dmax`; `HAF_MAX_ROOTS` names other folders). What the drill cannot see: both readers share one
-author's reading of the format, so the renders of the converted files (compared by eye with the artists' own pictures)
-are the check of that reading, and `Tests/MaxReaderTests.cs` (19 tests on files built byte by byte) the check of each
-rule. Thirteen defects planted one at a time (the rotation read without its inverse, a mirrored part not re-wound, the object offset inherited, the mask inverted, ...) each failed at least one test. One rule was decided by measurement: a scale chunk carries a
-quaternion documented as the axis system of the scale; applied either way round it leaves none of the torpedo boat's
-anchor's 339 edges with a right angle between its faces, left out 74 keep one — it is not applied.
+`MaxModel.cs` outside Unity and holds them to a second reader of the same files in Python
+(`tools/max-drill/max_world.py`). Per mesh part it compares the name, the triangle count, whether the part has UVs, and
+— in world space — the area, the bounding box, and the two measures that change sign with the winding: the signed
+volume about the part's own centre (a closed part) and the vector area (an open sheet). Each file is then converted and
+the written `.glb` is read back and held to the report (parts, triangles, pictures, the generator line). Run
+2026-11-21: 4 files, 257 parts, 244,337 triangles, all equal; turning any one of the 257 parts inside out changes one of
+the two winding measures beyond the tolerance. **Not in the push gate**: the population is four files of one 3ds Max
+generation on the author's disk (`D:/3DModels`, `D:/3dmax`; `HAF_MAX_ROOTS` names other folders).
+
+What this drill is not:
+
+- **Not an independent reading of the format.** The Python reader shares no code with the C# one and every reading of
+  the format with it (which chunk is what, the inverse quaternion, the scale's axis system, hidden faces, the re-wind of
+  a mirrored part). It catches a slip in one of the two implementations. The check of the reading itself is the renders
+  of the converted files, compared by eye with the artists' own pictures.
+- **Not a check of UV values, normals, materials, pivots or parent links:** none of those is compared.
+  `Tests/MaxReaderTests.cs` holds each of them, on files built byte by byte.
+
+One rule was decided by measurement, and decided twice. A scale chunk carries a quaternion: the axis system the three
+factors apply in. The first version left it out (on the torpedo boat's anchor more right angles survive without it); the
+review showed that test cannot tell the readings apart, because a diagonal scale keeps the right angles of a part's own
+axes whatever the file means. The measurement that can: how far each part's stretch in the world sits from the world's
+axes. Of the twelve parts where the rule changes anything, applying the axis puts nine on the axes and a tenth close to
+them, where leaving it out, or applying it the other way round, puts none of the boat's eleven there; and the boat's two
+bow fittings, one on each side, come out as a pair (30 x 167 x 54 and 35 x 163 x 54) instead of as two different
+things (46 x 50 x 54 and 39 x 206 x 54). It is applied.
+
+**`tools/max_unity_drill.sh`** (the `.max` door inside Unity, 2026-11-21): builds a temporary Unity project, copies each
+sample file's folder into it and runs `MaxImport.Picked` / `Convert` there in batch mode
+(`tools/max-drill/UnityMaxImportDrill.cs`), with Unity's own image decoder. Held to the `.glb` the stand-alone drill's
+executable writes from the same copy with System.Drawing's decoder: positions, normals and UVs bit for bit, every
+picture's size, and the pixels of each decoded picture. Also: a 5 x 3 picture through Unity's decoder byte for byte (row
+order and channel order); the same file converted again leaves the copy untouched; the Convert button's deferred half
+outside a GUI pass; a file cut to a third, a text file named `.max` and a missing file are refused without an exception
+and leave no `.glb`. Run 2026-11-21: 4 files, 57 checks, none failed; all 16 decoded pictures equal the reference pixel
+for pixel. **Not in the push gate** (same population). **Not covered:** the dialogs' text and the IMGUI layout — a
+modal dialog answers itself in batch mode — so the pickers themselves, on screen, are still the user's to try.
 
 **`tools/fbx_model_drill.sh`** (step 6a of the native FBX reader, 2026-11-01: the FBX path into the Factory): Blender imports
 every static FBX source and fixture with its FBX importer's defaults and exports a GLB (`tools/fbx-drill/fbx_to_glb.py`);

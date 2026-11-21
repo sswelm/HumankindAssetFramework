@@ -1,6 +1,6 @@
 // MaxDrill.cs - the native 3ds Max reader outside Unity (tools/max_drill.sh compiles and runs it):
 //   MaxDrill stats   <file.max>            one PART line per mesh part, in WORLD space and 3ds Max axes (compared with
-//                                          tools/max-drill/max_world.py, an independent Python reader of the same file)
+//                                          tools/max-drill/max_world.py, a second reader of the same file in Python)
 //   MaxDrill convert <file.max> <out.glb>  the conversion the tools' file pickers run, with the report
 // JPEG pixels come from System.Drawing here (Unity's loader in the editor); the composition code is the same.
 using System;
@@ -21,6 +21,14 @@ static class MaxDrill
                 var rep = MaxModel.ConvertToGlb(a[1], a[2], Decode);
                 Console.WriteLine(rep.Summary());
                 var back = GlbReader.Read(a[2]);
+                // the read-back is a check, not a print: the written file must hold what the report says and be recognised
+                long tris = back.TriangleCount; bool ours = MaxModel.IsOurs(a[2]);
+                if (tris != rep.Triangles || back.Meshes.Count != rep.Parts || back.Images.Count != rep.Images || !ours)
+                {
+                    Console.WriteLine("READ BACK DIFFERS: " + back.Meshes.Count + " meshes / " + tris + " triangles / " + back.Images.Count + " images / ours " + ours
+                        + "  against the report's " + rep.Parts + " / " + rep.Triangles + " / " + rep.Images);
+                    return 4;
+                }
                 Console.WriteLine("READ BACK: " + back.Nodes.Count + " nodes, " + back.Meshes.Count + " meshes, " + back.TriangleCount + " triangles, " + back.Materials.Count + " materials, " + back.Images.Count + " images; generator '" + back.Generator + "'; ours " + MaxModel.IsOurs(a[2]));
                 return 0;
             }
@@ -46,8 +54,9 @@ static class MaxDrill
             if (n.Mesh < 0) continue;
             double tx = 0, ty = 0, tz = 0;
             for (int at = i; at >= 0; at = m.Nodes[at].Parent) { tx += m.Nodes[at].Translation[0]; ty += m.Nodes[at].Translation[1]; tz += m.Nodes[at].Translation[2]; }
-            long tris = 0; double area = 0, vol = 0; bool uv = false;
+            long tris = 0; double area = 0, vol = 0, vax = 0, vay = 0, vaz = 0; bool uv = false;
             double[] lo = { 1e300, 1e300, 1e300 }, hi = { -1e300, -1e300, -1e300 };
+            var kept = new List<double[]>();
             foreach (var p in m.Meshes[n.Mesh].Primitives)
             {
                 if (p.Uv0 != null) uv = true;
@@ -63,11 +72,20 @@ static class MaxDrill
                     double ux = c[3] - c[0], uy = c[4] - c[1], uz = c[5] - c[2], vx = c[6] - c[0], vy = c[7] - c[1], vz = c[8] - c[2];
                     double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
                     area += 0.5 * Math.Sqrt(nx * nx + ny * ny + nz * nz);
-                    vol += (c[0] * (c[4] * c[8] - c[5] * c[7]) - c[1] * (c[3] * c[8] - c[5] * c[6]) + c[2] * (c[3] * c[7] - c[4] * c[6])) / 6;
+                    vax += 0.5 * nx; vay += 0.5 * ny; vaz += 0.5 * nz;
+                    kept.Add(c);
                     tris++;
                 }
             }
+            // the signed volume about the part's own centre (see max_world.py)
+            double mx = (lo[0] + hi[0]) / 2, my = (lo[1] + hi[1]) / 2, mz = (lo[2] + hi[2]) / 2;
+            foreach (var c in kept)
+            {
+                double ax = c[0] - mx, ay = c[1] - my, az = c[2] - mz, bx = c[3] - mx, by = c[4] - my, bz = c[5] - mz, cx = c[6] - mx, cy = c[7] - my, cz = c[8] - mz;
+                vol += (ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)) / 6;
+            }
             lines.Add("PART " + n.Name.Trim().Replace(' ', '_') + " tris=" + tris + " uv=" + (uv ? 1 : 0) + " area=" + G(area) + " vol=" + G(vol)
+                + " varea=" + G(vax) + "," + G(vay) + "," + G(vaz)
                 + " lo=" + G(lo[0]) + "," + G(lo[1]) + "," + G(lo[2]) + " hi=" + G(hi[0]) + "," + G(hi[1]) + "," + G(hi[2]));
         }
         lines.Sort(StringComparer.Ordinal);

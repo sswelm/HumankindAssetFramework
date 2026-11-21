@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# max_drill.sh - the native 3ds Max reader (editor/MaxDocument.cs, MaxScene.cs, MaxModel.cs) outside Unity, held to an
-# independent Python reader of the same files (tools/max-drill/max_world.py): per mesh part the same name, triangle
-# count and UV presence, and the same area, signed volume and bounding box in world space. Then each file is converted
-# as the tools' pickers convert it and the written .glb is read back.
+# max_drill.sh - the native 3ds Max reader (editor/MaxDocument.cs, MaxScene.cs, MaxModel.cs) outside Unity, held to a
+# second reader of the same files in Python (tools/max-drill/max_world.py): per mesh part the same name, triangle
+# count and UV presence, and the same area, signed volume, vector area and bounding box in world space. Then each file
+# is converted and the written .glb is read back and held to the report (parts, triangles, pictures, generator).
+# The second reader shares no code with the first and EVERY reading of the format: this catches a slip in one of the two
+# implementations, not a misreading both make. NOT compared at all: UV values, normals, materials, pivots, parent links
+# (Tests/MaxReaderTests.cs holds those on built files). The door inside Unity: tools/max_unity_drill.sh.
 #   usage: tools/max_drill.sh [file.max ...]      (no arguments: every .max under $HAF_MAX_ROOTS, default D:/3DModels D:/3dmax)
 # NOT in the push gate (2026-11-21): the population is four files of one 3ds Max generation on the author's disk.
 set -u
@@ -45,4 +48,4 @@ for f in "${files[@]}"; do
   sed 's/^/    /' "$tag.convert.txt"
 done
 if [ "$fail" -ne 0 ]; then echo "FAIL - .max drill: differences above ($n file(s))"; exit 1; fi
-echo "PASS - .max drill: $n file(s) read by the C# reader equal to the independent Python reader per part, converted and read back"
+echo "PASS - .max drill: $n file(s) read by the C# reader equal to the second (Python) reader per part, converted and read back equal to the report"

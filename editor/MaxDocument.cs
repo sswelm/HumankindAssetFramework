@@ -90,6 +90,9 @@ public sealed class MaxDocument
             return ((long)sect + 1) * ss;
         }
         // the sectors that hold the allocation table: 109 in the header, the rest through the DIFAT chain
+        // A file cannot hold more allocation sectors than it has sectors: without this bound a 1 MB file whose DIFAT
+        // names one sector over and over asked for gigabytes (review 2026-11-21).
+        if (nFat > sectors) throw new InvalidDataException($"compound file: {nFat} allocation sectors declared in a file of {sectors} sectors");
         var fatSects = new List<uint>();
         for (int i = 0; i < 109; i++) { uint s = BitConverter.ToUInt32(b, 0x4C + 4 * i); if (s < MaxRegular) fatSects.Add(s); }
         int per = ss / 4;
@@ -98,6 +101,7 @@ public sealed class MaxDocument
             if (guard > nDifat || guard > sectors) throw new InvalidDataException("compound file: the DIFAT chain is longer than its count (a loop)");
             long o = Off(difat);
             for (int i = 0; i < per - 1; i++) { uint s = BitConverter.ToUInt32(b, (int)o + 4 * i); if (s < MaxRegular) fatSects.Add(s); }
+            if (fatSects.Count > sectors) throw new InvalidDataException($"compound file: more allocation sectors listed than the file has sectors ({sectors})");
             difat = BitConverter.ToUInt32(b, (int)o + 4 * (per - 1));
         }
         if (nFat > fatSects.Count) throw new InvalidDataException($"compound file: {nFat} allocation sectors declared, {fatSects.Count} listed");
@@ -144,13 +148,21 @@ public sealed class MaxDocument
         if (miniFatStart < MaxRegular) { var mf = Chain(miniFatStart, -1, "the mini allocation table"); miniFat = new uint[mf.Length / 4]; Buffer.BlockCopy(mf, 0, miniFat, 0, miniFat.Length * 4); }
 
         var doc = new MaxDocument();
+        long claimed = 0;
         foreach (var e in entries)
         {
             if (e.type != 2) continue;
+            // two entries of one name: the first wins (no file read so far has it), and the second is not even walked
+            if (doc.Streams.ContainsKey(e.name)) continue;
+            // Streams do not share sectors, so together they cannot hold more bytes than the file: without this bound
+            // 4,095 entries naming one chain cost 2.5 GB from a 529 KB file (review 2026-11-21).
+            claimed += e.size;
+            if (claimed > b.Length) throw new InvalidDataException($"compound file: its streams declare more bytes together than the file holds ({b.Length}) - sectors named by more than one stream");
             byte[] raw;
             if (e.size == 0) raw = new byte[0];
             else if (e.size < cutoff)
             {
+                if (e.size > mini.Length) throw new InvalidDataException($"compound file: stream '{e.name}' declares {e.size} bytes, the mini stream holds {mini.Length}");
                 raw = new byte[e.size];
                 uint s = e.start; long done = 0, n = 0;
                 while (done < e.size)
@@ -168,8 +180,7 @@ public sealed class MaxDocument
             }
             else raw = Chain(e.start, e.size, "stream '" + e.name + "'");
             if (raw.Length >= 2 && raw[0] == 0x1F && raw[1] == 0x8B) { raw = Gunzip(raw, e.name); doc.Compressed = true; }
-            // two entries of one name: the first wins (no file read so far has it)
-            if (!doc.Streams.ContainsKey(e.name)) doc.Streams[e.name] = raw;
+            doc.Streams[e.name] = raw;
         }
         return doc;
     }
@@ -199,16 +210,27 @@ public sealed class MaxDocument
 
     /// <summary>The chunk tree of a stream; an absent stream gives null.</summary>
     public List<MaxChunk> Chunks(string stream)
-        => Streams.TryGetValue(stream, out var buf) ? ParseChunks(buf, 0, buf.Length, 0, stream) : null;
+    {
+        if (!Streams.TryGetValue(stream, out var buf)) return null;
+        int count = 0;
+        return ParseChunks(buf, 0, buf.Length, 0, stream, ref count);
+    }
 
-    public static List<MaxChunk> ParseChunks(byte[] buf) => ParseChunks(buf, 0, buf.Length, 0, "the stream");
+    public static List<MaxChunk> ParseChunks(byte[] buf) { int count = 0; return ParseChunks(buf, 0, buf.Length, 0, "the stream", ref count); }
 
-    static List<MaxChunk> ParseChunks(byte[] buf, int lo, int hi, int depth, string where)
+    /// <summary>A stream's chunk tree stops here: the tree is built whole, and a gzip-packed stream of empty chunks
+    /// (179 KB packed, 20 million chunks) cost 1.6 GB before this bound (review 2026-11-21). The largest of the four
+    /// sample scenes holds 11,981 chunks for its 152 parts - about 80 a part, so the bound leaves room for a scene of
+    /// some 25,000 parts.</summary>
+    public const int MaxChunks = 2000000;
+
+    static List<MaxChunk> ParseChunks(byte[] buf, int lo, int hi, int depth, string where, ref int count)
     {
         if (depth > MaxDepth) throw new InvalidDataException($"{where}: chunks nested deeper than {MaxDepth}");
         var list = new List<MaxChunk>();
         while (lo < hi)
         {
+            if (++count > MaxChunks) throw new InvalidDataException($"{where}: more than {MaxChunks} chunks; this reader stops there");
             if (hi - lo < 6) throw new InvalidDataException($"{where}: {hi - lo} stray byte(s) at {lo} where a chunk header belongs");
             ushort id = BitConverter.ToUInt16(buf, lo);
             uint s32 = BitConverter.ToUInt32(buf, lo + 2);
@@ -222,7 +244,7 @@ public sealed class MaxDocument
             else { container = (s32 >> 31) != 0; size = s32 & 0x7FFFFFFF; }
             if (size < head || size > hi - lo) throw new InvalidDataException($"{where}: chunk {id:X4} at {lo} declares {size} bytes, {hi - lo} remain in its parent");
             var c = new MaxChunk { Id = id, Buf = buf };
-            if (container) c.Kids = ParseChunks(buf, lo + head, lo + (int)size, depth + 1, where);
+            if (container) c.Kids = ParseChunks(buf, lo + head, lo + (int)size, depth + 1, where, ref count);
             else { c.Start = lo + head; c.Length = (int)size - head; }
             list.Add(c);
             lo += (int)size;
