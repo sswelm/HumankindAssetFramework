@@ -519,13 +519,21 @@ windows. **Deep dive:**
     game's own (any one unlocks it), `Prerequisites (AND)` means it is in the Tech Requires All list (all are needed).
     The two buttons under it switch the rule in edit mode. The switch is staged like every other edit; **Save** adds
     the technology to that list or removes it, and deploys `haf_tech_requires_all.json` (relaunch the game to apply).
-    Only that one name is changed in the list, so entries made in the list's own window meanwhile are kept. A node
-    under the AND rule with two or more prerequisites carries `AND` in its lower left corner. When the list cannot be
+    Only that one name is changed in the list, so entries made in the list's own window meanwhile are kept. A card
+    under the AND rule with two or more prerequisites carries `AND` under its title. When the list cannot be
     read the heading names no rule and the buttons are replaced by a warning; the list's own window says why.
   - **Position X / Y.** The selected node's position in grid cells, as two number fields (type, or drag the `X` / `Y`
     label). Same staged values as a drag on the canvas, same floor of 0.
   - **Scroll bars** under and to the right of the canvas. They move the same pan as the middle-mouse drag; their range
     is the tree's extent, widened to wherever the view is, so a view panned past the tree is not pulled back.
+  - **The canvas looks like the game's tech screen.** Cards have the game's proportions and spacing (measured from a
+    screenshot of the game: a card is 4.18 columns of `TechTreeX` wide and 5.25 rows of `TechTreeY` high), so what
+    overlaps or lines up here does so in the game. Links are routed by the game's own rule, read from its code: two
+    cards that share some height get one horizontal line; otherwise the link leaves the first card's top or bottom
+    edge, turns one rounded elbow and enters the second card's left edge. A card shows the title in upper case, then
+    era, tier and `AND`, then the internal name. The view opens on the tree's full height at its left end;
+    **Frame All** shows the whole tree. Not shown: the card's artwork, the unlock icons, the researched / locked
+    states and the era headers.
 - **Tech Requires All** — `Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites`. A list of technologies, nothing else.
   The game unlocks a technology when **any one** of its prerequisites is researched, and its data has no field to say
   otherwise; a technology in this list unlocks only when **all** of them are. **+ Add technology** picks from the

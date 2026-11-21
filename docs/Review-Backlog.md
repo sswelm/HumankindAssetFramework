@@ -1845,7 +1845,7 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   copy of that tool drops the `title` parameter and the new window stops compiling. Fine for now (the user, same day);
   the clean cut is to give the new window its own picker so the viewer file is untouched.
   **More local changes since 2026-11-21 (asked for by the user):** the OR / AND heading and switch, the `AND` corner
-  mark, the `X` / `Y` position fields, the scroll bars, the selection kept by name across a reload, and a seam for the drill (`BuildTreeImpl`). They are listed in
+  mark, the `X` / `Y` position fields, the scroll bars, the selection kept by name across a reload, the game's look of the canvas (card geometry measured from a screenshot, link routing ported from the game's code), and a seam for the drill (`BuildTreeImpl`). They are listed in
   the file's header comment. A newer copy of the other tool would now drop all of them, so the "own picker" cut no
   longer makes the file untouched. **Seen in Unity (the user's screenshot, 2026-11-21, ENC project,
   view mode):** the heading `Prerequisites (AND)` on World-Wide Web, the two rule buttons, the `X` / `Y` fields, both

@@ -10,6 +10,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **The Tech Tree viewer's canvas looks like the game's tech screen (2026-11-21).** Asked for by the user with a
+  screenshot of the game. Cards now have the game's proportions and spacing, measured from that screenshot with six
+  cards of known position (six columns = 720 px, 26 rows = 927 px, a card 502 x 187 px; the game keeps these sizes
+  in prefabs, not in code). Links follow the game's own routing, read from
+  `TechnologyScreen_Links.Link.RebuildCurve`: one horizontal line between cards that share some height, otherwise
+  out of the top or bottom edge, one rounded elbow, into the left edge. Dark cards with a thin gold edge on dark
+  indigo, the title in upper case over a divider. The view opens on the tree's height, as the game does. Checked:
+  the Unity window drill, 49 checks (40 before), five link paths against hand-derived points. Not done: the card's
+  artwork (the mapper's image reference did not resolve to a texture in the project at a first attempt), the
+  unlock icons, the researched / locked states, the era headers. The elbow's radius is a guess (no elbow is in the
+  screenshot). No test reads a pixel.
 - **The Tech Tree viewer shows and switches OR / AND, takes a typed position, and has scroll bars (2026-11-21).** The
   side strip said `Prerequisites (OR)` for every technology, also for one in the Tech Requires All list. The heading
   now names the rule the technology really has, and two buttons under it switch it in edit mode; Save adds or removes
