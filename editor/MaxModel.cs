@@ -105,10 +105,8 @@ public static class MaxModel
     public static string DefaultGlbPath(string maxPath)
         => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(maxPath)), Path.GetFileNameWithoutExtension(maxPath) + "_max.glb").Replace('\\', '/');
 
-    /// <summary>True for a .glb whose generator line names this reader: the kind a conversion overwrites unasked.
-    /// That is a file this reader wrote - and ALSO a file a HAF tool wrote from one, because GlbWriter keeps the
-    /// generator line of what it read. No tool saves over its source today; a copy of such a file renamed to
-    /// `name_max.glb` by hand would be replaced without a question.</summary>
+    /// <summary>True for a .glb whose generator names this reader. GlbWriter preserves that history when a HAF tool
+    /// edits the model, so it cannot establish whether an existing file is safe to overwrite.</summary>
     public static bool IsOurs(string glbPath)
     {
         try { return File.Exists(glbPath) && GlbReader.Read(glbPath).Generator.Contains(GeneratorTag); }
@@ -123,17 +121,44 @@ public static class MaxModel
     /// conversion is deterministic, and the tools watch a source's write time (the Model Cutter drops its unsaved marks
     /// when the file under it changes): picking the same .max twice must not touch the file.</summary>
     public static MaxReport ConvertToGlb(string maxPath, string glbPath, MaxImageDecoder decoder, out bool unchanged)
+        => ConvertToGlb(maxPath, glbPath, decoder, out unchanged, null);
+
+    /// <summary>Ask before replacing an existing file with different bytes. Returns null when replacement is declined.
+    /// The overloads without a confirmation callback are for callers that explicitly supply the output path.</summary>
+    internal static MaxReport ConvertToGlb(string maxPath, string glbPath, MaxImageDecoder decoder, out bool unchanged, Func<bool> confirmOverwrite)
     {
         var model = Read(maxPath, decoder, out var report);
         unchanged = false;
-        if (File.Exists(glbPath))
+        string full = Path.GetFullPath(glbPath);
+        var target = new FileInfo(full);
+        bool replace = target.Exists;
+        byte[] bytes = null;
+        if (replace)
         {
-            byte[] now = GlbWriter.Write(model), was = null;
-            try { was = File.ReadAllBytes(glbPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-            unchanged = was != null && was.Length == now.Length;
-            for (int i = 0; unchanged && i < now.Length; i++) if (was[i] != now[i]) unchanged = false;
+            bytes = GlbWriter.Write(model);
+            byte[] previous = null;
+            try { if (target.Length == bytes.LongLength) previous = File.ReadAllBytes(full); }
+            catch (IOException) { } catch (UnauthorizedAccessException) { }
+            unchanged = previous != null && previous.Length == bytes.Length;
+            for (int i = 0; unchanged && i < bytes.Length; i++)
+                unchanged = previous[i] == bytes[i];
+            if (unchanged) return report;
+            if (confirmOverwrite != null && !confirmOverwrite()) return null;
         }
-        if (!unchanged) GlbWriter.Write(model, glbPath);
+
+        Directory.CreateDirectory(target.DirectoryName);
+        string temporary = full + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16))
+            {
+                if (bytes == null) GlbWriter.Write(model, stream);
+                else stream.Write(bytes, 0, bytes.Length);
+            }
+            if (replace) File.Replace(temporary, full, null);
+            else File.Move(temporary, full);  // Refuses a destination that appeared while the GLB was being written.
+        }
+        finally { try { File.Delete(temporary); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
         return report;
     }
 

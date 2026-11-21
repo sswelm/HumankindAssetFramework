@@ -367,17 +367,17 @@ picture's size, and each composed picture's pixels within a mean difference of 2
 reference turned upside down than to the reference). Also: a 5 x 3 picture through Unity's decoder byte for byte (row
 order and channel order); the same file converted again leaves the copy untouched; the Convert button's deferred half
 outside a GUI pass; a file cut to a third, a text file named `.max` and a missing file are refused without an exception
-and leave no `.glb`. Run 2026-11-21 on the committed tree of this entry: 4 files, 61 checks (the run prints the
+and leave no `.glb`. The drill also rewrites a converted GLB with an edited node name and verifies that cancelling
+replacement preserves its bytes and timestamp, even though its generator still names the `.max` reader. The initial
+run on 2026-11-21 used 4 files and 61 checks (the run prints the
 count), none failed; the 16 composed pictures equal the reference pixel for pixel (15 come from JPEGs through Unity's
 decoder, one from a TGA through the reader's own). **Not in the push gate** (same population).
 
 - **Usage:** `tools/max_unity_drill.sh [file.max ...]`, the same `HAF_MAX_ROOTS`. `UNITY` is Unity's `Editor/Data`
   folder, `UNITY_EDITOR` the editor's executable. The temporary project is removed after a pass and kept after a
   failure; its path is printed either way.
-- **Not covered:** in batch mode every dialog answers itself with No. So the dialogs' text, the window layout and the
-  keyboard focus were not seen, and the YES to "overwrite a file the reader did not write" never ran inside Unity (with
-  such a file in the way the conversion returns nothing and the file stays; the code after a yes ran outside Unity).
-  The pickers themselves, on screen, are still the user's to try.
+- Batch mode exercises the cancellation path. `MaxReaderTests` exercises the write after confirmation. The dialogs'
+  appearance, the window layout, the keyboard focus and the pickers require a live editor session to inspect.
 
 **The tools after the door, driven in a batch-mode Unity editor** (round 3 of the review, a harness of the reviewer's
 own, not kept in the repository): on copies of the four converted files, the Cutter's and Fuser's analysis, split and

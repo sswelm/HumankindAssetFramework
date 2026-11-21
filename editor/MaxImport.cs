@@ -5,9 +5,8 @@
 // recipes, and every Blender fallback of the in-process ports - sees an ordinary GLB.
 //
 // The report (parts, triangles, textures found or missing, and what the reader left, as far as it can tell) is shown once and
-// written to the Console in full. A `name_max.glb` whose generator line names this reader is replaced without asking;
-// any other file of that name asks first. Picking a .max whose copy already holds exactly the bytes the conversion
-// gives leaves that file untouched and shows no report.
+// written to the Console in full. An existing `name_max.glb` asks before replacement if the conversion would change it.
+// Picking a .max whose copy already holds exactly the bytes the conversion gives leaves it untouched without a dialog.
 // In Unity: tools/max_unity_drill.sh runs Picked / Convert on copies of real files in a batch-mode editor.
 using System;
 using System.IO;
@@ -79,15 +78,17 @@ public static class MaxImport
         string target;
         try { target = MaxModel.DefaultGlbPath(maxPath); }
         catch (Exception e) { EditorUtility.DisplayDialog("3ds Max file", "The path cannot be used:\n" + maxPath + "\n\n" + e.Message, "OK"); return null; }
-        if (File.Exists(target) && !MaxModel.IsOurs(target)
-            && !EditorUtility.DisplayDialog("Overwrite existing file?",
-                "The converted copy would be written to\n" + target + "\n\nA file of that name exists and was NOT written by the .max reader. Overwrite it?", "Overwrite", "Cancel"))
-            return null;
         MaxReport report; bool unchanged;
         try
         {
             EditorUtility.DisplayProgressBar("3ds Max file", "Reading " + Path.GetFileName(maxPath) + " ...", 0.3f);
-            report = MaxModel.ConvertToGlb(maxPath, target, Decode, out unchanged);
+            report = MaxModel.ConvertToGlb(maxPath, target, Decode, out unchanged, () =>
+            {
+                EditorUtility.ClearProgressBar();
+                return EditorUtility.DisplayDialog("Overwrite existing GLB?",
+                    "The conversion would replace the existing file at\n" + target + "\n\nReplacing it will discard any edits to that file.",
+                    "Overwrite", "Cancel");
+            });
         }
         // EVERY failure ends in the dialog: this is the user's door, and a file the reader's own guards did not foresee
         // (an exception of another kind) must not surface as a bare Console error with the picker doing nothing.
@@ -109,6 +110,7 @@ public static class MaxImport
             return null;
         }
         finally { EditorUtility.ClearProgressBar(); }
+        if (report == null) return null;
         // The Console gets the whole report (every part that was not read, by name); the dialog a copy that fits it.
         if (unchanged)
         {
