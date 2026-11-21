@@ -10,6 +10,12 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **The Tech Tree viewer shows and switches a technology's visibility (2026-11-21).** Asked for by the user on
+  seeing Future Technology as an ordinary card: the game leaves it off its tech screen (`Visibility = Never` in its
+  definition; the tech screen skips a technology without the `TechnologyScreen` bit). The side strip now says so
+  and has a Visible / Invisible switch, staged and written to the definition on Save; the card and its links are
+  faint and the card says `HIDDEN`. Checked: 6 more drill checks (60). Not exercised: the write to a real
+  definition asset on Save.
 - **The Tech Tree viewer's canvas looks like the game's tech screen (2026-11-21).** Asked for by the user with a
   screenshot of the game. Cards now have the game's proportions and spacing, measured from that screenshot with six
   cards of known position (six columns = 720 px, 26 rows = 927 px, a card 502 x 187 px; the game keeps these sizes

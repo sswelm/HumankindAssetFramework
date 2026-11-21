@@ -58,6 +58,11 @@ public static class TechTreeData
         public bool   ArtNamed;   // the mapper names an image for the card, found or not
         public string ArtGuid;    // that image as a Unity GUID text (null when none is named): the key into the game's own atlases
 
+        // TechnologyDefinition.Visibility as its number (a flags enum: Always = -1, Never = 0, TechnologyScreen = 1,
+        // ControlBannerTechnologyPopup = 2). The game leaves a technology without the TechnologyScreen bit off its
+        // tech screen (TechnologyScreen's item loop). LOCAL CHANGE 2026-11-21.
+        public int BaseVisibility = VisibilityAlways;
+
         // Convenience: the asset to ping/select (prefer the def).
         public UnityEngine.Object Asset => ActiveDef ?? ActiveMapper;
     }
@@ -150,6 +155,7 @@ public static class TechTreeData
                     node.BasePrereqs = arr.Where(s => !string.IsNullOrEmpty(s)).ToArray();
                 node.Era  = ResolveReferenceName(f_era?.GetValue(def));
                 node.Tier = f_tier?.GetValue(def)?.ToString() ?? "";
+                node.BaseVisibility = ReadVisibility(def);
             }
             nodes.Add(node);
         }
@@ -377,6 +383,37 @@ public static class TechTreeData
         var t = mapper.GetType();
         t.GetField("TechTreeX", ALL)?.SetValue(mapper, x);
         t.GetField("TechTreeY", ALL)?.SetValue(mapper, y);
+    }
+
+    // ── Visibility on the game's tech screen ──────────────────────────────────
+    public const int VisibilityAlways = -1, VisibilityNever = 0;
+
+    /// <summary>The game shows a card for the technology on its tech screen (the TechnologyScreen bit is set).</summary>
+    internal static bool OnTechScreen(int visibility) => (visibility & 1) != 0;
+
+    internal static string VisibilityName(int visibility) => visibility switch
+    {
+        -1 => "Always",
+        0 => "Never",
+        1 => "TechnologyScreen",
+        2 => "ControlBannerTechnologyPopup",
+        _ => visibility.ToString(),
+    };
+
+    /// <summary>The definition's Visibility as its number; Always when the definition has no such field.</summary>
+    internal static int ReadVisibility(UnityEngine.Object def)
+    {
+        object v = def?.GetType().GetField("Visibility", ALL)?.GetValue(def);
+        try { return v == null ? VisibilityAlways : Convert.ToInt32(v); }
+        catch (Exception) { return VisibilityAlways; }
+    }
+
+    public static bool WriteVisibility(UnityEngine.Object def, int visibility)
+    {
+        var f = def.GetType().GetField("Visibility", ALL);
+        if (f == null) return false;
+        f.SetValue(def, f.FieldType.IsEnum ? Enum.ToObject(f.FieldType, visibility) : Convert.ChangeType(visibility, f.FieldType));
+        return true;
     }
 
     public static bool WritePrereqs(UnityEngine.Object def, string[] names)

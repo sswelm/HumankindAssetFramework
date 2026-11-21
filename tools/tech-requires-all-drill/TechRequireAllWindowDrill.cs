@@ -260,6 +260,22 @@ public static class TechRequireAllWindowDrill
                     TechTreeWindow.LinkPath(card, new Rect(100, 300, 251, 93.5f), 12, path);
                     Check("link, second card not right of the first: centre to centre, as the game draws it",
                           path.Count == 2 && Near(path[0], 125.5f, 46.75f) && Near(path[1], 225.5f, 346.75f), Points(path));
+                    // ---- visible / invisible on the game's tech screen (TechnologyDefinition.Visibility)
+                    Check("visibility: the tech-screen bit decides (Always and TechnologyScreen show, Never and the popup-only value do not)",
+                          TechTreeData.OnTechScreen(-1) && TechTreeData.OnTechScreen(1) && !TechTreeData.OnTechScreen(0) && !TechTreeData.OnTechScreen(2));
+                    VCall("SetVisibility", N("Technology_T"), 0);
+                    Check("visibility: switching to Invisible is staged", (int)VCall("EffVisibility", N("Technology_T")) == 0 && (bool)VCall("Hidden", N("Technology_T")) && Staged == 1);
+                    VCall("SetVisibility", N("Technology_T"), -1);
+                    Check("visibility: switching back is no change", (int)VCall("EffVisibility", N("Technology_T")) == -1 && Staged == 0);
+                    Check("visibility: the note names an invisible technology and says nothing for the usual case",
+                          TechTreeWindow.VisibilityNote("Future Technology", 0) == "Future Technology is INVISIBLE: the game does not show it on its tech screen (Visibility = Never). Its card is faint here."
+                          && TechTreeWindow.VisibilityNote("Future Technology", -1) == "" && TechTreeWindow.VisibilityNote("X", 1).Contains("Visibility = TechnologyScreen"),
+                          TechTreeWindow.VisibilityNote("Future Technology", 0));
+                    var fakeDef = ScriptableObject.CreateInstance<TechTreeDrillDefinition>();
+                    Check("visibility: read from a definition's field as its number", TechTreeData.ReadVisibility(fakeDef) == -1);
+                    Check("visibility: written to the field as the enum's value, and read back",
+                          TechTreeData.WriteVisibility(fakeDef, 0) && fakeDef.Visibility == TechTreeDrillDefinition.Flags.Never && TechTreeData.ReadVisibility(fakeDef) == 0, fakeDef.Visibility.ToString());
+                    UnityEngine.Object.DestroyImmediate(fakeDef);
                     // ---- the artwork. The expected GUID strings are what the GAME's own Amplitude.Framework.Guid.ToString()
                     // prints for these four ints (run against Amplitude.Framework.dll, 2026-11-21).
                     Check("art: an image reference becomes the Unity GUID the game prints for it",
@@ -316,4 +332,12 @@ public static class TechRequireAllWindowDrill
         File.WriteAllText(output, log.ToString()); Debug.Log(log.ToString());
         EditorApplication.Exit(failed == 0 ? 0 : 1);
     }
+}
+
+// Stands in for the game's TechnologyDefinition where the drill writes a visibility: the same field name and the same
+// kind of field (a flags enum with the game's four values).
+public class TechTreeDrillDefinition : ScriptableObject
+{
+    [Flags] public enum Flags { Never = 0, TechnologyScreen = 1, ControlBannerTechnologyPopup = 2, Always = -1 }
+    public Flags Visibility = Flags.Always;
 }

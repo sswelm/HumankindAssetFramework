@@ -526,6 +526,11 @@ windows. **Deep dive:**
     read the heading names no rule and the buttons are replaced by a warning; the list's own window says why.
   - **Position X / Y.** The selected node's position in grid cells, as two number fields (type, or drag the `X` / `Y`
     label). Same staged values as a drag on the canvas, same floor of 0.
+  - **Visible / Invisible.** Whether the game shows the technology on its tech screen
+    (`TechnologyDefinition.Visibility`: the game skips a technology without the `TechnologyScreen` bit). Two buttons
+    in the side strip switch between `Always` and `Never`, staged and written to the definition on Save; a note
+    under them says when the selected technology is invisible. An invisible technology's card and links are faint
+    and the card says `HIDDEN`. In ENC one technology is invisible (Future Technology).
   - **Scroll bars** under and to the right of the canvas. They move the same pan as the middle-mouse drag; their range
     is the tree's extent, widened to wherever the view is, so a view panned past the tree is not pulled back.
   - **The canvas looks like the game's tech screen.** Cards have the game's proportions and spacing (measured from a
