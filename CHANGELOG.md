@@ -23,7 +23,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   `Guid.ToString()` prints for it (124 of ENC's 213 card images resolve). The other 89 are the game's own: they are taken from the game's UI
   bundle, where `UIAtlas.asset` maps each reference to an atlas texture and a rectangle in it (measured from the
   top; checked outside Unity by cropping World-Wide Web's entry out of `UI_Technology_Era6_00`). The bundle is
-  opened per read and closed again; nothing is copied into the project. Not done: the unlock icons, the
+  opened per read and closed again; nothing is copied into the project. Seen in the user's Unity the same day
+  (screenshots): the look, the project's images and the game's own. Not done: the unlock icons, the
   researched / locked states, the era headers. The elbow's radius is a guess (no elbow is in the
   screenshot). No test reads a pixel.
 - **The Tech Tree viewer shows and switches OR / AND, takes a typed position, and has scroll bars (2026-11-21).** The

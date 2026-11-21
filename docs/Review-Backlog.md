@@ -1849,7 +1849,11 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   the file's header comment. A newer copy of the other tool would now drop all of them, so the "own picker" cut no
   longer makes the file untouched. **Seen in Unity (the user's screenshot, 2026-11-21, ENC project,
   view mode):** the heading `Prerequisites (AND)` on World-Wide Web, the two rule buttons, the `X` / `Y` fields, both
-  scroll bars and the `AND` corner mark. **Not seen yet, and held by no test:** a click on the buttons or the bars, a
+  scroll bars and the `AND` corner mark. Later the same day, in three more screenshots: the game's look (cards,
+  links with an elbow, the amber `Edit: ON` button), the artwork of the project's own images, and the game's own
+  images out of the UI bundle (Rocket Science, Communication Satellites, Renewable Energy, Covert Ops, World-Wide
+  Web; the side strip named the atlas `UI_Technology_Era6_00.png`). That was the first run of the bundle reading
+  inside Unity; the modding tools had the game's bundles mounted. **Not seen yet, and held by no test:** a click on the buttons or the bars, a
   rule switch saved from the viewer in a real project, and a typed position written to a real asset.
 - **A save with a planned queue, loaded with the plugin uninstalled, is not guarded** against the double visit in
   `RemoveTechnologyAndChildrenFromQueueAt`. Documented in Editor-Tools and Capabilities; no fix is possible from a
