@@ -51,7 +51,10 @@ public class TechTreeWindow : EditorWindow
     // reference path mirror (lives in the shared Index EditorPrefs key); set in OnEnable
     string _refPath = "";
 
-    bool _editMode;
+    // Editing is ON when the window opens (the user, 2026-11-21: moving cards is what this window is for) and the choice
+    // is remembered. OFF is for looking only: a click on the canvas then never moves a card.
+    bool _editMode = true;
+    const string EditModeKey = "TechTree.EditMode";
 
     // position-drag state (edit mode)
     TechTreeData.Node _dragNode;
@@ -111,6 +114,7 @@ public class TechTreeWindow : EditorWindow
     void OnEnable()
     {
         _modPath = EditorPrefs.GetString(ModPathKey, TechTreeData.DefaultModPath);
+        _editMode = EditorPrefs.GetBool(EditModeKey, true);
         _refPath = TechTreeData.ReferenceFolder;   // pick up whatever the Index set
         Undo.undoRedoPerformed += OnUndoRedo;
         try { Reload(); }
@@ -232,7 +236,12 @@ public class TechTreeWindow : EditorWindow
 
         // ── Toolbar ──
         EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
-        _editMode = GUILayout.Toggle(_editMode, _editMode ? "● Edit" : "View", EditorStyles.toolbarButton, GUILayout.Width(70));
+        GUI.backgroundColor = _editMode ? EDIT_DOT : Color.white;
+        bool edit = GUILayout.Toggle(_editMode, new GUIContent(_editMode ? "● Edit: ON" : "Edit: OFF",
+            "ON: drag a card or type its X / Y, switch OR / AND, add or remove prerequisites. Nothing is written until Save. OFF: look only."),
+            EditorStyles.toolbarButton, GUILayout.Width(80));
+        GUI.backgroundColor = Color.white;
+        if (edit != _editMode) { _editMode = edit; EditorPrefs.SetBool(EditModeKey, edit); }
         if (GUILayout.Button("Reload", EditorStyles.toolbarButton, GUILayout.Width(60))) Reload(keepView: true);
         if (GUILayout.Button("Frame All", EditorStyles.toolbarButton, GUILayout.Width(70))) { _framed = false; _fitWholeTree = true; }
 
@@ -546,6 +555,9 @@ public class TechTreeWindow : EditorWindow
             string detail = $"def:{(n.DefModded ? "mod" : "vanilla")}  map:{(n.MapperModded ? "mod" : "vanilla")}";
             EditorGUILayout.LabelField($"{state}   ({detail})", EditorStyles.miniLabel);
             EditorGUILayout.LabelField($"{n.Era} · {n.Tier} · ({EffX(n)},{EffY(n)})", EditorStyles.miniLabel);
+
+            if (!_editMode)
+                EditorGUILayout.HelpBox("Edit is OFF, so the position, the rule and the prerequisites are greyed out. Switch on \"Edit\" at the top left to change them.", MessageType.Info);
 
             // the position as numbers (grid cells), staged exactly like a drag on the canvas
             using (new EditorGUI.DisabledScope(!_editMode))

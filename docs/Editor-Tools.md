@@ -513,7 +513,9 @@ windows. **Deep dive:**
   an embedded inspector. Read-only viewer; persists UI prefs in EditorPrefs.
 - **Tech Tree** — `Tools ▸ HAF ▸ Tech Tree ▸ Open Viewer` (+ `Diagnose Mod Split`, `Dump Data`). View/edit the tech tree;
   in edit mode drag node positions and add or remove prereqs, committed on Save (edits in place under `Databases/`, else
-  copy-on-write into "New Additions"). New-tech creation is noted not-yet-implemented. Three additions of 2026-11-21,
+  copy-on-write into "New Additions"). New-tech creation is noted not-yet-implemented. Editing is switched by the
+  toolbar's first button (`● Edit: ON` / `Edit: OFF`); it is ON when the window opens and the choice is remembered. With
+  it OFF the side strip's controls are greyed out and a line there says why. Three additions of 2026-11-21,
   all in the side strip or beside the canvas:
   - **OR / AND.** The heading over the selected technology's prerequisites names its rule: `Prerequisites (OR)` is the
     game's own (any one unlocks it), `Prerequisites (AND)` means it is in the Tech Requires All list (all are needed).
