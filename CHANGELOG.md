@@ -14,8 +14,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   tree meant moving every later card by hand. The side strip has a number of columns and a button; every card
   whose column is right of the selected card's moves by that number (negative = left), each as a staged position,
   so Save writes them and the opposite number takes the shift back. The selected card and its own column stay. A
-  shift to the left stops where the nearest card would reach the selected card's column. The field starts at 6, one card's step in the tree. Checked: 8 drill
-  checks (132 in all), three planted defects caught. Not checked: a click on the button, and a shift saved in the real
+  shift to the left stops where the nearest card would reach the selected card's column. The field starts at 6, one card's step in the tree. The side strip scrolls up and down only now: the
+  button's long text had given it a horizontal bar that hid the left end of every row. Checked: 9 drill checks (133
+  in all), three planted defects caught. The strip's layout itself is judged by eye. Not checked: a click on the button, and a shift saved in the real
   project (it stages positions the way a drag does, and that path was run on the real data in PR #301's third
   review round).
 - **The Tech Tree viewer edits the tree (2026-11-21, PR #301).** Asked for by the user in one sitting, after the

@@ -663,6 +663,7 @@ windows. **Deep dive:**
     gap. The selected card and the cards in its own column stay. Each moved card is a staged position like a
     drag's, so Save writes them and the opposite number takes the shift back. A shift to the left stops where the
     nearest card would reach the selected card's column; the line under the button says what was moved.
+  - The side strip scrolls up and down only; its rows are laid out to its width.
   - **In the game / Switched off** (`TechnologyDefinition.Visibility`). `Never` does more than hide a technology: the
     game creates a technology for an empire only when its Visibility is not `Never`, so by the game's own rules a
     `Never` technology is not on the tech screen and cannot be researched, traded or granted, and a technology that
