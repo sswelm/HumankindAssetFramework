@@ -17,9 +17,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   `TechnologyScreen_Links.Link.RebuildCurve`: one horizontal line between cards that share some height, otherwise
   out of the top or bottom edge, one rounded elbow, into the left edge. Dark cards with a thin gold edge on dark
   indigo, the title in upper case over a divider. The view opens on the tree's height, as the game does. Checked:
-  the Unity window drill, 49 checks (40 before), five link paths against hand-derived points. Not done: the card's
-  artwork (the mapper's image reference did not resolve to a texture in the project at a first attempt), the
-  unlock icons, the researched / locked states, the era headers. The elbow's radius is a guess (no elbow is in the
+  the Unity window drill, 52 checks (40 before), five link paths against hand-derived points. A card also shows
+  its artwork, standing out of its right end as in the game, when the image is in the project: the mapper's image
+  reference is an `Amplitude.Framework.Guid` of four ints, and the Unity asset GUID is what the game's own
+  `Guid.ToString()` prints for it (124 of ENC's 213 card images resolve; the other 89 are the game's own and show
+  nothing). Not done: the game's own images, the unlock icons, the researched / locked states, the era headers. The elbow's radius is a guess (no elbow is in the
   screenshot). No test reads a pixel.
 - **The Tech Tree viewer shows and switches OR / AND, takes a typed position, and has scroll bars (2026-11-21).** The
   side strip said `Prerequisites (OR)` for every technology, also for one in the Tech Requires All list. The heading

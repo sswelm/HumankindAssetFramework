@@ -65,12 +65,12 @@ failure of that shape (every check passed, only the exit code differs) is the ru
 `bash tools/tech_requires_all_unity_drill.sh` drives the real window in a
 temporary Unity project (add, save, reopen, remove) and reads every deployed file back with the plugin's
 parser; the tech tree is injected, so the picker's list over a real modding project is not exercised. Since
-2026-11-21 the same run drives the Tech Tree viewer beside it (49 checks in all, 14 before): its OR / AND switch is
+2026-11-21 the same run drives the Tech Tree viewer beside it (52 checks in all, 14 before): its OR / AND switch is
 staged and written to the list on Save, an open list window without unsaved changes follows, one with unsaved changes
 keeps them and has its save refused, the viewer picks up the list window's save on its next draw, and a save over a
 broken list writes nothing and keeps the switch staged. A typed position is staged with the drag's floor and stays
 staged when there is no asset to write it to (the drill's nodes have none, so writing a position to an asset is not
-exercised). After a save the selection is the reloaded tree's own node (the seam returns new node objects on every reload, as the real builder does). Five link paths are compared with points worked out by hand from the game's routing rule (shared height, lower, higher, an elbow radius larger than the room, a card that is not to the right), and three checks hold the card's proportions, the row step and a click in a card's middle. Three checks hold the scroll bars' range, and one that drawing them does not move the view. No button is
+exercised). After a save the selection is the reloaded tree's own node (the seam returns new node objects on every reload, as the real builder does). Five link paths are compared with points worked out by hand from the game's routing rule (shared height, lower, higher, an elbow radius larger than the room, a card that is not to the right), and three checks hold the card's proportions, the row step and a click in a card's middle. Three more hold the artwork: an image reference becomes the GUID string the game's own `Amplitude.Framework.Guid.ToString()` prints for it (three vectors taken from the game's DLL), where the artwork goes on a card, and the side strip's line for a card without one. Reading the reference out of a real mapper asset and drawing a texture are NOT exercised (the drill's project has neither). Three checks hold the scroll bars' range, and one that drawing them does not move the view. No button is
 clicked and no pixel is read: the viewer's staging and save methods are called and its `OnGUI` is drawn between the
 steps. Planted once (2026-11-21): without the refresh of open list windows, without the viewer's re-read after
 another window's save, without the guard that keeps staged switches when the list is unreadable, and without the selection kept by

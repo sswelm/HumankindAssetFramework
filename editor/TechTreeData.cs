@@ -51,6 +51,12 @@ public static class TechTreeData
         public int    BaseX, BaseY;
         public string[] BasePrereqs;
 
+        // The card's artwork (the mapper's "TechnologyScreenItemBackground" image), as a project asset path; null
+        // when the mapper names none or the image is not in this project (the game's own images are in its bundles).
+        // LOCAL CHANGE 2026-11-21, for the viewer's in-game look.
+        public string ArtPath;
+        public bool   ArtNamed;   // the mapper names an image for the card, found or not
+
         // Convenience: the asset to ping/select (prefer the def).
         public UnityEngine.Object Asset => ActiveDef ?? ActiveMapper;
     }
@@ -128,6 +134,7 @@ public static class TechTreeData
                 node.BaseX    = GetInt(mapper, "TechTreeX");
                 node.BaseY    = GetInt(mapper, "TechTreeY");
                 node.TitleKey = GetString(mapper, "Title");
+                node.ArtPath  = ArtPathOf(mapper, out node.ArtNamed);
             }
             node.Label = !string.IsNullOrEmpty(node.TitleKey) && loc.TryGetValue(node.TitleKey, out var t)
                 ? t : (string.IsNullOrEmpty(node.TitleKey) ? name : node.TitleKey);
@@ -146,6 +153,61 @@ public static class TechTreeData
             nodes.Add(node);
         }
         return nodes;
+    }
+
+    // ── The card's artwork ────────────────────────────────────────────────────
+    public const string CardImageKey = "TechnologyScreenItemBackground";   // DataUtils.ImageSize.TechnologyScreenItemBackground
+
+    /// <summary>
+    /// An Amplitude.Framework.Guid (four ints, as a UIMapper stores an image reference) as the Unity asset GUID it
+    /// stands for: the bytes of each int from low to high, each byte with its LOW hex digit first. This is what the
+    /// game's own Guid.ToString() prints (checked against Amplitude.Framework.dll, 2026-11-21), and 124 of the 213
+    /// card images of the ENC project resolve to a PNG with it.
+    /// </summary>
+    internal static string AmplitudeGuidToUnity(int a, int b, int c, int d)
+    {
+        const string hex = "0123456789abcdef";
+        var sb = new System.Text.StringBuilder(32);
+        foreach (int word in new[] { a, b, c, d })
+            for (int i = 0; i < 4; i++)
+            {
+                int by = (word >> (8 * i)) & 0xFF;
+                sb.Append(hex[by & 0xF]).Append(hex[by >> 4]);
+            }
+        return sb.ToString();
+    }
+
+    static bool artReadWarned;
+    // Read through the SERIALIZED form (Images[i].serializableKey / .Value.guid.a..d), which is what the asset file
+    // holds: no dependence on the C# shape of the game's image list.
+    static string ArtPathOf(UnityEngine.Object mapper, out bool named)
+    {
+        named = false;
+        try
+        {
+            using (var so = new SerializedObject(mapper))
+            {
+                var images = so.FindProperty("Images");
+                if (images == null || !images.isArray) return null;
+                for (int i = 0; i < images.arraySize; i++)
+                {
+                    var e = images.GetArrayElementAtIndex(i);
+                    if (e.FindPropertyRelative("serializableKey")?.stringValue != CardImageKey) continue;
+                    var g = e.FindPropertyRelative("Value")?.FindPropertyRelative("guid");
+                    SerializedProperty a = g?.FindPropertyRelative("a"), b = g?.FindPropertyRelative("b"), c = g?.FindPropertyRelative("c"), d = g?.FindPropertyRelative("d");
+                    if (a == null || b == null || c == null || d == null) return null;
+                    if (a.intValue == 0 && b.intValue == 0 && c.intValue == 0 && d.intValue == 0) return null;   // no image set
+                    named = true;
+                    string path = AssetDatabase.GUIDToAssetPath(AmplitudeGuidToUnity(a.intValue, b.intValue, c.intValue, d.intValue));
+                    return string.IsNullOrEmpty(path) ? null : path;
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            if (!artReadWarned) { artReadWarned = true; Debug.LogWarning("[TechTree] a card's image could not be read from its mapper (said once; the cards show without artwork): " + e.Message); }
+        }
+        return null;
     }
 
     // ── Resolver 2: build the %key -> text dictionary once ────────────────────

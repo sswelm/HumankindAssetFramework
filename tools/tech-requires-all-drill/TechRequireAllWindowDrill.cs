@@ -260,6 +260,20 @@ public static class TechRequireAllWindowDrill
                     TechTreeWindow.LinkPath(card, new Rect(100, 300, 251, 93.5f), 12, path);
                     Check("link, second card not right of the first: centre to centre, as the game draws it",
                           path.Count == 2 && Near(path[0], 125.5f, 46.75f) && Near(path[1], 225.5f, 346.75f), Points(path));
+                    // ---- the artwork. The expected GUID strings are what the GAME's own Amplitude.Framework.Guid.ToString()
+                    // prints for these four ints (run against Amplitude.Framework.dll, 2026-11-21).
+                    Check("art: an image reference becomes the Unity GUID the game prints for it",
+                          TechTreeData.AmplitudeGuidToUnity(1853069741, 1283173340, 2015694476, -658824994) == "da9937e6cdbab7c4c8e05287ed02bb8d"
+                          && TechTreeData.AmplitudeGuidToUnity(209776758, 1286721164, -1264855650, 577032575) == "670f08c0c8ec1bc4e95db94bf71d4622"
+                          && TechTreeData.AmplitudeGuidToUnity(-1, 0, 1, int.MinValue) == "ffffffff000000001000000000000008",
+                          TechTreeData.AmplitudeGuidToUnity(-1, 0, 1, int.MinValue));
+                    var artRect = TechTreeWindow.ArtRect(new Rect(100, 200, 251, 93.5f));
+                    Check("art: a square 1.5 card heights high, centred on the card's height, just inside its right edge",
+                          Mathf.Abs(artRect.width - 140.25f) < 0.01f && Mathf.Abs(artRect.height - 140.25f) < 0.01f && Mathf.Abs(artRect.center.y - 246.75f) < 0.01f && Mathf.Abs(artRect.center.x - (351 - 15.06f)) < 0.01f, artRect.ToString());
+                    Check("art: the side strip explains a card without artwork",
+                          TechTreeWindow.ArtLine(new TechTreeData.Node { ArtPath = "Assets/Resources/Images/x512.png", ArtNamed = true }) == "Image: x512.png"
+                          && TechTreeWindow.ArtLine(new TechTreeData.Node { ArtNamed = true }) == "Image: not in this project (one of the game's own)"
+                          && TechTreeWindow.ArtLine(new TechTreeData.Node()) == "Image: none set");
                     // the canvas: a click in the middle of a card finds that card (cards sit on the game's grid)
                     var rectT = (Rect)VCall("NodeRect", N("Technology_T"));
                     Check("canvas: a card is 251 x 93.5 at zoom 1, in the game's proportions", Mathf.Abs(rectT.width / rectT.height - 251f / 93.5f) < 0.001f, rectT.ToString());

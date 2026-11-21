@@ -22,6 +22,7 @@ using UnityEngine;
 ///  - The selection is kept by name across a reload (it was the node object from before it).
 ///  - The canvas looks like the game's tech screen (asked for by the user, 2026-11-21): cards in the game's
 ///    proportions and spacing, and links routed by the game's own rule. See the GEOMETRY block and LinkPath.
+///    A card shows its artwork where the project holds the image (TechTreeData.ArtPathOf, ArtRect).
 /// </summary>
 public class TechTreeWindow : EditorWindow
 {
@@ -142,6 +143,7 @@ public class TechTreeWindow : EditorWindow
         _byName = _nodes.GroupBy(n => n.Name).ToDictionary(g => g.Key, g => g.First());
         // keep pending across reload only for names that still exist
         foreach (var k in _pending.Keys.Where(k => !_byName.ContainsKey(k)).ToList()) _pending.Remove(k);
+        _art.Clear();
         // The nodes are new objects: keep the selection by NAME. The old object holds the values from before this
         // reload, so after a Save the side strip showed the previous position and prerequisites, the X / Y fields
         // compared against them, and the node lost its highlight (local change 2026-11-21).
@@ -443,18 +445,23 @@ public class TechTreeWindow : EditorWindow
             wordWrap = false, clipping = TextClipping.Clip, normal = { textColor = new Color(1, 1, 1, 0.7f) }
         };
         var nameStyle = new GUIStyle(infoStyle) { normal = { textColor = new Color(1, 1, 1, 0.38f) } };
-        var andStyle = new GUIStyle(infoStyle) { alignment = TextAnchor.MiddleRight, fontStyle = FontStyle.Bold, normal = { textColor = AND_MARK } };
+        var andStyle = new GUIStyle(infoStyle) { fontStyle = FontStyle.Bold, normal = { textColor = AND_MARK } };
 
         foreach (var n in _nodes)
         {
             Rect r = NodeRect(n);
-            if (!r.Overlaps(local)) continue;
+            Rect artRect = ArtRect(r);
+            if (!r.Overlaps(local) && !(n.ArtPath != null && artRect.Overlaps(local))) continue;
 
             bool selected = n == _selected;
             float radius = 4f * _zoom;
             // the card: fill, then the thin gold edge (brighter and thicker on the selected one)
             GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, selected ? CARD_SELECTED : CARD, 0, radius);
             GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, selected ? GOLD : CARD_EDGE, selected ? 2f : 1f, radius);
+
+            // the artwork, over the card's right end and standing out of it
+            var art = ArtOf(n);
+            if (art != null) GUI.DrawTexture(artRect, art, ScaleMode.ScaleToFit, true);
 
             float pad = 8f * _zoom;
             float titleH = 0.29f * r.height;   // the game's title band: the divider sits at 29% of the card's height
@@ -480,13 +487,38 @@ public class TechTreeWindow : EditorWindow
             string eraTier = ShortEra(n.Era) + (string.IsNullOrEmpty(n.Era) || string.IsNullOrEmpty(n.Tier) ? "" : " · ") + ShortTier(n.Tier);
             GUI.Label(info, eraTier, infoStyle);
             if (!_rulesUnreadable && EffRequireAll(n) && EffPrereqs(n).Count >= 2)
-                GUI.Label(info, "AND", andStyle);
+            {
+                // right behind era and tier: the card's right end belongs to the artwork
+                float used = infoStyle.CalcSize(new GUIContent(eraTier)).x + 8f * _zoom;
+                GUI.Label(new Rect(info.x + used, info.y, info.width - used, info.height), "AND", andStyle);
+            }
             // at the bottom, where the game shows what the technology unlocks: its internal name
             GUI.Label(new Rect(r.x + pad, r.yMax - rowH - 3f * _zoom, r.width - 2 * pad, rowH), n.Name, nameStyle);
         }
 
         _pan = panSave;
         GUI.EndClip();
+    }
+
+    // ── Artwork ───────────────────────────────────────────────────────────────
+    readonly Dictionary<string, Texture> _art = new Dictionary<string, Texture>();   // asset path -> texture, loaded when first drawn
+
+    Texture ArtOf(TechTreeData.Node n)
+    {
+        if (string.IsNullOrEmpty(n.ArtPath)) return null;
+        if (!_art.TryGetValue(n.ArtPath, out var tex)) _art[n.ArtPath] = tex = AssetDatabase.LoadAssetAtPath<Texture>(n.ArtPath);
+        return tex;
+    }
+
+    /// <summary>
+    /// Where a card's artwork goes: a square one and a half card heights high, centred on the card's height and just
+    /// inside its right edge, so it stands out above, below and to the right of the card as it does in the game.
+    /// Measured from a screenshot of the game (2026-11-21, three researched cards); the game's own values are in a prefab.
+    /// </summary>
+    internal static Rect ArtRect(Rect card)
+    {
+        float side = 1.5f * card.height;
+        return new Rect(card.xMax - 0.06f * card.width - side * 0.5f, card.center.y - side * 0.5f, side, side);
     }
 
     readonly List<Vector2> _linkPath = new List<Vector2>();
@@ -555,6 +587,7 @@ public class TechTreeWindow : EditorWindow
             string detail = $"def:{(n.DefModded ? "mod" : "vanilla")}  map:{(n.MapperModded ? "mod" : "vanilla")}";
             EditorGUILayout.LabelField($"{state}   ({detail})", EditorStyles.miniLabel);
             EditorGUILayout.LabelField($"{n.Era} · {n.Tier} · ({EffX(n)},{EffY(n)})", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(ArtLine(n), EditorStyles.miniLabel);
 
             if (!_editMode)
                 EditorGUILayout.HelpBox("Edit is OFF, so the position, the rule and the prerequisites are greyed out. Switch on \"Edit\" at the top left to change them.", MessageType.Info);
@@ -618,6 +651,12 @@ public class TechTreeWindow : EditorWindow
         EditorGUILayout.EndScrollView();
         GUILayout.EndArea();
     }
+
+    // what the side strip says about the card's image, so a card without artwork is explained
+    internal static string ArtLine(TechTreeData.Node n) =>
+        !string.IsNullOrEmpty(n.ArtPath) ? "Image: " + System.IO.Path.GetFileName(n.ArtPath)
+        : n.ArtNamed ? "Image: not in this project (one of the game's own)"
+        : "Image: none set";
 
     internal static string RuleHeader(bool unreadable, bool requireAll) =>
         unreadable ? "Prerequisites:" : requireAll ? "Prerequisites (AND):" : "Prerequisites (OR):";
