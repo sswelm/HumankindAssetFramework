@@ -63,7 +63,7 @@ script compares its exit code with a load-only control (139). On 2026-11-21, wit
 beside it, one run of three exited 127 after `DRILL PASS` and was reported as a failure; two reruns exited 139. A
 failure of that shape (every check passed, only the exit code differs) is the runtime's exit, not the hooks: rerun.
 `bash tools/tech_requires_all_unity_drill.sh` drives the real Tech Requires All window and the Tech Tree viewer in one
-temporary Unity project and reads every deployed list back with the plugin's parser: 147 checks (14 before PR #301,
+temporary Unity project and reads every deployed list back with the plugin's parser: 170 checks (14 before PR #301,
 which were the list window's own: add, save, reopen, remove). The viewer's part:
 - **The two windows on one list.** The OR / AND switch is staged and written on Save; an open list window without
   unsaved changes follows, one with unsaved changes keeps them and has its save refused; the viewer picks up the list
@@ -75,14 +75,33 @@ which were the list window's own: add, save, reopen, remove). The viewer's part:
   its definition's file, and an Undo after a Save takes nothing of it back.
 - **Staged edits:** kept across a reload that does not find the technology, and across a round trip of the window
   through Unity's own serializer with everything in memory wiped (all five kinds of edit, the selection, the view).
-- **What a technology unlocks** (2026-11-22, 14 checks), on stand-ins of the game's shapes that the reader looks
-  up by name: which constructible stands for an unlock (for everyone before emblematic, the exclusion-list
-  prerequisite of the base Harbour, the highest level, the later one on a tie), one entry per shown effect in
-  order, the kind, the icon's image key per kind found as a real file of the temporary project or as a GUID
-  only, the icon row's rectangles, the side strip's lines, and a card that draws its row in every step. Planted:
-  five defects, each caught. On the real data (a scratch project, not in the repo): the reader's output for the
-  216 ENC technologies against an independent reading of the asset text, see the CHANGELOG entry.
-- **Shift** (2026-11-21, 8 checks): the cards right of a card move together and the others stay, the opposite number
+- **What a technology unlocks** (2026-11-22, 37 checks), on stand-ins that have the game's SHAPES, because the
+  reader works by name and by shape: the override is absent unless set, the faction rule is an enum, a reference
+  is a struct with a private field, `UnitDefinition` is abstract with a concrete subclass, and the constructible
+  base type carries the game's full name. Each expectation is written from the game's rule and the input.
+  - Which constructible stands for an unlock (for everyone before another culture's, the exclusion list of the
+    base Harbour, "is or ever was the starting tribe", the highest level, the later one on a tie), and the frame
+    kind through base types.
+  - One technology with 24 effects of every kind: the entries and the game's ORDER in one string (no two
+    entries of it compare equal, so the string does not depend on the sort's algorithm), then per kind the name,
+    the mapper it is looked up by, the title, the image key (with decoy images under every key the game does not
+    ask for) and whether the game draws it.
+  - Two units of one `SortPriority` behind a bonus: the order the game's `List.Sort` leaves, which is not the
+    stable one.
+  - The index on real assets of the temporary project: Databases over the reference folder over anywhere else;
+    constructible, resource and cost modifier definitions told apart; an asset without an Images list is no
+    mapper.
+  - The row as a plan (which boxes, which entry in each, the `+N` box, the culture mark) and its rectangles at
+    two card sizes; the side strip's heading and lines.
+  - The icon copies, by pixels: a pictogram comes out white, transparent outside and solid inside, at twice the
+    field's size with mip levels; a colour icon is its own rectangle of the atlas, the right way up, colours and
+    alpha as stored; the render target that was active is put back. A control check holds the drill's own pixel
+    reading to a known texture.
+  - Planted in the reworked code: 94 defects, 93 caught. The one that survived was the largest: with the card's row not drawn at all the drill still passed, because the side strip loaded the same image. That check now draws with nothing selected, and the plant fails it. How the row LOOKS (frame colours, the faint draw of another culture's entry) is in no check; that is judged from screenshots.
+  - On the real data (scratch projects under `C:/tmp/haf-build/review4`, not in the repo): the reader against a
+    second implementation of the game's rules on all 217 ENC technologies and the game's own 93, an icon census,
+    and screenshots of the real window. Numbers in the CHANGELOG entry.
+- **Shift** (2026-11-21, 9 checks, one of them the side strip's layout): the cards right of a card move together and the others stay, the opposite number
   takes it back, a shift to the left stops in the column after the anchor's, a card in the anchor's own column is not
   moved, and the texts. Planted: including the anchor's column, no limit, and moving the rows too each fail them.
 - **Input through the real `OnGUI`:** a click that slips is no drag, a column of movement is a column, nothing moves

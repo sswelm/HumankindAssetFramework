@@ -103,7 +103,91 @@ static class TechTreeVanillaArt
         var gone = new List<string>();
         foreach (var kv in atlases) if (kv.Value == null) gone.Add(kv.Key);
         foreach (var k in gone) atlases.Remove(k);
+        gone.Clear();
+        foreach (var kv in icons) if (kv.Value == null) gone.Add(kv.Key);
+        foreach (var k in gone) icons.Remove(k);
     }
+
+    // ── One small texture per ICON ────────────────────────────────────────────
+    // A card's unlock icons are 46 units high and drawn at a fraction of that. Two things make the atlas itself a
+    // poor source for them (review 2026-11-22, measured):
+    //  - The pictograms of bonuses, resources and actions sit in ALPHA-ONLY atlases (Alpha8: a distance field in the
+    //    alpha, RGB 0 in every pixel). The game draws them with a distance-field shader; drawn as stored they are
+    //    black, blurred shapes (the user's screenshot of the first version).
+    //  - The colour icons' atlases have no mip levels, so a 212 px icon drawn at 20 px is grainy beside the
+    //    project's own icons, which have them.
+    // So each icon is copied once into a texture of its own, with mip levels: a pictogram as a WHITE shape whose
+    // alpha is the field ramped around its contour at 0.5 (the reviewer's verified recipe: twice the field's size,
+    // slope 16; a hard threshold loses thin strokes, the raw field is a glow), a colour icon as it is.
+    static readonly Dictionary<string, Texture2D> icons = new Dictionary<string, Texture2D>(StringComparer.Ordinal);
+    internal const int IconMax = 128;        // a colour icon's copy is at most this large
+    internal const float FieldSlope = 16f;   // how steep the pictogram's edge is made (per unit of alpha, at twice the field's size)
+
+    /// <summary>The icon for that image reference as a texture of its own; null when the image is not one of the game's or cannot be read.</summary>
+    public static Texture2D Icon(string unityGuid)
+    {
+        if (string.IsNullOrEmpty(unityGuid)) return null;
+        if (icons.TryGetValue(unityGuid, out var icon))
+        {
+            if (icon != null || ReferenceEquals(icon, null)) return icon;   // a remembered failure stays until Reload; a destroyed one is made again
+            icons.Remove(unityGuid);
+        }
+        icon = null;
+        if (TryRegion(unityGuid, out var region))
+        {
+            var atlas = Atlas(region.Output);
+            if (atlas != null)
+            {
+                try { icon = Bake(atlas, region.Uv, region.Width, region.Height, atlas.format == TextureFormat.Alpha8); }
+                catch (Exception e) { Debug.LogWarning("[TechTree] the game's icon in '" + region.Output + "' could not be copied (it is not shown; Reload tries again): " + e.Message); }
+            }
+        }
+        icons[unityGuid] = icon;
+        HookCleanup();
+        return icon;
+    }
+
+    /// <summary>
+    /// Copies the rectangle `uv` of `atlas` into a new texture with mip levels. `field` = the source is a distance
+    /// field in the alpha channel: the copy is white, at twice the size, with the alpha ramped around 0.5.
+    /// Safe inside OnGUI: the render target that was active is put back (without that, the rest of the window's
+    /// draw is lost; executed by the reviewer).
+    /// </summary>
+    internal static Texture2D Bake(Texture atlas, Rect uv, int width, int height, bool field)
+    {
+        int w = Mathf.Max(1, width), h = Mathf.Max(1, height);
+        if (field) { w *= 2; h *= 2; }
+        else if (Mathf.Max(w, h) > IconMax) { float k = IconMax / (float)Mathf.Max(w, h); w = Mathf.Max(1, Mathf.RoundToInt(w * k)); h = Mathf.Max(1, Mathf.RoundToInt(h * k)); }
+        // the copy keeps the source's bytes: the target and the copy are of the source's colour space, so a project
+        // in linear colour space converts on the way in and back on the way out (ENC's is gamma: no conversion at all)
+        bool srgb = !field && UnityEngine.Experimental.Rendering.GraphicsFormatUtility.IsSRGBFormat(atlas.graphicsFormat);
+        var previous = RenderTexture.active;
+        var target = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32, srgb ? RenderTextureReadWrite.sRGB : RenderTextureReadWrite.Linear);
+        try
+        {
+            Graphics.Blit(atlas, target, new Vector2(uv.width, uv.height), new Vector2(uv.x, uv.y));
+            RenderTexture.active = target;
+            var copy = new Texture2D(w, h, TextureFormat.RGBA32, true, !srgb) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Trilinear, wrapMode = TextureWrapMode.Clamp };
+            copy.ReadPixels(new Rect(0, 0, w, h), 0, 0, false);
+            if (field)
+            {
+                var pixels = copy.GetPixels32();
+                for (int i = 0; i < pixels.Length; i++) pixels[i] = new Color32(255, 255, 255, FieldAlpha(pixels[i].a));
+                copy.SetPixels32(pixels);
+            }
+            copy.Apply(true, true);
+            return copy;
+        }
+        finally
+        {
+            RenderTexture.active = previous;
+            RenderTexture.ReleaseTemporary(target);
+        }
+    }
+
+    /// <summary>A distance field's value as the shape's alpha: 0.5 is the contour, the ramp around it FieldSlope steep.</summary>
+    internal static byte FieldAlpha(byte field) =>
+        (byte)Mathf.RoundToInt(255f * Mathf.Clamp01((field / 255f - 0.5f) * FieldSlope + 0.5f));
 
     static void EnsureIndex()
     {
@@ -201,6 +285,8 @@ static class TechTreeVanillaArt
         {
             foreach (var tex in ownTextures) if (tex != null) Resources.UnloadAsset(tex);
             ownTextures.Clear(); atlases.Clear();
+            foreach (var icon in icons.Values) if (icon != null) UnityEngine.Object.DestroyImmediate(icon);   // this class made them
+            icons.Clear();
         };
     }
 }

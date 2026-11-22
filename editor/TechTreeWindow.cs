@@ -37,8 +37,9 @@ using UnityEngine;
 ///    that is only a pixel or two high.
 ///  - Seams and hooks for the list's window and the drill: BuildTreeImpl, RepaintOpenWindows.
 ///  - What a technology unlocks (asked for by the user, 2026-11-22): a row of icons along the bottom of its card,
-///    where the game's card has it, and the list with titles in the side strip. Read by TechTreeUnlocks.cs from the
-///    definition's own effects; shown only, not edited here.
+///    where the game's card has it, in the game's order, and the list with titles in the side strip. Read by
+///    TechTreeUnlocks.cs from the definition's own effects; shown only, not edited here. For it the internal name
+///    moved from the card's bottom row to the row of era and tier.
 ///  - Shift: every card right of the selected one moved by a number of columns, as one staged edit per card
 ///    (ShiftRightOf; asked for by the user, 2026-11-21, to make room in the tree without moving cards one by one).
 /// </summary>
@@ -209,7 +210,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     static readonly Color UNLOCK_OTHER = new Color(0.27f, 0.22f, 0.36f);
     // The game's card (310 x 116) keeps a table 50 high along its bottom for these icons, 4 from the bottom edge.
     const float UNLOCK_SIDE = 46f, UNLOCK_GAP = 3f, UNLOCK_LEFT = 6f, UNLOCK_BOTTOM = 4f;
-    const float UNLOCK_MIN_PIXELS = 9f;   // no icons while they would be smaller than this
+    const float NAME_MIN_ZOOM = 0.6f;     // the internal name is small print: not drawn below this zoom
     const float HIDDEN_ALPHA = 0.4f;                                    // how faint the card and links of a technology without a card in the game are
 
     [MenuItem("Tools/HAF/Tech Tree/Open Viewer")]
@@ -703,30 +704,29 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 GUI.Label(new Rect(info.x + used, info.y, info.width - used, info.height), EffVisibility(n) == TechTreeData.VisibilityNever ? "OFF" : "HIDDEN", hiddenStyle);
                 GUI.color = new Color(1f, 1f, 1f, fade);
             }
-            // the internal name, faint, behind the marks (the bottom of the card is the unlock row's)
-            if (hidden) used += hiddenStyle.CalcSize(new GUIContent("HIDDEN")).x + 6f * _zoom;
-            float nameRight = r.x + 0.63f * r.width;   // the artwork starts at 200 of 310
-            if (info.x + used < nameRight - 20f * _zoom)
-                GUI.Label(new Rect(info.x + used, info.y, nameRight - info.x - used, info.height), n.Name, nameStyle);
+            // the internal name, faint, behind the marks (the bottom of the card is the unlock row's). Every name
+            // starts with "Technology_": left out, so the part that tells the names apart has room.
+            if (hidden) used += hiddenStyle.CalcSize(new GUIContent(EffVisibility(n) == TechTreeData.VisibilityNever ? "OFF" : "HIDDEN")).x + 6f * _zoom;
+            if (_zoom >= NAME_MIN_ZOOM && info.x + used < r.xMax - pad - 20f * _zoom)
+                GUI.Label(new Rect(info.x + used, info.y, r.xMax - pad - info.x - used, info.height), ShortName(n.Name), nameStyle);
 
             // what the technology unlocks, where the game's card shows it: a row of icons along the bottom
-            if (n.Unlocks.Count > 0 && UNLOCK_SIDE * _zoom >= UNLOCK_MIN_PIXELS)
+            if (n.Unlocks.Count > 0 && r.Overlaps(local))
             {
-                var boxes = UnlockRects(r, n.Unlocks.Count);
-                for (int i = 0; i < boxes.Count; i++)
+                foreach (var box in PlanUnlockRow(r, n.Unlocks))
                 {
-                    var u = n.Unlocks[i]; var box = boxes[i];
-                    Color frame = UnlockFrame(u.Kind); frame.a *= fade;
+                    Color frame = box.Unlock == null ? UNLOCK_OTHER : UnlockFrame(box.Unlock.Kind); frame.a *= fade;
+                    // an entry only another culture gets: an amber edge, and its picture faint
+                    Color boxEdge = box.Cultural ? new Color(AND_MARK.r, AND_MARK.g, AND_MARK.b, 0.9f * fade) : new Color(1f, 1f, 1f, 0.3f * fade);
                     GUI.color = Color.white;
-                    GUI.DrawTexture(box, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, frame, 0, 3f * _zoom);
-                    GUI.DrawTexture(box, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, new Color(1f, 1f, 1f, 0.3f * fade), 1f, 3f * _zoom);
-                    GUI.color = new Color(1f, 1f, 1f, fade);
+                    GUI.DrawTexture(box.Rect, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, frame, 0, 3f * _zoom);
+                    GUI.DrawTexture(box.Rect, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, boxEdge, 1f, 3f * _zoom);
+                    GUI.color = new Color(1f, 1f, 1f, fade * (box.Cultural ? 0.55f : 1f));
                     float inset = 2f * _zoom;
-                    var inner = new Rect(box.x + inset, box.y + inset, box.width - 2 * inset, box.height - 2 * inset);
-                    if (TryImage(u.ImagePath, u.ImageGuid, out var icon, out var iconUv, out float iconAspect))
-                        GUI.DrawTextureWithTexCoords(FitInside(inner, iconAspect), icon, iconUv, true);
-                    else
-                        GUI.Label(box, "?", unknownStyle);   // an unlock without an icon is still an unlock
+                    var inner = new Rect(box.Rect.x + inset, box.Rect.y + inset, box.Rect.width - 2 * inset, box.Rect.height - 2 * inset);
+                    if (box.Unlock == null) GUI.Label(box.Rect, "+" + box.More, unknownStyle);
+                    else if (TryIcon(box.Unlock, out var icon, out float iconAspect)) GUI.DrawTexture(FitInside(inner, iconAspect), icon, ScaleMode.StretchToFill, true);
+                    else GUI.Label(box.Rect, "?", unknownStyle);   // an unlock without an icon is still an unlock
                 }
             }
             GUI.color = Color.white;
@@ -758,6 +758,50 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             if (tex != null) { uv = region.Uv; aspect = region.Height > 0 ? region.Width / (float)region.Height : 1f; return true; }
         }
         return false;
+    }
+
+    // An unlock's icon: the project's own file by its path, else the game's own as a small texture of its own
+    // (TechTreeVanillaArt.Icon: a white shape for a pictogram, a copy with mip levels for a colour icon).
+    bool TryIcon(TechTreeUnlocks.Unlock u, out Texture tex, out float aspect)
+    {
+        tex = null; aspect = 1f;
+        string path = u.ImagePath;
+        if (!string.IsNullOrEmpty(path))
+        {
+            if (!_art.TryGetValue(path, out tex)) _art[path] = tex = AssetDatabase.LoadAssetAtPath<Texture>(path);
+        }
+        if (tex == null) tex = TechTreeVanillaArt.Icon(u.ImageGuid);
+        if (tex == null) return false;
+        aspect = tex.height > 0 ? tex.width / (float)tex.height : 1f;
+        return true;
+    }
+
+    /// <summary>One box of a card's unlock row, as it is decided before anything is drawn.</summary>
+    internal struct UnlockBox
+    {
+        public Rect Rect;
+        public TechTreeUnlocks.Unlock Unlock;   // null for the "+N" box
+        public int More;                        // the "+N" box: how many entries did not fit
+        public bool Cultural;                   // an entry only other cultures get: drawn with the amber edge
+    }
+
+    /// <summary>
+    /// A card's unlock row: the entries the game draws an icon for, in Read's order, in the rectangles that fit the
+    /// card (six on the game's card). When there are more, the last rectangle says how many are left out.
+    /// </summary>
+    internal static List<UnlockBox> PlanUnlockRow(Rect card, IList<TechTreeUnlocks.Unlock> unlocks)
+    {
+        var shown = new List<TechTreeUnlocks.Unlock>();
+        foreach (var u in unlocks) if (u.NotShown == null) shown.Add(u);
+        var rects = UnlockRects(card, shown.Count);
+        var row = new List<UnlockBox>(rects.Count);
+        for (int i = 0; i < rects.Count; i++)
+        {
+            bool last = i == rects.Count - 1 && shown.Count > rects.Count;
+            row.Add(last ? new UnlockBox { Rect = rects[i], More = shown.Count - rects.Count + 1 }
+                         : new UnlockBox { Rect = rects[i], Unlock = shown[i], Cultural = shown[i].OnlyFor != null });
+        }
+        return row;
     }
 
     /// <summary>
@@ -797,15 +841,44 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         }
     }
 
-    /// <summary>One line of the side strip's list of what the selected technology unlocks.</summary>
-    internal static string UnlockLine(TechTreeUnlocks.Unlock u)
+    /// <summary>The heading of the side strip's list: what a card shows, and what it does not.</summary>
+    internal static string UnlockHeader(IList<TechTreeUnlocks.Unlock> unlocks)
     {
-        string line = UnlockWord(u) + " · " + u.Title;
-        if (u.Title != u.ElementName) line += "  (" + u.ElementName + ")";
-        if (u.Alternatives > 0) line += $"  +{u.Alternatives} other{(u.Alternatives == 1 ? "" : "s")} in the same unlock";
-        if (!u.MapperFound) line += "  — no UI mapper in the project, so no icon";
-        else if (u.ImageGuid == null) line += "  — its UI mapper names no icon";
-        return line;
+        int row = 0, cultural = 0, none = 0;
+        foreach (var u in unlocks) { if (u.NotShown != null) none++; else if (u.OnlyFor != null) cultural++; else row++; }
+        string head = "Unlocks (" + row + ")";
+        if (cultural > 0) head += " + " + cultural + " for other cultures";
+        if (none > 0) head += " + " + none + " without an icon in the game";
+        return head + ":";
+    }
+
+    /// <summary>A culture's name as the side strip writes it: without the data's "Civilization_" prefix.</summary>
+    internal static string CultureWord(string culture) =>
+        culture != null && culture.StartsWith("Civilization_", StringComparison.Ordinal) ? culture.Substring("Civilization_".Length) : (culture ?? "");
+
+    static string Cultures(string[] cultures) => string.Join(", ", cultures.Select(CultureWord));
+
+    /// <summary>
+    /// The side strip's lines for one unlock: the entry, then one line per constructible other cultures get instead.
+    /// `icon` = why no icon shows for an entry that should have one ("" when one shows, or when the entry has none
+    /// to show by the game's own rule).
+    /// </summary>
+    internal static List<string> UnlockLines(TechTreeUnlocks.Unlock u, string icon)
+    {
+        var lines = new List<string>();
+        string name = string.IsNullOrEmpty(u.Title) ? (u.ElementName != "" ? u.ElementName : "(no name)") : u.Title;
+        string line = UnlockWord(u) + " · " + name;
+        if (u.ElementName != "" && u.Title != u.ElementName) line += "  (" + u.ElementName + ")";
+        if (u.OnlyFor != null) line += "  — ONLY for " + (u.OnlyFor.Length > 0 ? Cultures(u.OnlyFor) : "some cultures") + ": the game shows it to no other culture";
+        if (u.Dlc != "") line += "  — needs " + u.Dlc;
+        if (u.NotShown != null) line += "  — the game shows NO icon: " + u.NotShown;
+        else if (!u.MapperFound) line += "  — no UI mapper '" + u.MapperName + "' in the project: a blank icon";
+        else if (u.ImageGuid == null) line += "  — its UI mapper names no icon: a blank icon";
+        else if (!string.IsNullOrEmpty(icon)) line += "  — icon not shown here: " + icon;
+        lines.Add(line);
+        foreach (var other in u.Others)
+            lines.Add("      " + (other.Cultures.Length > 0 ? Cultures(other.Cultures) + " get" : "also named:") + " " + other.Title + (other.Title != other.Name ? "  (" + other.Name + ")" : ""));
+        return lines;
     }
 
     /// <summary>The largest rectangle of that aspect (width over height) inside `box`, centred.</summary>
@@ -994,12 +1067,18 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 
             // what the technology unlocks, as its card's icon row shows it (read from the definition's effects; not edited here)
             EditorGUILayout.Space(6);
-            EditorGUILayout.LabelField($"Unlocks ({n.Unlocks.Count}):", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(UnlockHeader(n.Unlocks), EditorStyles.boldLabel);
             if (n.Unlocks.Count == 0)
                 EditorGUILayout.LabelField("  (nothing that shows on its card)", EditorStyles.miniLabel);
             else
                 foreach (var u in n.Unlocks)
-                    EditorGUILayout.LabelField(new GUIContent(UnlockLine(u), u.ElementName), EditorStyles.wordWrappedMiniLabel);
+                {
+                    // why an entry that should have an icon shows "?" here (the game's bundle not readable, an atlas not loaded)
+                    string iconProblem = u.NotShown == null && u.MapperFound && u.ImageGuid != null && !TryIcon(u, out _, out _)
+                        ? (TechTreeVanillaArt.Problem != "" ? TechTreeVanillaArt.Problem : "the image is neither a file of this project nor in the game's atlases (Reload tries again)") : "";
+                    foreach (string line in UnlockLines(u, iconProblem))
+                        EditorGUILayout.LabelField(line, EditorStyles.wordWrappedMiniLabel);
+                }
 
             EditorGUILayout.Space(8);
             if (GUILayout.Button("Select asset"))
@@ -1309,6 +1388,9 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 
     // ── helpers ───────────────────────────────────────────────────────────────
     static string ShortEra(string era)  => string.IsNullOrEmpty(era) ? "" : era.Replace("Era", "E");
+    /// <summary>A technology's internal name as a card shows it: without the "Technology_" every one of them starts with.</summary>
+    internal static string ShortName(string name) =>
+        name != null && name.StartsWith("Technology_", StringComparison.Ordinal) ? name.Substring("Technology_".Length) : (name ?? "");
     static string ShortTier(string tier) => string.IsNullOrEmpty(tier) ? "" : tier.Replace("Tier", "T");
 }
 

@@ -75,15 +75,37 @@ public static class TechRequireAllWindowDrill
                 }
         return new TechTreeDrillTypes.DrillImage { serializableKey = key, Value = new TechTreeDrillTypes.DrillTexture { guid = new TechTreeDrillTypes.DrillGuid { a = words[0], b = words[1], c = words[2], d = words[3] } } };
     }
-    static T Constructible<T>(string name, int level, int op, params string[] factions) where T : TechTreeDrillTypes.ConstructibleDefinition
+    static T Constructible<T>(string name, int level, TechTreeDrillTypes.FactionOperator op, params string[] factions) where T : Amplitude.Mercury.Data.Simulation.ConstructibleDefinition
     {
         var c = ScriptableObject.CreateInstance<T>(); c.name = name; c.Level = level; c.FactionPrerequisite = new TechTreeDrillTypes.FactionPrerequisite(op, factions); return c;
     }
+    // a plain UI mapper, and a constructible's (the one with a SortPriority)
     static TechTreeDrillTypes.DrillMapper Mapper(string name, string title, params TechTreeDrillTypes.DrillImage[] images)
     {
         var m = ScriptableObject.CreateInstance<TechTreeDrillTypes.DrillMapper>(); m.name = name; m.Title = title; m.Images = images.ToList(); return m;
     }
-    static TechTreeDrillTypes.Reference[] Refs(params string[] names) => names.Select(n => new TechTreeDrillTypes.Reference { serializableElementName = n }).ToArray();
+    static TechTreeDrillTypes.DrillMapper CMapper(string name, string title, int sortPriority, params TechTreeDrillTypes.DrillImage[] images)
+    {
+        var m = ScriptableObject.CreateInstance<TechTreeDrillTypes.DrillConstructibleMapper>(); m.name = name; m.Title = title; m.SortPriority = sortPriority; m.Images = images.ToList(); return m;
+    }
+    static TechTreeDrillTypes.Reference Ref(string name) => new TechTreeDrillTypes.Reference(name);
+    static TechTreeDrillTypes.Reference[] Refs(params string[] names) => names.Select(n => new TechTreeDrillTypes.Reference(n)).ToArray();
+    static TechTreeDrillTypes.TechDefinition Effects(params object[] effects) => new TechTreeDrillTypes.TechDefinition { SimulationEventEffects = effects };
+    static TechTreeDrillTypes.SimulationEventEffect_UnlockConstructible Unlocks(params string[] names) => new TechTreeDrillTypes.SimulationEventEffect_UnlockConstructible { ConstructibleReferences = Refs(names) };
+    static string Names(IEnumerable<TechTreeUnlocks.Unlock> entries) => string.Join(",", entries.Select(u => u.ElementName == "" ? "(none)" : u.ElementName));
+    // a texture's pixels through the graphics card (the icon copies are not readable from C#)
+    static Color32[] PixelsOf(Texture texture)
+    {
+        var before = RenderTexture.active;
+        var target = RenderTexture.GetTemporary(texture.width, texture.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+        Graphics.Blit(texture, target);
+        RenderTexture.active = target;
+        var read = new Texture2D(texture.width, texture.height, TextureFormat.RGBA32, false, true);
+        read.ReadPixels(new Rect(0, 0, texture.width, texture.height), 0, 0, false); read.Apply();
+        RenderTexture.active = before; RenderTexture.ReleaseTemporary(target);
+        var pixels = read.GetPixels32(); UnityEngine.Object.DestroyImmediate(read);
+        return pixels;
+    }
 
     // ---- real assets in the temporary project (the mutation run of 2026-11-21: nothing in this drill wrote one)
     const string DbDefs = "Assets/Databases/Defs", DbMaps = "Assets/Databases/Maps", RefDefs = "Assets/VanillaReference/Defs", RefMaps = "Assets/VanillaReference/Maps";
@@ -141,14 +163,17 @@ public static class TechRequireAllWindowDrill
         {
             var tree = Tree();
             tree[1].BaseX = 8; tree[1].BaseY = -2; tree[2].BaseX = 16; tree[2].BaseY = 4; tree[3].BaseX = 16; tree[3].BaseY = 9;
-            // T's card carries an icon row: a project image, an entry without an icon, and more entries than fit
+            // T's card carries an icon row: a project image, an entry with a blank icon, one the game does not draw,
+            // more entries than fit, and one only another culture gets
             tree[2].Unlocks = new List<TechTreeUnlocks.Unlock>
             {
-                new TechTreeUnlocks.Unlock { Effect = "UnlockConstructible", Kind = TechTreeUnlocks.Kind.Unit, ElementName = "Unit_X", Title = "Unit X", MapperFound = true, ImagePath = IconPath, ImageGuid = IconGuid() },
-                new TechTreeUnlocks.Unlock { Effect = "ApplyDescriptor", Kind = TechTreeUnlocks.Kind.Other, ElementName = "Bonus_Y", Title = "Bonus Y" },
+                new TechTreeUnlocks.Unlock { Effect = "UnlockConstructible", Kind = TechTreeUnlocks.Kind.Unit, ElementName = "Unit_X", MapperName = "Unit_X", Title = "Unit X", MapperFound = true, ImagePath = IconPath, ImageGuid = IconGuid() },
+                new TechTreeUnlocks.Unlock { Effect = "ApplyDescriptor", Kind = TechTreeUnlocks.Kind.Other, ElementName = "Bonus_Y", MapperName = "Bonus_Y", Title = "Bonus Y" },
+                new TechTreeUnlocks.Unlock { Effect = "UnlockAction", Kind = TechTreeUnlocks.Kind.Other, ElementName = "Action_Z", MapperName = "ActionTypeAction_Z", Title = "Action_Z", NotShown = "there is no UI mapper 'ActionTypeAction_Z'" },
             };
             for (int extra = 0; extra < 6; extra++)
-                tree[2].Unlocks.Add(new TechTreeUnlocks.Unlock { Effect = "UnlockConstructible", Kind = extra % 2 == 0 ? TechTreeUnlocks.Kind.Extension : TechTreeUnlocks.Kind.Infrastructure, ElementName = "C" + extra, Title = "C" + extra, MapperFound = true });
+                tree[2].Unlocks.Add(new TechTreeUnlocks.Unlock { Effect = "UnlockConstructible", Kind = extra % 2 == 0 ? TechTreeUnlocks.Kind.Extension : TechTreeUnlocks.Kind.Infrastructure, ElementName = "C" + extra, MapperName = "C" + extra, Title = "C" + extra, MapperFound = true });
+            tree[2].Unlocks.Add(new TechTreeUnlocks.Unlock { Effect = "UnlockConstructible", Kind = TechTreeUnlocks.Kind.Unit, ElementName = "Unit_Q", MapperName = "Unit_Q", Title = "Unit Q", MapperFound = true, OnlyFor = new[] { "Civilization_Q" } });
             return tree;
         };
         viewer = ScriptableObject.CreateInstance<TechTreeWindow>();   // OnEnable: reads the tree and the list
@@ -732,77 +757,292 @@ public static class TechRequireAllWindowDrill
                 case 16:
                 {
                     // ---- what a technology unlocks: the reader on stand-ins of the game's shapes (2026-11-22) ----
+                    // Every expectation below is derived from the game's rules (TechTreeUnlocks.cs's header) and this
+                    // input, not from the reader's output; the review's 125 planted defects showed which shapes the
+                    // first stand-ins were too friendly to catch (a "" override, an int Operator, a concrete
+                    // UnitDefinition), and they are the game's shapes now.
                     var index = new TechTreeUnlocks.Index();
-                    void Def(TechTreeDrillTypes.ConstructibleDefinition c) { index.Constructibles[c.name] = c; }
-                    Def(Constructible<TechTreeDrillTypes.UnitDefinition>("Unit_Common", 6, 1));                       // no culture named: for everyone
-                    Def(Constructible<TechTreeDrillTypes.UnitDefinition>("Unit_Emblem", 7, 1, "Civilization_A"));     // AnyInFactionsHistory + a name: emblematic
-                    Def(Constructible<TechTreeDrillTypes.UnitDefinition>("Unit_Common_B", 6, 1));
-                    Def(Constructible<TechTreeDrillTypes.UnitDefinition>("Unit_Common_Late", 9, 1));
-                    Def(Constructible<TechTreeDrillTypes.ExtensionDistrictDefinition>("Harbour_Base", 0, 2, "Civilization_A", "Civilization_B"));   // Operator None: for everyone BUT these
-                    Def(Constructible<TechTreeDrillTypes.ExtensionDistrictDefinition>("Harbour_A", 1, 0, "Civilization_A"));                       // Any + a name: emblematic
-                    Def(Constructible<TechTreeDrillTypes.InfrastructureDefinition>("Infra_One", 3, 1));
+                    void Def(Amplitude.Mercury.Data.Simulation.ConstructibleDefinition c) { index.Constructibles[c.name] = c; }
+                    void M(TechTreeDrillTypes.DrillMapper m) { index.Mappers[m.name] = m; }
+                    const TechTreeDrillTypes.FactionOperator Any = TechTreeDrillTypes.FactionOperator.Any, InHistory = TechTreeDrillTypes.FactionOperator.AnyInFactionsHistory, NoneOf = TechTreeDrillTypes.FactionOperator.None;
+                    Def(Constructible<TechTreeDrillTypes.LandUnitDefinition>("Unit_Common", 6, InHistory));                                     // no culture named: for everyone
+                    Def(Constructible<TechTreeDrillTypes.LandUnitDefinition>("Unit_Emblem", 7, InHistory, "Civilization_A"));                   // is or was A: emblematic
+                    Def(Constructible<TechTreeDrillTypes.LandUnitDefinition>("Unit_Common_B", 6, Any));
+                    Def(Constructible<TechTreeDrillTypes.LandUnitDefinition>("Unit_Common_Late", 9, Any));
+                    Def(Constructible<TechTreeDrillTypes.ExtensionDistrictDefinition>("Harbour_Base", 0, NoneOf, "Civilization_A", "Civilization_B"));   // for everyone BUT these
+                    Def(Constructible<TechTreeDrillTypes.ExtensionDistrictDefinition>("Harbour_A", 1, Any, "Civilization_A"));
+                    Def(Constructible<TechTreeDrillTypes.ExtensionDistrictDefinition>("Tribe_District", 0, InHistory, TechTreeUnlocks.StartingCulture));   // ENC's idiom: everyone was the tribe
+                    Def(Constructible<TechTreeDrillTypes.ExtensionDistrictDefinition>("Tribe_Now", 0, Any, TechTreeUnlocks.StartingCulture));              // IS the tribe now: not a later culture
+                    Def(Constructible<TechTreeDrillTypes.SettlementImprovementDefinition>("Infra_One", 3, Any));
+                    Def(Constructible<TechTreeDrillTypes.AirportDefinition>("Zed_Airport", 0, Any));
+                    Def(Constructible<TechTreeDrillTypes.SettlementEvolutionDefinition>("Evolution", 0, Any));
+                    Def(Constructible<TechTreeDrillTypes.LandUnitDefinition>("Emblem_Only_A", 2, Any, "Civilization_A"));
+                    Def(Constructible<TechTreeDrillTypes.LandUnitDefinition>("Emblem_Only_B", 3, Any, "Civilization_B"));
+                    Def(Constructible<TechTreeDrillTypes.LandUnitDefinition>("Tie_A", 1, Any));
+                    Def(Constructible<TechTreeDrillTypes.LandUnitDefinition>("Tie_B", 1, Any));
+
+                    bool forBase;
                     Check("unlocks: the constructible for everyone stands for an unlock, not the emblematic one of a higher level",
-                          TechTreeUnlocks.Choose(new[] { "Unit_Emblem", "Unit_Common" }, index) == "Unit_Common" && TechTreeUnlocks.Choose(new[] { "Unit_Common", "Unit_Emblem" }, index) == "Unit_Common");
+                          TechTreeUnlocks.Choose(new[] { "Unit_Emblem", "Unit_Common" }, index, out forBase) == "Unit_Common" && forBase
+                          && TechTreeUnlocks.Choose(new[] { "Unit_Common", "Unit_Emblem" }, index, out forBase) == "Unit_Common" && forBase);
                     Check("unlocks: a prerequisite that names the cultures it is NOT for (the base Harbour) is for everyone",
-                          TechTreeUnlocks.ForEveryone(index.Constructibles["Harbour_Base"]) && !TechTreeUnlocks.ForEveryone(index.Constructibles["Harbour_A"])
-                          && TechTreeUnlocks.Choose(new[] { "Harbour_Base", "Harbour_A" }, index) == "Harbour_Base");
+                          TechTreeUnlocks.ForBaseCulture(index.Constructibles["Harbour_Base"]) && !TechTreeUnlocks.ForBaseCulture(index.Constructibles["Harbour_A"])
+                          && TechTreeUnlocks.Choose(new[] { "Harbour_Base", "Harbour_A" }, index, out forBase) == "Harbour_Base" && forBase);
+                    Check("unlocks: 'is or ever was the starting tribe' is everyone; 'is the tribe now', and 'is or ever was' another culture, are not",
+                          TechTreeUnlocks.ForBaseCulture(index.Constructibles["Tribe_District"]) && !TechTreeUnlocks.ForBaseCulture(index.Constructibles["Tribe_Now"])
+                          && !TechTreeUnlocks.ForBaseCulture(index.Constructibles["Unit_Emblem"]) && TechTreeUnlocks.ForBaseCulture(index.Constructibles["Unit_Common"]));
                     Check("unlocks: among those for everyone the highest level, the later one on a tie (the game's rule)",
-                          TechTreeUnlocks.Choose(new[] { "Unit_Common", "Unit_Common_Late", "Unit_Common_B" }, index) == "Unit_Common_Late"
-                          && TechTreeUnlocks.Choose(new[] { "Unit_Common", "Unit_Common_B" }, index) == "Unit_Common_B" && TechTreeUnlocks.Choose(new[] { "Unit_Common_B", "Unit_Common" }, index) == "Unit_Common");
-                    Check("unlocks: only emblematic ones named: the highest of them; a name without a definition is passed over; none known: the first",
-                          TechTreeUnlocks.Choose(new[] { "Harbour_A", "Unit_Emblem" }, index) == "Unit_Emblem" && TechTreeUnlocks.Choose(new[] { "Ghost", "Infra_One" }, index) == "Infra_One"
-                          && TechTreeUnlocks.Choose(new[] { "Ghost_1", "Ghost_2" }, index) == "Ghost_1" && TechTreeUnlocks.Choose(new string[0], index) == null);
+                          TechTreeUnlocks.Choose(new[] { "Unit_Common", "Unit_Common_Late", "Unit_Common_B" }, index, out forBase) == "Unit_Common_Late"
+                          && TechTreeUnlocks.Choose(new[] { "Unit_Common", "Unit_Common_B" }, index, out forBase) == "Unit_Common_B" && TechTreeUnlocks.Choose(new[] { "Unit_Common_B", "Unit_Common" }, index, out forBase) == "Unit_Common");
+                    string onlyEmblems = TechTreeUnlocks.Choose(new[] { "Emblem_Only_B", "Emblem_Only_A" }, index, out bool emblemsForBase);
+                    string overGhost = TechTreeUnlocks.Choose(new[] { "Ghost", "Infra_One" }, index, out bool ghostForBase);
+                    Check("unlocks: only other cultures' ones named: the highest of them, and said to be for no culture-less player; a name without a definition is passed over; none known: no answer",
+                          onlyEmblems == "Emblem_Only_B" && !emblemsForBase && overGhost == "Infra_One" && ghostForBase
+                          && TechTreeUnlocks.Choose(new[] { "Ghost_1", "Ghost_2" }, index, out forBase) == null && !forBase && TechTreeUnlocks.Choose(new string[0], index, out forBase) == null,
+                          onlyEmblems + " " + emblemsForBase + " " + overGhost);
+                    Check("unlocks, kind: by the definition's type or a base of it (a land unit is a unit, an airport a district, an evolution a district)",
+                          TechTreeUnlocks.KindOf("Unit_Common", index) == TechTreeUnlocks.Kind.Unit && TechTreeUnlocks.KindOf("Zed_Airport", index) == TechTreeUnlocks.Kind.Extension
+                          && TechTreeUnlocks.KindOf("Evolution", index) == TechTreeUnlocks.Kind.Extension && TechTreeUnlocks.KindOf("Infra_One", index) == TechTreeUnlocks.Kind.Infrastructure
+                          && TechTreeUnlocks.KindOf("Ghost", index) == TechTreeUnlocks.Kind.Infrastructure);
 
                     string icon = IconGuid();
                     const string elsewhere = "0123456789abcdef0123456789abcdef";   // a GUID no asset of this project has: one of the game's own
-                    index.Mappers["Unit_Common"] = Mapper("Unit_Common", "%UnitCommonTitle", Image("Picto", elsewhere), Image("Default_Small", icon), Image("Variation1_Small", elsewhere));
-                    index.Mappers["Harbour_Base"] = Mapper("Harbour_Base", "Harbour", Image("Default_Small", null), Image("Variation1_Small", elsewhere));
-                    index.Mappers["Infra_One"] = Mapper("Infra_One", "Infra", Image("Picto", elsewhere));                 // a constructible takes no Picto
-                    index.Mappers["Bonus_Mapper"] = Mapper("Bonus_Mapper", "A bonus", Image("Small", elsewhere));
-                    index.Mappers["Resource_R"] = Mapper("Resource_R", "Horses", Image("Small", icon), Image("Picto", elsewhere));
-                    var definition = new TechTreeDrillTypes.TechDefinition { SimulationEventEffects = new object[]
-                    {
-                        new TechTreeDrillTypes.SimulationEventEffect_UnlockConstructible { ConstructibleReferences = Refs("Unit_Emblem", "Unit_Common", "Ghost") },
+                    const string wrong = "fedcba9876543210fedcba9876543210";       // the image of a key the game does NOT ask for
+                    M(CMapper("Unit_Common", "%UnitCommonTitle", 30, Image("Picto", wrong), Image("Default_Small", icon), Image("Small", wrong), Image("Variation1_Small", wrong)));
+                    M(CMapper("Unit_Emblem", "%EmblemTitle", 2));
+                    M(CMapper("Harbour_Base", "Harbour", 10, Image("Default_Small", null), Image("Small", elsewhere), Image("Variation1_Small", wrong)));   // an empty Default_Small: the plain Small
+                    M(CMapper("Infra_One", "Infra", 20, Image("Picto", wrong), Image("Variation1_Small", wrong)));                                         // neither key: no icon
+                    M(CMapper("Tribe_District", "Tribe district", 5, Image("Small", elsewhere)));
+                    M(CMapper("Emblem_Only_B", "Emblem B", 1, Image("Default_Small", elsewhere)));
+                    M(CMapper("Tie_A", "Tie A", 7)); M(CMapper("Tie_B", "Tie B", 7));
+                    M(Mapper("Bonus_Mapper", "A bonus", Image("Picto", wrong), Image("Small", elsewhere)));
+                    M(Mapper("Effect_Plain", "Plain", Image("Default_Small", wrong), Image("Picto", wrong)));       // a bonus asks for Small only
+                    M(Mapper("Resource_R", "Horses", Image("Small", wrong), Image("Picto", elsewhere)));
+                    M(Mapper("Resource_S", "DECOY"));                                                               // a mapper, but no resource definition
+                    M(Mapper("ActionTypeCuttingForest", "Clear forest", Image("Small", wrong), Image("Picto", elsewhere)));
+                    M(Mapper("CuttingForest", "DECOY", Image("Picto", wrong)));                                     // the game asks for "ActionType" + name
+                    M(Mapper("ReinforceBattle", "DECOY", Image("Picto", wrong)));                                   // ... and there is no "ActionTypeReinforceBattle"
+                    M(Mapper("Prohibit_Mapper", "No more moves", Image("Small", wrong)));                                // an action asks for Picto only
+                    M(Mapper("Package_1", "A package", Image("Small", elsewhere)));
+                    M(Mapper("Ability_1", "An ability", Image("Small", elsewhere), Image("Small", wrong)));              // a key twice: the first entry counts
+                    M(Mapper("Cost_1", "Cheaper", Image("Small", elsewhere)));
+                    M(Mapper("FameGains", "Fame", Image("Small", elsewhere)));
+                    M(Mapper("Fame_Own", "Own fame", Image("Small", null), Image("Small", wrong)));                      // ... also when the first is empty
+                    M(Mapper("Effect_ResetAllCivics", "Reset", Image("Small", elsewhere)));
+                    index.Resources.Add("Resource_R"); index.CostModifiers.Add("Cost_1");
+
+                    var definition = Effects(
+                        Unlocks("Unit_Emblem", "Unit_Common", "Ghost"),
                         new TechTreeDrillTypes.SimulationEventEffect_UnlockConstructible { Hidden = true, ConstructibleReferences = Refs("Infra_One") },
-                        new TechTreeDrillTypes.SimulationEventEffect_UnlockConstructible { ConstructibleReferences = Refs("Harbour_A", "Harbour_Base") },
-                        new TechTreeDrillTypes.SimulationEventEffect_UnlockConstructible { ConstructibleReferences = Refs("Infra_One") },
-                        new TechTreeDrillTypes.SimulationEventEffect_ApplyDescriptor { Descriptor = new TechTreeDrillTypes.Reference { serializableElementName = "Effect_Raw" }, UIMapperOverride = "Bonus_Mapper" },
+                        Unlocks("Harbour_A", "Harbour_Base"),
+                        Unlocks("Infra_One"),
+                        new TechTreeDrillTypes.SimulationEventEffect_ApplyDescriptor { Descriptor = Ref("Effect_Raw"), UIMapperOverride = "Bonus_Mapper" },
+                        new TechTreeDrillTypes.SimulationEventEffect_ApplyDescriptor { Descriptor = Ref("Effect_Plain") },                       // no override: null, as the assets store it
                         new TechTreeDrillTypes.SimulationEventEffect_ForceCalendar(),
                         new TechTreeDrillTypes.SimulationEventEffect_UnlockResource { ResourceReferences = Refs("Resource_R", "Resource_S") },
                         new TechTreeDrillTypes.SimulationEventEffect_UnlockAction { ActionType = TechTreeDrillTypes.DrillAction.CuttingForest },
-                        null,
-                    } };
-                    var read = TechTreeUnlocks.Read(definition, index, text => text == "%UnitCommonTitle" ? "Warriors" : text);
-                    Check("unlocks: one entry per effect that is not hidden, one per resource, none for an effect the card does not show, in the effects' order",
-                          string.Join(",", read.Select(u => u.Effect + ":" + u.ElementName)) == "UnlockConstructible:Unit_Common,UnlockConstructible:Harbour_Base,UnlockConstructible:Infra_One,ApplyDescriptor:Bonus_Mapper,UnlockResource:Resource_R,UnlockResource:Resource_S,UnlockAction:CuttingForest",
-                          string.Join(",", read.Select(u => u.Effect + ":" + u.ElementName)));
-                    Check("unlocks: the kind by the definition's type, the count of the others an unlock names, the title through the localization",
-                          read.Count == 7 && read[0].Kind == TechTreeUnlocks.Kind.Unit && read[0].Alternatives == 2 && read[0].Title == "Warriors" && read[1].Kind == TechTreeUnlocks.Kind.Extension && read[1].Alternatives == 1
-                          && read[2].Kind == TechTreeUnlocks.Kind.Infrastructure && read[3].Kind == TechTreeUnlocks.Kind.Other && read[3].Title == "A bonus");
-                    Check("unlocks, icon: a constructible's Default_Small, found as a file of the project",
-                          read.Count == 7 && read[0].MapperFound && read[0].ImagePath == IconPath && read[0].ImageGuid == icon, read.Count == 7 ? read[0].ImagePath + " " + read[0].ImageGuid : "count " + read.Count);
-                    Check("unlocks, icon: an empty Default_Small falls to another *_Small; that image is not in the project, so only its GUID is known",
-                          read.Count == 7 && read[1].ImagePath == null && read[1].ImageGuid == elsewhere, read.Count == 7 ? read[1].ImagePath + " " + read[1].ImageGuid : "");
-                    Check("unlocks, icon: a constructible whose mapper has only a Picto names no icon; an unlock without a mapper says so",
-                          read.Count == 7 && read[2].MapperFound && read[2].ImageGuid == null && !read[5].MapperFound && read[5].Title == "Resource_S" && !read[6].MapperFound);
-                    Check("unlocks, icon: a bonus takes Small, a resource takes Picto before Small",
-                          read.Count == 7 && read[3].ImageGuid == elsewhere && read[4].ImageGuid == elsewhere && read[4].ImagePath == null, read.Count == 7 ? read[4].ImagePath + " " + read[4].ImageGuid : "");
+                        new TechTreeDrillTypes.SimulationEventEffect_UnlockAction { ActionType = TechTreeDrillTypes.DrillAction.ReinforceBattle },
+                        new TechTreeDrillTypes.SimulationEventEffect_ProhibitAction { ActionType = TechTreeDrillTypes.DrillAction.MoveCapital, UIMapperOverride = "Prohibit_Mapper" },
+                        new TechTreeDrillTypes.SimulationEventEffect_UnlockSettlementStartingPackage { StartingPackageReference = Ref("Package_1"), UIMapperOverride = "Bonus_Mapper" },
+                        new TechTreeDrillTypes.SimulationEventEffect_AddEmpireBattleAbility { BattleAbilityDefinition = Ref("Ability_1") },
+                        new TechTreeDrillTypes.SimulationEventEffect_ApplyCostModifier { CostModifierReference = Ref("Cost_1") },
+                        new TechTreeDrillTypes.SimulationEventEffect_ApplyCostModifier { CostModifierReference = Ref("Cost_Ghost") },
+                        new TechTreeDrillTypes.SimulationEventEffect_AddFame(),
+                        new TechTreeDrillTypes.SimulationEventEffect_AddFame { UIMapperOverride = "Fame_Own" },
+                        new TechTreeDrillTypes.SimulationEventEffect_AddFame { UIMapperOverride = "Fame_None" },
+                        new TechTreeDrillTypes.SimulationEventEffect_ResetAllCivics(),
+                        new TechTreeDrillTypes.SimulationEventEffect_UpgradeAllRoads { UIMapperOverride = "Roads_Mapper" },
+                        Unlocks("Emblem_Only_A", "Emblem_Only_B"),
+                        Unlocks("Ghost_1"),
+                        new TechTreeDrillTypes.SimulationEventEffect_UnlockConstructible { ConstructibleReferences = Refs("Unit_Common_B"), UIMapperOverride = "Not_A_Constructible" },
+                        new TechTreeDrillTypes.SimulationEventEffect_UnlockConstructible { ConstructibleReferences = Refs("Tribe_District"), DlcPrerequisite = new TechTreeDrillTypes.DlcPrerequisite { DownloadableContent = TechTreeDrillTypes.DrillDlc.Dlc6 } },
+                        null);
+                    var read = TechTreeUnlocks.Read(definition, index, text => text == "%UnitCommonTitle" ? "Warriors" : text == "%EmblemTitle" ? "Emblem!" : text);
+                    TechTreeUnlocks.Unlock E(string name) => read.FirstOrDefault(u => u.ElementName == name) ?? new TechTreeUnlocks.Unlock { ElementName = "MISSING " + name };
+                    // The game's order (TechnologyUnlocksComparer): cost / fame / package / other first, then bonus, resource,
+                    // action, constructible; inside a group by ordinal name; two constructibles that both have a constructible
+                    // mapper by its SortPriority (5, 10, 20, 30), else by the kind of definition (none: last), then by name.
+                    // No two entries of this input compare equal, so the order does not depend on the sort's algorithm.
+                    const string expectedOrder = "(none),Cost_1,Cost_Ghost,Effect_ResetAllCivics,Fame_None,Fame_Own,Package_1,Roads_Mapper,"
+                        + "Ability_1,Bonus_Mapper,Effect_Plain,Resource_R,Resource_S,CuttingForest,Prohibit_Mapper,ReinforceBattle,"
+                        + "Tribe_District,Harbour_Base,Infra_One,Unit_Common,Ghost_1,Not_A_Constructible,Emblem_Only_B";
+                    Check("unlocks: one entry per effect that is not hidden (one per resource), in the GAME's order, the entry only another culture gets after them",
+                          Names(read) == expectedOrder, Names(read));
+                    Check("unlocks, order: three entries of which two compare equal come out as the game's List.Sort leaves them (the bonus, then the LATER unit first: Military Reforms)",
+                          Names(TechTreeUnlocks.Read(Effects(Unlocks("Tie_A"), Unlocks("Tie_B"), new TechTreeDrillTypes.SimulationEventEffect_ApplyDescriptor { Descriptor = Ref("Effect_Plain") }), index, null)) == "Effect_Plain,Tie_B,Tie_A",
+                          Names(TechTreeUnlocks.Read(Effects(Unlocks("Tie_A"), Unlocks("Tie_B"), new TechTreeDrillTypes.SimulationEventEffect_ApplyDescriptor { Descriptor = Ref("Effect_Plain") }), index, null)));
+                    Check("unlocks, order: a constructible without a constructible mapper is placed by its kind (a district before a unit), whatever the names and the effects' order",
+                          Names(TechTreeUnlocks.Read(Effects(Unlocks("Unit_Common"), Unlocks("Zed_Airport")), index, null)) == "Zed_Airport,Unit_Common");
+                    Check("unlocks: nothing to read is an empty row, not an exception",
+                          TechTreeUnlocks.Read(null, index, null).Count == 0 && TechTreeUnlocks.Read(new TechTreeDrillTypes.TechDefinition(), index, null).Count == 0 && TechTreeUnlocks.Read(Effects(Unlocks()), index, null).Count == 0);
 
-                    // the row on the card: the game's 310 x 116 card keeps 46-high icons 4 from its bottom, six fit
+                    Check("unlocks, constructible: kind, localized title, and the others of the same unlock WITH their cultures",
+                          E("Unit_Common").Kind == TechTreeUnlocks.Kind.Unit && E("Unit_Common").Title == "Warriors" && E("Unit_Common").NotShown == null && E("Unit_Common").OnlyFor == null
+                          && string.Join(";", E("Unit_Common").Others.Select(o => o.Name + "=" + o.Title + "[" + string.Join("+", o.Cultures) + "]")) == "Unit_Emblem=Emblem![Civilization_A];Ghost=Ghost[]"
+                          && E("Harbour_Base").Kind == TechTreeUnlocks.Kind.Extension && string.Join(";", E("Harbour_Base").Others.Select(o => o.Name + "[" + string.Join("+", o.Cultures) + "]")) == "Harbour_A[Civilization_A]"
+                          && E("Infra_One").Kind == TechTreeUnlocks.Kind.Infrastructure && E("Infra_One").Others.Count == 0,
+                          string.Join(";", E("Unit_Common").Others.Select(o => o.Name + "=" + o.Title + "[" + string.Join("+", o.Cultures) + "]")));
+                    Check("unlocks, constructible: an effect that names ONLY other cultures' constructibles is kept, marked with the culture, and names the other one",
+                          E("Emblem_Only_B").OnlyFor != null && string.Join("+", E("Emblem_Only_B").OnlyFor ?? new string[0]) == "Civilization_B" && E("Emblem_Only_B").NotShown == null
+                          && string.Join(";", E("Emblem_Only_B").Others.Select(o => o.Name + "[" + string.Join("+", o.Cultures) + "]")) == "Emblem_Only_A[Civilization_A]"
+                          && read.Count(u => u.OnlyFor != null) == 1);
+                    Check("unlocks, constructible: a name without a definition, and an override that is no constructible, are entries the game does not draw",
+                          E("Ghost_1").NotShown != null && E("Ghost_1").NotShown.Contains("no constructible definition") && E("Not_A_Constructible").Effect == "UnlockConstructible"
+                          && E("Not_A_Constructible").NotShown != null && E("Not_A_Constructible").NotShown.Contains("is no constructible definition") && !read.Any(u => u.ElementName == "Unit_Common_B"),
+                          E("Ghost_1").NotShown + " | " + E("Not_A_Constructible").NotShown);
+                    Check("unlocks, icon: a constructible's Default_Small, found as a file of the project; an empty Default_Small falls to the plain Small; no other key is taken",
+                          E("Unit_Common").MapperFound && E("Unit_Common").ImagePath == IconPath && E("Unit_Common").ImageGuid == icon
+                          && E("Harbour_Base").ImagePath == null && E("Harbour_Base").ImageGuid == elsewhere && E("Infra_One").MapperFound && E("Infra_One").ImageGuid == null,
+                          E("Unit_Common").ImagePath + " " + E("Unit_Common").ImageGuid + " | " + E("Harbour_Base").ImageGuid + " | " + E("Infra_One").ImageGuid);
+                    Check("unlocks, bonus: the override replaces the descriptor's name, no override keeps it; the icon is the mapper's Small and only that",
+                          E("Bonus_Mapper").Effect == "ApplyDescriptor" && E("Bonus_Mapper").Title == "A bonus" && E("Bonus_Mapper").ImageGuid == elsewhere && !read.Any(u => u.ElementName == "Effect_Raw")
+                          && E("Effect_Plain").MapperFound && E("Effect_Plain").Title == "Plain" && E("Effect_Plain").ImageGuid == null && E("Effect_Plain").NotShown == null
+                          && E("Ability_1").Effect == "AddEmpireBattleAbility" && E("Ability_1").Title == "An ability" && E("Ability_1").ImageGuid == elsewhere,
+                          E("Bonus_Mapper").ImageGuid + " | " + E("Effect_Plain").ImageGuid);
+                    Check("unlocks, resource and cost: the icon is Picto / Small; a name that is no such definition is not drawn by the game, mapper or not",
+                          E("Resource_R").ImageGuid == elsewhere && E("Resource_R").NotShown == null && E("Resource_S").NotShown != null && E("Resource_S").NotShown.Contains("no resource definition")
+                          && E("Cost_1").Effect == "ApplyCostModifier" && E("Cost_1").ImageGuid == elsewhere && E("Cost_1").NotShown == null && E("Cost_Ghost").NotShown != null && E("Cost_Ghost").NotShown.Contains("no cost modifier definition"),
+                          E("Resource_R").ImageGuid + " | " + E("Resource_S").NotShown + " | " + E("Cost_Ghost").NotShown);
+                    Check("unlocks, action: looked up as 'ActionType' + its name, never by the bare name; without that mapper the game draws nothing; an override that is no action is its own mapper",
+                          E("CuttingForest").MapperName == "ActionTypeCuttingForest" && E("CuttingForest").Title == "Clear forest" && E("CuttingForest").ImageGuid == elsewhere && E("CuttingForest").NotShown == null
+                          && E("ReinforceBattle").MapperName == "ActionTypeReinforceBattle" && !E("ReinforceBattle").MapperFound && E("ReinforceBattle").NotShown != null && E("ReinforceBattle").Title == "ReinforceBattle"
+                          && E("Prohibit_Mapper").Effect == "ProhibitAction" && E("Prohibit_Mapper").MapperName == "Prohibit_Mapper" && E("Prohibit_Mapper").MapperFound && E("Prohibit_Mapper").NotShown == null
+                          && E("Prohibit_Mapper").ImageGuid == null,
+                          E("CuttingForest").MapperName + " " + E("CuttingForest").Title + " | " + E("ReinforceBattle").MapperName + " " + E("ReinforceBattle").NotShown);
+                    Check("unlocks, package / fame / civics / roads: the package ignores the override; fame takes its override's mapper when there is one, else the shared FameGains",
+                          E("Package_1").Effect == "UnlockSettlementStartingPackage" && E("Package_1").Kind == TechTreeUnlocks.Kind.Extension && E("Package_1").Title == "A package" && E("Package_1").ImageGuid == elsewhere
+                          && E("").Effect == "AddFame" && E("").MapperName == "FameGains" && E("").Title == "Fame" && E("").ImageGuid == elsewhere
+                          && E("Fame_Own").MapperName == "Fame_Own" && E("Fame_Own").Title == "Own fame" && E("Fame_Own").ImageGuid == null && E("Fame_None").MapperName == "FameGains" && E("Fame_None").Title == "Fame"
+                          && E("Effect_ResetAllCivics").Effect == "ResetAllCivics" && E("Effect_ResetAllCivics").Title == "Reset"
+                          && E("Roads_Mapper").Effect == "UpgradeAllRoads" && !E("Roads_Mapper").MapperFound && E("Roads_Mapper").NotShown == null,
+                          E("Package_1").Title + " | " + E("").MapperName + " | " + E("Fame_None").MapperName);
+                    Check("unlocks: the downloadable content an effect needs is kept with its entry, and only with it",
+                          E("Tribe_District").Dlc == "Dlc6" && E("Tribe_District").OnlyFor == null && read.Count(u => u.Dlc != "") == 1, E("Tribe_District").Dlc);
+
+                    // ---- the index, on real assets of the temporary project: Databases over the reference folder over anywhere else
+                    Folder("Assets/Databases/Idx"); Folder("Assets/VanillaReference/Idx"); Folder("Assets/Elsewhere");
+                    void MapperAsset(string folder, string name, string title) => NewAsset<TechTreeDrillTypes.DrillConstructibleMapper>(folder + "/" + name + ".asset", m => { m.Title = title; m.Images = new List<TechTreeDrillTypes.DrillImage> { Image("Small", elsewhere) }; });
+                    MapperAsset("Assets/Elsewhere", "Idx_M", "else"); MapperAsset("Assets/VanillaReference/Idx", "Idx_M", "ref"); MapperAsset("Assets/Databases/Idx", "Idx_M", "db");
+                    MapperAsset("Assets/VanillaReference/Idx", "Idx_R", "ref"); MapperAsset("Assets/Elsewhere", "Idx_R", "else");
+                    MapperAsset("Assets/Elsewhere", "Idx_E", "else");
+                    NewAsset<TechTreeDrillTypes.LandUnitDefinition>("Assets/Elsewhere/Idx_C.asset", c => c.Level = 2);
+                    NewAsset<TechTreeDrillTypes.LandUnitDefinition>("Assets/Databases/Idx/Idx_C.asset", c => c.Level = 1);
+                    NewAsset<TechTreeDrillTypes.ResourceDefinition>("Assets/Elsewhere/Idx_Res.asset", r => { });
+                    NewAsset<TechTreeDrillTypes.CostModifierDefinition>("Assets/Elsewhere/Idx_Cost.asset", c => { });
+                    NewAsset<TechTreeDrillMapper>("Assets/Elsewhere/Idx_Plain.asset", m => { });   // no Images list: not a UI mapper
+                    AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
+                    var built = TechTreeUnlocks.BuildIndex("Assets/VanillaReference");
+                    string TitleIn(string name) => built.Mappers.TryGetValue(name, out var found) ? ((TechTreeDrillTypes.DrillMapper)found).Title : "(none)";
+                    Check("unlock index: a UI mapper is found by its name; the copy under Databases wins, then the reference folder's, then any other",
+                          TitleIn("Idx_M") == "db" && TitleIn("Idx_R") == "ref" && TitleIn("Idx_E") == "else", TitleIn("Idx_M") + " " + TitleIn("Idx_R") + " " + TitleIn("Idx_E"));
+                    Check("unlock index: constructible, resource and cost modifier definitions are told apart by their types; an asset without an Images list is no mapper",
+                          built.Constructibles.TryGetValue("Idx_C", out var builtUnit) && ((TechTreeDrillTypes.LandUnitDefinition)builtUnit).Level == 1 && !built.Mappers.ContainsKey("Idx_C") && !built.Constructibles.ContainsKey("Idx_M")
+                          && built.Resources.Contains("Idx_Res") && !built.Mappers.ContainsKey("Idx_Res") && built.CostModifiers.Contains("Idx_Cost") && !built.Resources.Contains("Idx_Cost")
+                          && !built.Mappers.ContainsKey("Idx_Plain"),
+                          "constructibles " + string.Join(",", built.Constructibles.Keys) + " resources " + string.Join(",", built.Resources) + " costs " + string.Join(",", built.CostModifiers));
+                    var fromAssets = TechTreeUnlocks.Read(Effects(Unlocks("Idx_C")), built, null);
+                    Check("unlock index: an unlock read through it finds the mapper asset and its image",
+                          fromAssets.Count == 1 && fromAssets[0].Kind == TechTreeUnlocks.Kind.Unit && fromAssets[0].NotShown == null && !fromAssets[0].MapperFound
+                          && TechTreeUnlocks.Read(Effects(new TechTreeDrillTypes.SimulationEventEffect_ApplyDescriptor { Descriptor = Ref("Idx_M") }), built, null)[0].ImageGuid == elsewhere);
+
+                    // ---- the row on the card: the game's 310 x 116 card keeps 46-high icons 4 from its bottom, six fit
                     var row = TechTreeWindow.UnlockRects(new Rect(100, 200, 310, 116), 8);
                     Check("unlock row: six icons of 46 fit the card, along its bottom from the left",
                           row.Count == 6 && Mathf.Abs(row[0].x - 106) < 0.01f && Mathf.Abs(row[0].y - 266) < 0.01f && Mathf.Abs(row[0].width - 46) < 0.01f && Mathf.Abs(row[1].x - 155) < 0.01f && row[5].xMax <= 410,
                           row.Count + " first " + (row.Count > 0 ? row[0].ToString() : ""));
                     var half = TechTreeWindow.UnlockRects(new Rect(0, 0, 155, 58), 2);
-                    Check("unlock row: scaled with the card, no more rectangles than unlocks", half.Count == 2 && Mathf.Abs(half[0].width - 23) < 0.01f && Mathf.Abs(half[0].y - 33) < 0.01f);
-                    Check("unlock list: what the side strip says per entry",
-                          read.Count == 7 && TechTreeWindow.UnlockLine(read[0]) == "Unit · Warriors  (Unit_Common)  +2 others in the same unlock"
-                          && TechTreeWindow.UnlockLine(read[1]) == "District · Harbour  (Harbour_Base)  +1 other in the same unlock"
-                          && TechTreeWindow.UnlockLine(read[2]) == "Infrastructure · Infra  (Infra_One)  — its UI mapper names no icon"
-                          && TechTreeWindow.UnlockLine(read[5]) == "Resource · Resource_S  — no UI mapper in the project, so no icon"
-                          && TechTreeWindow.UnlockLine(read[3]) == "Bonus · A bonus  (Bonus_Mapper)", read.Count == 7 ? TechTreeWindow.UnlockLine(read[0]) + " | " + TechTreeWindow.UnlockLine(read[5]) : "");
-                    Check("unlock row: the viewer's own card (T) has drawn its icons in every step, with the project image loaded",
-                          N("Technology_T").Unlocks.Count == 8 && ((System.Collections.IDictionary)typeof(TechTreeWindow).GetField("_art", Private).GetValue(viewer)).Contains(IconPath));
+                    Check("unlock row: scaled with the card (the margin and the gap too), no more rectangles than unlocks",
+                          half.Count == 2 && Mathf.Abs(half[0].width - 23) < 0.01f && Mathf.Abs(half[0].y - 33) < 0.01f && Mathf.Abs(half[0].x - 3) < 0.01f && Mathf.Abs(half[1].x - 27.5f) < 0.01f,
+                          half.Count == 2 ? half[0] + " " + half[1] : half.Count.ToString());
+                    // 23 entries, 5 the game does not draw: 18 boxes wanted, six fit: the first five, then "+13"
+                    var plan = TechTreeWindow.PlanUnlockRow(new Rect(100, 200, 310, 116), read);
+                    Check("unlock row, plan: the entries the game draws, in order, skipping the others; when more than fit, the last box counts the rest",
+                          plan.Count == 6 && string.Join(",", plan.Take(5).Select(b => b.Unlock == null ? "+" : b.Unlock.ElementName == "" ? "(none)" : b.Unlock.ElementName)) == "(none),Cost_1,Effect_ResetAllCivics,Fame_None,Fame_Own"
+                          && plan[5].Unlock == null && plan[5].More == 13 && plan.Take(5).All(b => b.More == 0 && !b.Cultural) && plan[5].Rect == row[5] && plan[0].Rect == row[0],
+                          plan.Count + ": " + string.Join(",", plan.Select(b => b.Unlock == null ? "+" + b.More : b.Unlock.ElementName)));
+                    var small = TechTreeWindow.PlanUnlockRow(new Rect(100, 200, 310, 116), new List<TechTreeUnlocks.Unlock> { E("Unit_Common"), E("Resource_S"), E("Emblem_Only_B") });
+                    var six = TechTreeWindow.PlanUnlockRow(new Rect(100, 200, 310, 116), read.Where(u => u.NotShown == null).Take(6).ToList());
+                    Check("unlock row, plan: an entry only another culture gets has its box, marked; exactly as many as fit need no count",
+                          small.Count == 2 && small[0].Unlock == E("Unit_Common") && !small[0].Cultural && small[1].Unlock == E("Emblem_Only_B") && small[1].Cultural && small[1].More == 0
+                          && six.Count == 6 && six.All(b => b.Unlock != null && b.More == 0));
+                    Check("unlock list: the heading counts what a card shows, what only other cultures get, and what the game does not draw",
+                          TechTreeWindow.UnlockHeader(read) == "Unlocks (17) + 1 for other cultures + 5 without an icon in the game:" && TechTreeWindow.UnlockHeader(new List<TechTreeUnlocks.Unlock> { E("Unit_Common") }) == "Unlocks (1):",
+                          TechTreeWindow.UnlockHeader(read));
+                    string L(string name, string iconProblem = "") => string.Join(" / ", TechTreeWindow.UnlockLines(E(name), iconProblem));
+                    Check("unlock list: an entry's line, then one line per constructible another culture gets instead, by culture",
+                          L("Unit_Common") == "Unit · Warriors  (Unit_Common) /       A get Emblem!  (Unit_Emblem) /       also named: Ghost"
+                          && L("Emblem_Only_B") == "Unit · Emblem B  (Emblem_Only_B)  — ONLY for B: the game shows it to no other culture /       A get Emblem_Only_A"
+                          && L("") == "Fame · Fame" && L("Bonus_Mapper") == "Bonus · A bonus  (Bonus_Mapper)",
+                          L("Unit_Common") + " | " + L("Emblem_Only_B") + " | " + L(""));
+                    Check("unlock list: what is in the way of an icon is said: the game draws none, no mapper, no image in the mapper, the DLC it needs, the image not readable here",
+                          L("Resource_S") == "Resource · DECOY  (Resource_S)  — the game shows NO icon: 'Resource_S' is no resource definition of this project"
+                          && L("Roads_Mapper") == "Roads · Roads_Mapper  — no UI mapper 'Roads_Mapper' in the project: a blank icon"
+                          && L("Effect_Plain") == "Bonus · Plain  (Effect_Plain)  — its UI mapper names no icon: a blank icon"
+                          && L("Tribe_District") == "District · Tribe district  (Tribe_District)  — needs Dlc6"
+                          && L("Harbour_Base", "the game's files were not found") == "District · Harbour  (Harbour_Base)  — icon not shown here: the game's files were not found /       A get Harbour_A",
+                          L("Resource_S") + " | " + L("Roads_Mapper") + " | " + L("Effect_Plain") + " | " + L("Tribe_District") + " | " + L("Harbour_Base", "x"));
+                    Check("unlock list: each kind of entry has its word",
+                          L("Infra_One") == "Infrastructure · Infra  (Infra_One)  — its UI mapper names no icon: a blank icon" && L("Package_1") == "Starting package · A package  (Package_1)"
+                          && L("Ability_1") == "Battle ability · An ability  (Ability_1)" && L("Resource_R") == "Resource · Horses  (Resource_R)" && L("Cost_1") == "Cost · Cheaper  (Cost_1)"
+                          && L("CuttingForest") == "Action · Clear forest  (CuttingForest)" && L("Prohibit_Mapper") == "Prohibits · No more moves  (Prohibit_Mapper)  — its UI mapper names no icon: a blank icon"
+                          && L("Effect_ResetAllCivics") == "Civics · Reset  (Effect_ResetAllCivics)",
+                          L("Infra_One") + " | " + L("Package_1") + " | " + L("Ability_1") + " | " + L("Cost_1") + " | " + L("Prohibit_Mapper"));
+                    Check("card: the internal name is shown without the prefix every technology has; a culture without the data's prefix",
+                          TechTreeWindow.ShortName("Technology_Era1_01") == "Era1_01" && TechTreeWindow.ShortName("Other") == "Other" && TechTreeWindow.ShortName(null) == ""
+                          && TechTreeWindow.CultureWord("Civilization_Era1_Phoenicia") == "Era1_Phoenicia" && TechTreeWindow.CultureWord("Tribe") == "Tribe");
+
+                    // ---- the game's icons as textures of their own (TechTreeVanillaArt.Bake): a pictogram is an alpha-only
+                    // distance field, black as stored (the first version drew it so); the copy is white with a ramped alpha
+                    var field = new Texture2D(8, 8, TextureFormat.Alpha8, false);
+                    var fieldPixels = new Color32[64];
+                    for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++) fieldPixels[y * 8 + x] = new Color32(0, 0, 0, (byte)(x < 4 ? 0 : 255));   // outside | inside
+                    field.SetPixels32(fieldPixels); field.Apply();
+                    var marker = RenderTexture.GetTemporary(4, 4); RenderTexture.active = marker;   // as inside OnGUI: something else is the render target
+                    var shape = TechTreeVanillaArt.Bake(field, new Rect(0, 0, 1, 1), 8, 8, true);
+                    bool targetKept = RenderTexture.active == marker;
+                    var shapePixels = PixelsOf(shape);
+                    Check("icon copy, pictogram: twice the field's size, WHITE in every pixel, transparent outside and solid inside, with mip levels, the render target put back",
+                          shape.width == 16 && shape.height == 16 && shape.mipmapCount > 1 && targetKept && shapePixels.All(c => c.r == 255 && c.g == 255 && c.b == 255)
+                          && shapePixels[8 * 16 + 0].a == 0 && shapePixels[8 * 16 + 15].a == 255,
+                          shape.width + "x" + shape.height + " mips " + shape.mipmapCount + " target kept " + targetKept + " left " + shapePixels[8 * 16] + " right " + shapePixels[8 * 16 + 15]);
+                    Check("icon copy, pictogram: the field's 0.5 is the contour; the ramp around it is steep but not a step",
+                          TechTreeVanillaArt.FieldAlpha(0) == 0 && TechTreeVanillaArt.FieldAlpha(100) == 0 && TechTreeVanillaArt.FieldAlpha(156) == 255 && TechTreeVanillaArt.FieldAlpha(255) == 255
+                          && TechTreeVanillaArt.FieldAlpha(124) > 0 && TechTreeVanillaArt.FieldAlpha(124) < TechTreeVanillaArt.FieldAlpha(128) && TechTreeVanillaArt.FieldAlpha(128) < TechTreeVanillaArt.FieldAlpha(132) && TechTreeVanillaArt.FieldAlpha(132) < 255
+                          && Mathf.Abs(TechTreeVanillaArt.FieldAlpha(128) - 136) <= 1,
+                          TechTreeVanillaArt.FieldAlpha(124) + " " + TechTreeVanillaArt.FieldAlpha(128) + " " + TechTreeVanillaArt.FieldAlpha(132));
+                    var colours = new Texture2D(8, 8, TextureFormat.RGBA32, false);
+                    var colourPixels = new Color32[64];
+                    // left: red below, yellow above; right: blue below, green above (both half transparent)
+                    for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++)
+                        colourPixels[y * 8 + x] = x < 4 ? (y < 4 ? new Color32(255, 0, 0, 255) : new Color32(255, 255, 0, 255)) : (y < 4 ? new Color32(0, 0, 255, 128) : new Color32(0, 255, 0, 128));
+                    colours.SetPixels32(colourPixels); colours.Apply();
+                    var control = PixelsOf(colours);   // the drill's own reading must not mirror or flip, or the checks below prove nothing
+                    Check("icon copy, control: this drill reads a texture's pixels where they are",
+                          control[0].r == 255 && control[0].g == 0 && control[0].b == 0 && control[7 * 8].r == 255 && control[7 * 8].g == 255 && control[7].b == 255 && control[7 * 8 + 7].g == 255 && control[7 * 8 + 7].b == 0,
+                          control[0] + " " + control[7] + " " + control[56] + " " + control[63]);
+                    var region = TechTreeVanillaArt.Bake(colours, new Rect(0.5f, 0, 0.5f, 1), 4, 8, false);   // the right half only
+                    var regionPixels = PixelsOf(region);
+                    var large = TechTreeVanillaArt.Bake(colours, new Rect(0, 0, 1, 1), 512, 256, false);
+                    Check("icon copy, colour icon: only its own rectangle of the atlas, the right way up, colours and alpha as stored, with mip levels; a large one is made smaller",
+                          region.width == 4 && region.height == 8 && region.mipmapCount > 1 && targetKept
+                          && regionPixels.Take(16).All(c => c.r <= 2 && c.g <= 2 && c.b >= 253 && Mathf.Abs(c.a - 128) <= 2) && regionPixels.Skip(16).All(c => c.r <= 2 && c.g >= 253 && c.b <= 2 && Mathf.Abs(c.a - 128) <= 2)
+                          && large.width == 128 && large.height == 64,
+                          region.width + "x" + region.height + " " + regionPixels[0] + " " + regionPixels[31] + " large " + large.width + "x" + large.height);
+                    RenderTexture.active = null; RenderTexture.ReleaseTemporary(marker);
+                    foreach (var made in new UnityEngine.Object[] { field, shape, colours, region, large }) UnityEngine.Object.DestroyImmediate(made);
+                    Check("icon copy: no image reference, no icon (and no reading of the game's files for it)", TechTreeVanillaArt.Icon(null) == null && TechTreeVanillaArt.Icon("") == null);
+
+                    // The card's row must load its image ITSELF. The side strip asks for the selected technology's icons
+                    // too (a planted "the row is never drawn" survived on that, 2026-11-22), so: nothing selected, the
+                    // loaded images forgotten, one draw.
+                    var art = (System.Collections.IDictionary)typeof(TechTreeWindow).GetField("_art", Private).GetValue(viewer);
+                    bool loadedBefore = art.Contains(IconPath);
+                    VSet("_selected", null); art.Clear();
+                    viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                    Check("unlock row: the viewer's own card (T) draws its row: with nothing selected, one draw loads the project image as a texture",
+                          N("Technology_T").Unlocks.Count == 10 && loadedBefore && art.Contains(IconPath) && (art[IconPath] as Texture) != null
+                          && TechTreeWindow.PlanUnlockRow(new Rect(0, 0, 310, 116), N("Technology_T").Unlocks).Count == 6,
+                          N("Technology_T").Unlocks.Count + " before " + loadedBefore + " after " + art.Contains(IconPath));
                     break;
                 }
                 default:
@@ -848,33 +1088,59 @@ public class TechTreeDrillMapper : ScriptableObject
 }
 
 // Stand-ins of the game's shapes for TechTreeUnlocks, which reads by NAME: the effect types' names, the fields'
-// names, and for a UI mapper the serialized paths Images[i].serializableKey / .Value.guid.a..d.
+// names, and for a UI mapper the serialized paths Images[i].serializableKey / .Value.guid.a..d. They keep the game's
+// KINDS of shape too, because the review of 2026-11-22 planted 125 defects and the friendlier first stand-ins let
+// these through: the override is null unless set (the game's default and what the assets store), the faction
+// operator is an enum, a reference is a struct with a private field, UnitDefinition is abstract with concrete
+// subclasses, and the constructible base type has the game's full name (the index finds it by that).
+namespace Amplitude.Mercury.Data.Simulation
+{
+    public abstract class ConstructibleDefinition : ScriptableObject { public int Level; public TechTreeDrillTypes.FactionPrerequisite FactionPrerequisite; }
+}
+
 namespace TechTreeDrillTypes
 {
-    [Serializable] public class Reference { public string serializableElementName; }
-    public class SimulationEventEffect { public string UIMapperOverride = ""; public bool Hidden; }
+    using Amplitude.Mercury.Data.Simulation;
+
+    [Serializable] public struct Reference { [SerializeField] string serializableElementName; public Reference(string name) { serializableElementName = name; } }
+    public enum DrillDlc { None = 0, Dlc6 = 6 }
+    [Serializable] public struct DlcPrerequisite { public DrillDlc DownloadableContent; }
+    public abstract class SimulationEventEffect { public string UIMapperOverride; public bool Hidden; public DlcPrerequisite DlcPrerequisite; }
     public class SimulationEventEffect_UnlockConstructible : SimulationEventEffect { public Reference[] ConstructibleReferences; }
+    public class SimulationEventEffect_UnlockSettlementStartingPackage : SimulationEventEffect { public Reference StartingPackageReference; }
     public class SimulationEventEffect_ApplyDescriptor : SimulationEventEffect { public Reference Descriptor; }
+    public class SimulationEventEffect_AddEmpireBattleAbility : SimulationEventEffect { public Reference BattleAbilityDefinition; }
     public class SimulationEventEffect_UnlockResource : SimulationEventEffect { public Reference[] ResourceReferences; }
-    public enum DrillAction { CuttingForest }
+    public class SimulationEventEffect_ApplyCostModifier : SimulationEventEffect { public Reference CostModifierReference; }
+    public enum DrillAction { CuttingForest, MoveCapital, ReinforceBattle }
     public class SimulationEventEffect_UnlockAction : SimulationEventEffect { public DrillAction ActionType; }
+    public class SimulationEventEffect_ProhibitAction : SimulationEventEffect { public DrillAction ActionType; }
+    public class SimulationEventEffect_AddFame : SimulationEventEffect { }
+    public class SimulationEventEffect_ResetAllCivics : SimulationEventEffect { }
+    public class SimulationEventEffect_UpgradeAllRoads : SimulationEventEffect { }
     public class SimulationEventEffect_ForceCalendar : SimulationEventEffect { }
     public class TechDefinition { public object[] SimulationEventEffects; }
 
+    public enum FactionOperator { Any, AnyInFactionsHistory, None }
     [Serializable]
     public struct FactionPrerequisite
     {
-        public int Operator;   // the game's enum: Any 0, AnyInFactionsHistory 1, None 2
+        public FactionOperator Operator;
         [SerializeField] string[] serializableFactionNames;
-        public FactionPrerequisite(int op, string[] names) { Operator = op; serializableFactionNames = names; }
+        public FactionPrerequisite(FactionOperator op, string[] names) { Operator = op; serializableFactionNames = names; }
     }
-    public class ConstructibleDefinition : ScriptableObject { public int Level; public FactionPrerequisite FactionPrerequisite; }
-    public class UnitDefinition : ConstructibleDefinition { }
+    public abstract class UnitDefinition : ConstructibleDefinition { }
+    public class LandUnitDefinition : UnitDefinition { }
     public class ExtensionDistrictDefinition : ConstructibleDefinition { }
-    public class InfrastructureDefinition : ConstructibleDefinition { }
+    public class AirportDefinition : ExtensionDistrictDefinition { }
+    public class SettlementEvolutionDefinition : ConstructibleDefinition { }
+    public class SettlementImprovementDefinition : ConstructibleDefinition { }
+    public class ResourceDefinition : ScriptableObject { }
+    public class CostModifierDefinition : ScriptableObject { }
 
     [Serializable] public struct DrillGuid { public int a, b, c, d; }
     [Serializable] public struct DrillTexture { public DrillGuid guid; }
     [Serializable] public struct DrillImage { public DrillTexture Value; public string serializableKey; }
     public class DrillMapper : ScriptableObject { public string Title; public List<DrillImage> Images = new List<DrillImage>(); }
+    public class DrillConstructibleMapper : DrillMapper { public int SortPriority; }
 }

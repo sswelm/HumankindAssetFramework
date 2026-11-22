@@ -692,15 +692,30 @@ windows. **Deep dive:**
     saved; without a matching collection there the Save is refused with a Console line and the edit stays staged.
     In ENC the reference copy is `Assets/~References` and the collections are in `Assets/Databases/Technologies`.
   - **What a technology unlocks.** A row of icons along the bottom of its card, where the game's card has it, and
-    the same as a list with titles in the side strip (`Unlocks (N)`). The entries are the technology definition's
-    own effects that are not hidden, as the game turns them into its icon row: one per unlocked constructible
-    (unit, district, infrastructure), one per bonus, resource, action, cost change and so on. An unlock that names
-    several constructibles (a common unit and its emblematic variants) shows the one every culture gets; the list
-    says how many others it names. Icons come from each entry's UI mapper: a file of the project, or one of the
-    game's own from its UI bundle. A card shows up to six. Frame colours: blue a unit, green a district or starting
-    package, brown an infrastructure, violet anything else; `?` marks an entry without an icon. The icons of
-    bonuses, resources and actions are the game's small one-colour pictograms, drawn as they are stored (soft at
-    the edges). Shown only: unlocks are not edited here.
+    the same as a list in the side strip. The entries are the technology definition's own effects that are not
+    hidden, turned into a row the way the game does it: one per unlocked constructible (unit, district,
+    infrastructure), bonus, resource, action, cost change and so on, in the game's order (bonuses, resources,
+    actions, then constructibles by their UI mapper's `SortPriority`).
+    - **Whose row it is.** The game builds the row for the player's culture; the viewer shows the one a culture
+      without anything of its own gets. Where an unlock names a common unit and emblematic ones, the card shows
+      the common one and the side strip lists the others under it with their cultures (`Era1_Phoenicia get Bireme`).
+      An unlock that only other cultures get comes after the row, faint with an amber edge, and its line says
+      `ONLY for` and the culture.
+    - **The icons** come from each entry's UI mapper, by the one image key the game asks that kind of entry for:
+      a file of the project, or one of the game's own from its UI bundle (the pictograms of bonuses, resources and
+      actions are drawn white, as in the game). Frame colours: blue a unit, green a district or starting package,
+      brown an infrastructure, violet anything else. A card has room for six; with more, the sixth box says how
+      many are left out (`+3`).
+    - **`?` in a box** means the game would show a blank icon there, or the image could not be read here. The
+      side strip says which, per entry: no UI mapper of that name, a mapper without that image, or the game's
+      files not readable (Reload tries again). An entry the game draws nothing for (an action without its
+      `ActionType...` mapper, a name that is no constructible / resource / cost modifier definition of the
+      project) has no box; it is listed in the side strip with the reason, and the heading counts it
+      (`Unlocks (3) + 3 for other cultures + 1 without an icon in the game`).
+    - **Not shown:** whether the player owns the DLC an unlock needs (the line says `needs` and the DLC), the
+      striped overlay of some unit classes, and the emblematic decoration.
+    - Unlocks are not edited here. The internal name of a technology sits behind era and tier on its card,
+      without the `Technology_` prefix, from zoom 0.6 up.
   - Not shown: the researched / locked states and the era headers.
 - **Tech Requires All** — `Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites`. A list of technologies, nothing else.
   The game unlocks a technology when **any one** of its prerequisites is researched, and its data has no field to say
