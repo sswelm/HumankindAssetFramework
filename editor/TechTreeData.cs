@@ -34,7 +34,7 @@ public static class TechTreeData
     public class Node
     {
         public string Name;        // asset name, e.g. "Technology_Era1_01"
-        public string TitleKey;    // the mapper's Title as stored: a "%...Title" localization key, or (all of ENC's) the text itself
+        public string TitleKey;    // the mapper's Title as stored: a "%...Title" localization key (88 of ENC's 215), or the text itself
         public string Label;       // resolved display text (falls back to key/name)
         public string BaseDescription = "";   // the mapper's Description as stored (a "%..." key or the text)
         public string Description = "";       // resolved display text of it
@@ -115,6 +115,7 @@ public static class TechTreeData
     public static List<Node> Build(string modPath)
     {
         var loc        = BuildLocalizationDict();
+        Localization = loc;
         var techType   = FindType("Amplitude.Mercury.Data.Simulation.TechnologyDefinition");
         var mapperType = FindType("Amplitude.Mercury.UI.TechnologyUIMapper");
         if (techType == null || mapperType == null)
@@ -452,6 +453,102 @@ public static class TechTreeData
     }
 
     // ── The card's texts and image (2026-11-22) ──────────────────────────────
+    /// <summary>The localization the last Build read (key -> text): what a typed "%..." text would show in the game.</summary>
+    internal static Dictionary<string, string> Localization = new Dictionary<string, string>();
+
+    internal static bool TryLocalize(string key, out string text)
+    {
+        text = null;
+        return !string.IsNullOrEmpty(key) && Localization != null && Localization.TryGetValue(key, out text);
+    }
+
+    // ── Which pictures the mod's asset bundle takes ───────────────────────────
+    // The game finds a mod's picture by its GUID in the mod's asset bundle only (Amplitude.Framework.AssetDatabase.
+    // TryLoadAsset; review of PR #309, 2026-11-22). The bundle takes what the project's AssetBundleBuildSettings
+    // filters match (BuildAssetBundleFilter.MatchAssets, decompiled Amplitude.Framework editor): Include filters,
+    // then Exclude ones, then "exclude directories by substring"; a texture needs a filter with the Texture bit (1).
+    // A mapper's GUID ints are not a Unity reference, so a picture is NOT pulled in as a dependency. ENC's settings
+    // take textures from Assets/Resources only.
+    internal sealed class BundleFilter
+    {
+        public string Directory = "", SubString = "";
+        public bool Recursive;
+        public int Mode;       // 0 Include, 1 Exclude, 2 ExcludeDirectoryBySubString
+        public int TypeMask;   // AssetType flags: Texture = 1
+    }
+
+    /// <summary>Every AssetBundleBuildSettings asset of the project, each as its list of filters. Empty when there is none.</summary>
+    internal static List<List<BundleFilter>> ModBundleFilters()
+    {
+        var all = new List<List<BundleFilter>>();
+        foreach (string guid in AssetDatabase.FindAssets("t:AssetBundleBuildSettings"))
+            foreach (var o in AssetDatabase.LoadAllAssetsAtPath(AssetDatabase.GUIDToAssetPath(guid)))
+            {
+                if (o == null || o.GetType().Name != "AssetBundleBuildSettings") continue;
+                using (var so = new SerializedObject(o))
+                {
+                    var filters = so.FindProperty("filters");
+                    if (filters == null || !filters.isArray) continue;
+                    var list = new List<BundleFilter>();
+                    for (int i = 0; i < filters.arraySize; i++)
+                    {
+                        var f = filters.GetArrayElementAtIndex(i);
+                        list.Add(new BundleFilter
+                        {
+                            Directory = f.FindPropertyRelative("Directory")?.stringValue ?? "",
+                            SubString = f.FindPropertyRelative("SubString")?.stringValue ?? "",
+                            Recursive = f.FindPropertyRelative("Recursive")?.boolValue ?? false,
+                            Mode = f.FindPropertyRelative("Mode")?.intValue ?? 0,
+                            TypeMask = f.FindPropertyRelative("TypeMask")?.intValue ?? 0,
+                        });
+                    }
+                    all.Add(list);
+                }
+            }
+        return all;
+    }
+
+    /// <summary>
+    /// Whether one of the project's bundles takes this texture (by the filters' rule); null when the project has no
+    /// build settings to tell.
+    /// </summary>
+    internal static bool? InModBundle(string assetPath, IList<List<BundleFilter>> settings)
+    {
+        if (settings == null || settings.Count == 0 || string.IsNullOrEmpty(assetPath)) return null;
+        foreach (var filters in settings)
+        {
+            bool taken = false;
+            foreach (var f in filters) if (f.Mode == 0 && (f.TypeMask & 1) != 0 && FilterCovers(f, assetPath)) taken = true;
+            foreach (var f in filters) if (f.Mode == 1 && (f.TypeMask & 1) != 0 && FilterCovers(f, assetPath)) taken = false;
+            foreach (var f in filters) if (f.Mode == 2 && (System.IO.Path.GetDirectoryName(assetPath) ?? "").Contains(f.SubString ?? "")) taken = false;
+            if (taken) return true;
+        }
+        return false;
+    }
+
+    // the filter's folder under Assets/, and every folder below it when Recursive
+    static bool FilterCovers(BundleFilter f, string assetPath)
+    {
+        string folder = ("Assets/" + (f.Directory ?? "")).Replace('\\', '/').TrimEnd('/');
+        string path = assetPath.Replace('\\', '/');
+        string directory = (System.IO.Path.GetDirectoryName(path) ?? "").Replace('\\', '/');
+        return f.Recursive ? path.StartsWith(folder + "/", StringComparison.OrdinalIgnoreCase) : string.Equals(directory, folder, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The folders the bundles take textures from, for the side strip ("Assets/Resources (and below)").</summary>
+    internal static string BundleTextureFolders(IList<List<BundleFilter>> settings)
+    {
+        var folders = new List<string>();
+        if (settings != null)
+            foreach (var filters in settings)
+                foreach (var f in filters)
+                    if (f.Mode == 0 && (f.TypeMask & 1) != 0)
+                    {
+                        string name = "Assets/" + f.Directory + (f.Recursive ? " (and below)" : "");
+                        if (!folders.Contains(name)) folders.Add(name);
+                    }
+        return string.Join(", ", folders);
+    }
     /// <summary>
     /// The two image entries of a technology's mapper that show its picture: the card on the tech screen, and the
     /// popup when it is researched. In all 214 of ENC's mappers they hold the same image. The third, "Picto", is the

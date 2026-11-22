@@ -359,6 +359,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         // reference path half typed lost them for good). They are not drawn and not written while it is missing;
         // Save says so, Revert discards them.
         _art.Clear();
+        _bundleFilters = null; _imageRefusal = "";
         // A focused X / Y field would keep showing what was typed before the reload, and the next key would build on
         // it. Reload also runs outside OnGUI (undo), where clearing the focus does not hold: the next draw does it.
         _dropFocus = true;
@@ -412,8 +413,16 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     bool Hidden(TechTreeData.Node n) => !TechTreeData.OnTechScreen(EffVisibility(n));
     /// <summary>The title as stored (staged or saved): the text, or a "%..." key.</summary>
     string EffTitle(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Title != null ? p.Title : (n.TitleKey ?? "");
-    /// <summary>The title as shown: a staged one as typed, the saved one as the game shows it.</summary>
-    internal string EffLabel(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Title != null ? p.Title : (n.Label ?? n.Name ?? "");
+    /// <summary>The title as the game would show it: a staged "%..." key translated where the project knows it.</summary>
+    internal string EffLabel(TechTreeData.Node n)
+    {
+        if (!(_pending.TryGetValue(n.Name, out var p) && p.Title != null)) return n.Label ?? n.Name ?? "";
+        return p.Title.StartsWith("%", StringComparison.Ordinal) && TechTreeData.TryLocalize(p.Title, out var text) ? text : p.Title;
+    }
+    /// <summary>What the Title field shows: the staged text, else the saved title as the game shows it (a key translated).</summary>
+    internal string TitleShown(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Title != null ? p.Title : (n.Label ?? "");
+    /// <summary>What the Description box shows: the staged text, else the saved description as the game shows it.</summary>
+    internal string DescriptionShown(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Description != null ? p.Description : (n.Description ?? "");
     string EffDescription(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Description != null ? p.Description : (n.BaseDescription ?? "");
     /// <summary>The card's image as a Unity GUID text (staged or saved); null when none is named.</summary>
     internal string EffImage(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Image != null ? p.Image : n.ArtGuid;
@@ -1326,7 +1335,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 foreach (var pr in prereqs.ToList())
                 {
                     EditorGUILayout.BeginHorizontal();
-                    string label = _byName.TryGetValue(pr, out var s) ? $"{s.Label}" : pr;
+                    string label = _byName.TryGetValue(pr, out var s) ? EffLabel(s) : pr;
                     if (GUILayout.Button(label, EditorStyles.miniButton) && _byName.TryGetValue(pr, out var sn))
                     { _selected = sn; GUIUtility.keyboardControl = 0; EditorGUIUtility.PingObject(sn.Asset); Selection.activeObject = sn.Asset; }
                     using (new EditorGUI.DisabledScope(!_editMode))
@@ -1435,26 +1444,29 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 
     // ── The card's title, description and image ──────────────────────────────
     GUIStyle _descriptionStyle;
+    string _imageRefusal = "";                              // why the last picked picture was refused
+    List<List<TechTreeData.BundleFilter>> _bundleFilters;   // the project's bundle filters, read when first needed after a Reload
 
     void DrawCardTexts(TechTreeData.Node n, float width)
     {
         EditorGUILayout.BeginHorizontal();
         GUILayout.Label(new GUIContent("Title", "The technology's name as the game shows it, on its card and everywhere else. Save writes it into the technology's UI mapper (Title), the same in every language."), GUILayout.Width(54));
-        string title = EditorGUILayout.TextField(EffTitle(n));
+        string title = EditorGUILayout.TextField(TitleShown(n));
         EditorGUILayout.EndHorizontal();
-        if (title != EffTitle(n)) SetTitle(n, title);
+        if (title != TitleShown(n)) SetTitle(n, title);
 
         GUILayout.Label(new GUIContent("Description", "The text the game shows in the technology's tooltip. Save writes it into the technology's UI mapper (Description), the same in every language."));
         if (_descriptionStyle == null) _descriptionStyle = new GUIStyle(EditorStyles.textArea) { wordWrap = true };
         // as high as its text (the real descriptions are 3 to 6 lines at this width), within 3 and 16 lines
-        string shownDescription = EffDescription(n);
+        string shownDescription = DescriptionShown(n);
         float lines = _descriptionStyle.lineHeight > 0 ? _descriptionStyle.lineHeight : 13f;
         float descriptionHeight = Mathf.Clamp(_descriptionStyle.CalcHeight(new GUIContent(shownDescription), width - 4f) + lines, 3f * lines + 6f, 16f * lines + 6f);   // + one line: the measure ran one short in the strip
         string description = EditorGUILayout.TextArea(shownDescription, _descriptionStyle, GUILayout.Height(descriptionHeight));
-        if (description != EffDescription(n)) SetDescription(n, description);
+        if (description != shownDescription) SetDescription(n, description);
 
-        string textNote = TextNote(n.TitleKey, n.Label, EffTitle(n), n.BaseDescription, EffDescription(n));
-        if (textNote != "") EditorGUILayout.HelpBox(textNote, MessageType.Info);
+        _pending.TryGetValue(n.Name, out var staged);
+        string textNote = TextNote(n.TitleKey, staged?.Title, n.BaseDescription, staged?.Description, out bool textWarning);
+        if (textNote != "") EditorGUILayout.HelpBox(textNote, textWarning ? MessageType.Warning : MessageType.Info);
 
         // the image: a picture of the project, or the image of another technology (the game's own ones too)
         string image = EffImage(n);
@@ -1468,37 +1480,90 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             var others = _nodes.Where(o => o != n && !string.IsNullOrEmpty(EffImage(o))).ToList();
             new TechPickerDropdown(new AdvancedDropdownState(), others, name => { if (_byName.TryGetValue(name, out var other)) SetImage(n, EffImage(other)); }, "Image of").Show(GUILayoutUtility.GetLastRect());
         }
+        bool imageStaged = _pending.TryGetValue(n.Name, out var pi) && pi.Image != null;
+        // back to the saved image: the only way back to one of the game's own, which neither the field nor
+        // "Same as…" can offer when no other technology has it (review B: 94 of ENC's technologies)
+        using (new EditorGUI.DisabledScope(!imageStaged))
+            if (GUILayout.Button(new GUIContent("Own", "Back to the technology's saved image."), EditorStyles.miniButton, GUILayout.Width(40))) ClearImage(n);
         EditorGUILayout.EndHorizontal();
-        if (picked != current && picked != null) SetImage(n, AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(picked)));
-        string imageNote = ImageNote(image, imagePath, image != n.ArtGuid, CommonImageFolder());
-        if (imageNote != "") EditorGUILayout.LabelField(imageNote, EditorStyles.wordWrappedMiniLabel);
+        if (picked == null && current != null && imageStaged) ClearImage(n);   // "None" in the field: back to the saved image
+        else if (picked != null && picked != current)
+        {
+            string refusal = ImageRefusal(picked);
+            if (refusal == null) { SetImage(n, AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(picked))); _imageRefusal = ""; }
+            else _imageRefusal = refusal;
+        }
+        if (_imageRefusal != "") EditorGUILayout.HelpBox(_imageRefusal, MessageType.Warning);
+        if (_bundleFilters == null) _bundleFilters = TechTreeData.ModBundleFilters();
+        string imageNote = ImageNote(image, imagePath, image != n.ArtGuid, TechTreeData.InModBundle(imagePath, _bundleFilters), TechTreeData.BundleTextureFolders(_bundleFilters), CommonImageFolder(), out bool imageWarning);
+        if (imageNote != "")
+        {
+            if (imageWarning) EditorGUILayout.HelpBox(imageNote, MessageType.Warning);
+            else EditorGUILayout.LabelField(imageNote, EditorStyles.wordWrappedMiniLabel);
+        }
     }
 
     /// <summary>
-    /// What the side strip says about the texts. A title or description that is a localization key ("%...") is
-    /// shown translated; one typed here replaces the key with the text itself, the same in every language.
+    /// What the side strip says about the texts. 88 of ENC's titles and 86 of its descriptions are localization keys
+    /// ("%..."), shown in the fields translated; a text typed there replaces the key, and the game then shows that
+    /// text in every language. A typed text that starts with "%" is taken by the game as a key (TextUtils.Localize
+    /// looks at the first character only): said, and a warning when the project knows no such key. `stagedTitle`,
+    /// `stagedDescription`: null when not changed. `warning` = something the game would show wrongly.
     /// </summary>
-    internal static string TextNote(string baseTitle, string shownTitle, string title, string baseDescription, string description)
+    internal static string TextNote(string baseTitle, string stagedTitle, string baseDescription, string stagedDescription, out bool warning)
     {
+        warning = false;
         var notes = new List<string>();
-        if (title.Trim() == "") notes.Add("The title is empty: the game would show no name.");
-        bool titleKey = baseTitle != null && baseTitle.StartsWith("%", StringComparison.Ordinal), descriptionKey = baseDescription != null && baseDescription.StartsWith("%", StringComparison.Ordinal);
-        if (titleKey && title == baseTitle) notes.Add("The title is the localization key " + baseTitle + ", shown as \"" + shownTitle + "\". A title typed here replaces the key: the game then shows that text in every language.");
-        else if (titleKey) notes.Add("This replaces the localization key " + baseTitle + " with the text itself, the same in every language.");
-        if (descriptionKey && description != baseDescription) notes.Add("The description replaces the localization key " + baseDescription + " with the text itself, the same in every language.");
+        if (stagedTitle != null && stagedTitle.Trim() == "") { notes.Add("The title is empty: the game would show no name."); warning = true; }
+        foreach (var (what, saved, staged) in new[] { ("title", baseTitle, stagedTitle), ("description", baseDescription, stagedDescription) })
+        {
+            if (staged != null && staged.StartsWith("%", StringComparison.Ordinal))
+            {
+                if (TechTreeData.TryLocalize(staged, out string shown))
+                    notes.Add("The " + what + " starts with %, so the game takes it as the localization key " + staged + " (\"" + shown + "\").");
+                else
+                {
+                    notes.Add("The " + what + " starts with %, so the game takes it as a localization key, and the project knows no key " + staged + ": the game would show the key itself and log an error (with a { or } in it, the screen can fail).");
+                    warning = true;
+                }
+            }
+            else if (saved != null && saved.StartsWith("%", StringComparison.Ordinal))
+                notes.Add(staged == null
+                    ? "The " + what + " is the localization key " + saved + ", shown here translated. Typing replaces the key: the game then shows the typed text in every language."
+                    : "This replaces the localization key " + saved + " with the typed " + what + ", the same in every language (the game's translations of it are no longer used).");
+        }
         return string.Join(" ", notes);
+    }
+
+    /// <summary>Why a picked object cannot be a technology's image; null when it can (a picture file of its own).</summary>
+    internal static string ImageRefusal(UnityEngine.Object picked)
+    {
+        if (picked == null) return null;
+        string path = AssetDatabase.GetAssetPath(picked);
+        if (string.IsNullOrEmpty(path)) return "That texture is not a file of the project.";
+        if (AssetDatabase.IsSubAsset(picked) || AssetDatabase.GetMainAssetTypeAtPath(path) != typeof(Texture2D))
+            return "That texture is part of another file (" + System.IO.Path.GetFileName(path) + "): the game finds an image by its file, so pick a picture file.";
+        return null;
     }
 
     /// <summary>
     /// What the side strip says about the image. `changed` = it is a staged one. `commonFolder` = where most of the
     /// project's technology pictures are, said when a picked picture is elsewhere ("" to say nothing).
     /// </summary>
-    internal static string ImageNote(string guid, string path, bool changed, string commonFolder)
+    internal static string ImageNote(string guid, string path, bool changed, bool? inBundle, string bundleFolders, string commonFolder, out bool warning)
     {
+        warning = false;
         if (string.IsNullOrEmpty(guid)) return "No image is set.";
         string what = !string.IsNullOrEmpty(path) ? System.IO.Path.GetFileName(path) : "one of the game's own images";
         string note = changed ? "New image (staged): " + what + "." : "";
-        if (!string.IsNullOrEmpty(path) && !string.IsNullOrEmpty(commonFolder) && System.IO.Path.GetDirectoryName(path).Replace('\\', '/') != commonFolder)
+        if (string.IsNullOrEmpty(path)) return note;
+        if (inBundle == false)
+        {
+            warning = true;
+            return (note == "" ? "" : note + " ") + "This picture is not in the mod's asset bundle: the project's build settings take pictures only from "
+                   + (bundleFolders != "" ? bundleFolders : "no folder") + ". The game would show a placeholder; move the picture there first.";
+        }
+        if (inBundle == null && !string.IsNullOrEmpty(commonFolder) && System.IO.Path.GetDirectoryName(path).Replace('\\', '/') != commonFolder)
             note += (note == "" ? "" : " ") + "The project's other technology pictures are in " + commonFolder + ".";
         return note;
     }
@@ -1516,18 +1581,32 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         return folders.Count == 0 ? "" : folders.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key, StringComparer.Ordinal).First().Key;
     }
 
+    // Windows line ends (a paste) are stored as the asset's text gives them back after a restart: one "\n"
+    internal static string OneLineEnd(string text) => (text ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
+
     void SetTitle(TechTreeData.Node n, string title)
     {
+        title = OneLineEnd(title);
         var p = Stage(n);
-        p.Title = title != (n.TitleKey ?? "") ? title : null;   // equal to base = no change
+        // equal to the saved title as shown (a key's translation) or as stored (the key): no change, the key stays
+        p.Title = title != (n.Label ?? "") && title != (n.TitleKey ?? "") ? title : null;
         DropIfClean(n);
         Repaint();
     }
 
     void SetDescription(TechTreeData.Node n, string description)
     {
+        description = OneLineEnd(description);
         var p = Stage(n);
-        p.Description = description != (n.BaseDescription ?? "") ? description : null;
+        p.Description = description != (n.Description ?? "") && description != (n.BaseDescription ?? "") ? description : null;
+        DropIfClean(n);
+        Repaint();
+    }
+
+    void ClearImage(TechTreeData.Node n)
+    {
+        if (!_pending.TryGetValue(n.Name, out var p)) return;
+        p.Image = null;
         DropIfClean(n);
         Repaint();
     }
