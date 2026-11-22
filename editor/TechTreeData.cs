@@ -34,8 +34,10 @@ public static class TechTreeData
     public class Node
     {
         public string Name;        // asset name, e.g. "Technology_Era1_01"
-        public string TitleKey;    // raw "%...Title"
+        public string TitleKey;    // the mapper's Title as stored: a "%...Title" localization key, or (all of ENC's) the text itself
         public string Label;       // resolved display text (falls back to key/name)
+        public string BaseDescription = "";   // the mapper's Description as stored (a "%..." key or the text)
+        public string Description = "";       // resolved display text of it
         public string Era;         // EraReference name, for grouping/tinting
         public string Tier;        // TechnologyTier enum
         // What the era decides in the game besides the separators (review of 2026-11-22, DepartmentOfScience):
@@ -165,10 +167,12 @@ public static class TechTreeData
                 node.BaseX    = GetInt(mapper, "TechTreeX");
                 node.BaseY    = GetInt(mapper, "TechTreeY");
                 node.TitleKey = GetString(mapper, "Title");
+                node.BaseDescription = GetString(mapper, "Description");
                 node.ArtPath  = ArtPathOf(mapper, out node.ArtNamed, out node.ArtGuid);
             }
             node.Label = !string.IsNullOrEmpty(node.TitleKey) && loc.TryGetValue(node.TitleKey, out var t)
                 ? t : (string.IsNullOrEmpty(node.TitleKey) ? name : node.TitleKey);
+            node.Description = !string.IsNullOrEmpty(node.BaseDescription) && loc.TryGetValue(node.BaseDescription, out var desc) ? desc : node.BaseDescription;
 
             var def = node.ActiveDef;
             node.BasePrereqs = Array.Empty<string>();
@@ -445,6 +449,81 @@ public static class TechTreeData
             if (!AssetDatabase.IsValidFolder(next)) AssetDatabase.CreateFolder(cur, parts[i]);
             cur = next;
         }
+    }
+
+    // ── The card's texts and image (2026-11-22) ──────────────────────────────
+    /// <summary>
+    /// The two image entries of a technology's mapper that show its picture: the card on the tech screen, and the
+    /// popup when it is researched. In all 214 of ENC's mappers they hold the same image. The third, "Picto", is the
+    /// small symbol (always one of the game's own in ENC) and is not touched.
+    /// </summary>
+    public static readonly string[] TechnologyImageKeys = { CardImageKey, "TechnologyPopupBackground" };
+
+    /// <summary>Writes the mapper's Title or Description (a string field): the text as the game shows it, in every language.</summary>
+    public static bool WriteText(UnityEngine.Object mapper, string field, string text)
+    {
+        var f = mapper?.GetType().GetField(field, ALL);
+        if (f == null || f.FieldType != typeof(string)) return false;
+        f.SetValue(mapper, text ?? "");
+        return true;
+    }
+
+    /// <summary>
+    /// A Unity GUID text as the four ints an Amplitude Guid stores (the reverse of AmplitudeGuidToUnity: each byte
+    /// low nibble first, the bytes of each int low to high). False for anything that is not 32 hex digits.
+    /// </summary>
+    internal static bool UnityGuidToAmplitude(string unityGuid, out int a, out int b, out int c, out int d)
+    {
+        a = b = c = d = 0;
+        if (unityGuid == null || unityGuid.Length != 32) return false;
+        var words = new int[4];
+        for (int w = 0; w < 4; w++)
+            for (int i = 0; i < 4; i++)
+            {
+                int low = HexDigit(unityGuid[w * 8 + i * 2]), high = HexDigit(unityGuid[w * 8 + i * 2 + 1]);
+                if (low < 0 || high < 0) return false;
+                words[w] |= ((high << 4) | low) << (8 * i);
+            }
+        a = words[0]; b = words[1]; c = words[2]; d = words[3];
+        return true;
+    }
+
+    static int HexDigit(char ch) =>
+        ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : ch >= 'A' && ch <= 'F' ? ch - 'A' + 10 : -1;
+
+    /// <summary>
+    /// Writes one image into a mapper's Images list under each of `keys`: the FIRST entry of a key (the one the game
+    /// and ImageOf read) gets the image; a key the list does not have gets an entry of its own at the end. Through the
+    /// serialized form, as ImageOf reads it. False when the GUID is not one, or the mapper has no Images list.
+    /// </summary>
+    public static bool WriteImage(UnityEngine.Object mapper, string[] keys, string unityGuid)
+    {
+        if (mapper == null || keys == null || !UnityGuidToAmplitude(unityGuid, out int a, out int b, out int c, out int d)) return false;
+        using (var so = new SerializedObject(mapper))
+        {
+            var images = so.FindProperty("Images");
+            if (images == null || !images.isArray) return false;
+            foreach (string key in keys)
+            {
+                SerializedProperty entry = null;
+                for (int i = 0; i < images.arraySize && entry == null; i++)
+                    if (images.GetArrayElementAtIndex(i).FindPropertyRelative("serializableKey")?.stringValue == key) entry = images.GetArrayElementAtIndex(i);
+                if (entry == null)
+                {
+                    images.arraySize++;
+                    entry = images.GetArrayElementAtIndex(images.arraySize - 1);
+                    var keyProperty = entry.FindPropertyRelative("serializableKey");
+                    if (keyProperty == null) return false;
+                    keyProperty.stringValue = key;
+                }
+                var guid = entry.FindPropertyRelative("Value")?.FindPropertyRelative("guid");
+                SerializedProperty pa = guid?.FindPropertyRelative("a"), pb = guid?.FindPropertyRelative("b"), pc = guid?.FindPropertyRelative("c"), pd = guid?.FindPropertyRelative("d");
+                if (pa == null || pb == null || pc == null || pd == null) return false;
+                pa.intValue = a; pb.intValue = b; pc.intValue = c; pd.intValue = d;
+            }
+            so.ApplyModifiedPropertiesWithoutUndo();   // a Save is not part of Undo (see TechTreeWindow.CommitChanges)
+        }
+        return true;
     }
 
     public static void WritePosition(UnityEngine.Object mapper, int x, int y)

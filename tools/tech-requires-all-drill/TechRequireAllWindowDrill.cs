@@ -66,18 +66,21 @@ public static class TechRequireAllWindowDrill
     }
     // T's card artwork: a file of its own (the unlock row's check asks whether THE ROW loaded its image), opaque red,
     // so that a pixel says whether the artwork or something of the card is on top
-    const string ArtPath = "Assets/Icons/drill_art.png";
-    static void MakeArt()
+    const string ArtPath = "Assets/Icons/drill_art.png", BluePath = "Assets/Icons/drill_blue.png";
+    static void MakeArt() { MakePicture(ArtPath, new Color32(255, 0, 0, 255)); MakePicture(BluePath, new Color32(0, 0, 255, 255)); }
+    static void MakePicture(string assetPath, Color32 colour)
     {
-        string file = Path.Combine(Path.GetDirectoryName(Application.dataPath), ArtPath);
+        string file = Path.Combine(Path.GetDirectoryName(Application.dataPath), assetPath);
         if (File.Exists(file)) return;
         Folder("Assets/Icons");
         var pixels = new Texture2D(8, 8, TextureFormat.RGBA32, false);
-        pixels.SetPixels32(Enumerable.Repeat(new Color32(255, 0, 0, 255), 64).ToArray());
+        pixels.SetPixels32(Enumerable.Repeat(colour, 64).ToArray());
         File.WriteAllBytes(file, pixels.EncodeToPNG());
         UnityEngine.Object.DestroyImmediate(pixels);
-        AssetDatabase.ImportAsset(ArtPath);
+        AssetDatabase.ImportAsset(assetPath);
     }
+    static string BlueGuid => AssetDatabase.AssetPathToGUID(BluePath);
+    static bool Blue(Color32 c) => c.b > 180 && c.r < 70 && c.g < 70;
     static Func<List<TechTreeData.Era>> productionEras;   // the window's own reader, before the drill replaced it
     static List<TechTreeData.Era> DrillEras() => Enumerable.Range(0, 4).Select(i => new TechTreeData.Era { Name = "Era" + i, Index = i }).ToList();
     // the viewer's pixels as its last repaint left them (TechTreeWindow.AfterCanvasDrawn), rows from the bottom
@@ -170,7 +173,13 @@ public static class TechRequireAllWindowDrill
         node.VanillaDef = Asset<TechTreeDrillDefinition>(RefDefs + "/" + name + ".asset");
         node.VanillaMapper = Asset<TechTreeDrillMapper>(RefMaps + "/" + name + ".asset");
         var def = node.ActiveDef as TechTreeDrillDefinition; var map = node.ActiveMapper as TechTreeDrillMapper;
-        if (map != null) { node.BaseX = map.TechTreeX; node.BaseY = map.TechTreeY; }
+        if (map != null)
+        {
+            node.BaseX = map.TechTreeX; node.BaseY = map.TechTreeY;
+            node.TitleKey = map.Title; if (!string.IsNullOrEmpty(map.Title)) node.Label = map.Title;
+            node.BaseDescription = node.Description = map.Description ?? "";
+            node.ArtPath = TechTreeData.ImageOf(map, new[] { TechTreeData.CardImageKey }, null, out node.ArtNamed, out node.ArtGuid);
+        }
         if (def != null) { node.BasePrereqs = NamesOf(def).ToArray(); node.BaseVisibility = TechTreeData.ReadVisibility(def); node.Era = TechTreeData.ReadEra(def); }
         return node;
     }
@@ -205,7 +214,7 @@ public static class TechRequireAllWindowDrill
             tree[1].BaseX = 8; tree[1].BaseY = -2; tree[2].BaseX = 16; tree[2].BaseY = 4; tree[3].BaseX = 16; tree[3].BaseY = 9;
             // eras: A and B in the first, T and S in the second; T's card has an artwork (a file of its own)
             tree[0].Era = "Era1"; tree[1].Era = "Era1"; tree[2].Era = "Era2"; tree[3].Era = "Era2";
-            tree[2].ArtPath = ArtPath; tree[2].ArtNamed = true;
+            tree[2].ArtPath = ArtPath; tree[2].ArtNamed = true; tree[2].ArtGuid = AssetDatabase.AssetPathToGUID(ArtPath);
             // T's card carries an icon row: a project image, an entry with a blank icon, one the game does not draw,
             // more entries than fit, and one only another culture gets
             tree[2].Unlocks = new List<TechTreeUnlocks.Unlock>
@@ -512,6 +521,7 @@ public static class TechRequireAllWindowDrill
                     VCall("SetPosition", N(T), -3, 4);
                     Check("position: a typed negative X is floored at 0 too", (int)VCall("EffX", N(T)) == 0 && (int)VCall("EffY", N(T)) == 4);
                     VCall("SetPosition", N(T), 20, 6); VCall("SetVisibility", N(T), 0); VCall("SetRule", N(T), true); VCall("RemovePrereq", N(T), "Technology_B"); VCall("SetEra", N(T), "Era3");
+                    VCall("SetTitle", N(T), "Steam Power"); VCall("SetDescription", N(T), "Makes\nsteam."); VCall("SetImage", N(T), BlueGuid);
                     var fullTree = TechTreeWindow.BuildTreeImpl;
                     TechTreeWindow.BuildTreeImpl = _ => fullTree(null).Where(n => n.Name != T).ToList();
                     VCall("Reload", true, false);
@@ -535,16 +545,19 @@ public static class TechRequireAllWindowDrill
                     VCall("Reload", true, false);
                     Check("a script reload keeps every kind of staged edit, the selection and the view",
                           Staged == 1 && (int)VCall("EffX", N(T)) == 20 && (int)VCall("EffY", N(T)) == 6 && (int)VCall("EffVisibility", N(T)) == 0 && All(T) && Prereqs(T).SequenceEqual(new[] { "Technology_A" })
-                          && (string)VCall("EffEra", N(T)) == "Era3"
+                          && (string)VCall("EffEra", N(T)) == "Era3" && viewer.EffLabel(N(T)) == "Steam Power" && (string)VCall("EffDescription", N(T)) == "Makes\nsteam." && viewer.EffImage(N(T)) == BlueGuid
                           && ReferenceEquals(VGet<TechTreeData.Node>("_selected"), N(T)) && VGet<Vector2>("_pan") == panWas && VGet<float>("_zoom") == zoomWas,
                           "staged " + Staged + " selected " + (VGet<TechTreeData.Node>("_selected")?.Name ?? "none") + " pan " + VGet<Vector2>("_pan") + " zoom " + VGet<float>("_zoom"));
                     VCall("CommitChanges");   // the rule is written; position, prerequisites and visibility have no asset here and stay
                     Check("save: the parts without an asset are counted as skipped in the Save line, the era with them",
-                          LastSave.Contains(" · 4 skipped (no writable target"), LastSave);
+                          LastSave.Contains(" · 7 skipped (no writable target"), LastSave);
                     Check("save: a saved rule switch leaves the staged set, the parts without an asset stay",
                           Deployed == T && Staged == 1 && (int)VCall("EffX", N(T)) == 20 && (int)VCall("EffVisibility", N(T)) == 0 && (string)VCall("EffEra", N(T)) == "Era3"
                           && VGet<HashSet<string>>("_requireAll").Contains(T), Deployed + " staged " + Staged);
                     VCall("SetPosition", N(T), 16, 4); VCall("SetVisibility", N(T), -1); VCall("AddPrereq", N(T), "Technology_B");
+                    Check("    the card shows the staged title; typed back to the saved title, description and image, they are no change",
+                          viewer.EffLabel(N(T)) == "Steam Power" && N(T).Label == "Two Parents" && viewer.CardTitle(N(T)) == "STEAM POWER", viewer.CardTitle(N(T)));
+                    VCall("SetTitle", N(T), ""); VCall("SetDescription", N(T), ""); VCall("SetImage", N(T), N(T).ArtGuid);
                     N(T).Tier = "Tier2";
                     Check("    the era alone is still staged, and it is the era the card shows", Staged == 1 && (string)VCall("EffEra", N(T)) == "Era3" && N(T).Era == "Era2" && viewer.CardEraTier(N(T)) == "E3 · T2", "staged " + Staged + " card " + viewer.CardEraTier(N(T)));
                     VCall("SetEra", N(T), "Era2");
@@ -678,7 +691,11 @@ public static class TechRequireAllWindowDrill
                     const string M = "Technology_M";
                     Folder(DbDefs); Folder(DbMaps); Folder(RefDefs); Folder(RefMaps);
                     NewAsset<TechTreeDrillDefinition>(DbDefs + "/" + M + ".asset", d => { d.TechnologyPrerequisite.SerializableTechnologyNames = new[] { "Technology_A", "Technology_B" }; d.EraReference = new TechTreeDrillTypes.Reference("Era1"); });
-                    NewAsset<TechTreeDrillMapper>(DbMaps + "/" + M + ".asset", m => { m.TechTreeX = 24; m.TechTreeY = 2; });
+                    NewAsset<TechTreeDrillMapper>(DbMaps + "/" + M + ".asset", m =>
+                    {
+                        m.TechTreeX = 24; m.TechTreeY = 2; m.Title = "Em"; m.Description = "Em's text.";
+                        m.Images = new List<TechTreeDrillTypes.DrillImage> { Image("TechnologyPopupBackground", AssetDatabase.AssetPathToGUID(ArtPath)), Image("Picto", "0123456789abcdef0123456789abcdef"), Image("TechnologyScreenItemBackground", AssetDatabase.AssetPathToGUID(ArtPath)) };
+                    });
                     foreach (string reference in new[] { "Technology_R", "Technology_Q" })
                     {
                         NewAsset<TechTreeDrillDefinition>(RefDefs + "/" + reference + ".asset", d => d.TechnologyPrerequisite.SerializableTechnologyNames = new[] { "Technology_A", "Technology_B" });
@@ -820,7 +837,7 @@ public static class TechRequireAllWindowDrill
                           (int)VCall("EffX", N(M)) == 99 && warnings.Count(w => w.Contains("Undo / Redo changed 1 technology in memory (Em)")) == warnedBefore + 1, string.Join(" | ", warnings.Where(w => w.Contains("Undo"))));
                     mMap.TechTreeX = 20;
                     VCall("OnUndoRedo");
-                    Check("    and the wording for several", TechTreeWindow.UndoNote(3, "Em").StartsWith("Undo / Redo changed 3 technologies in memory (Em, ...): position, era, prerequisites or visibility are now different from the file on disk"));
+                    Check("    and the wording for several", TechTreeWindow.UndoNote(3, "Em").StartsWith("Undo / Redo changed 3 technologies in memory (Em, ...): position, era, title, description, image, prerequisites or visibility are now different from the file on disk"));
                     // an undo elsewhere that changes only the era is one of those too
                     int eraWarned = warnings.Count(w => w.Contains("Undo / Redo changed 1 technology in memory (Em)"));
                     mDef.EraReference = new TechTreeDrillTypes.Reference("Era0");
@@ -828,6 +845,43 @@ public static class TechRequireAllWindowDrill
                     Check("    an undo that changes only the era is said too", N(M).Era == "Era0" && warnings.Count(w => w.Contains("Undo / Redo changed 1 technology in memory (Em)")) == eraWarned + 1);
                     mDef.EraReference = new TechTreeDrillTypes.Reference("Era2");
                     VCall("OnUndoRedo");
+
+                    // ---- the card's title, description and image, saved into the mapper (2026-11-22) ----
+                    Check("assets: the title, the description and the image are read from the mapper",
+                          N(M).Label == "Em" && N(M).TitleKey == "Em" && N(M).BaseDescription == "Em's text." && N(M).ArtPath == ArtPath && N(M).ArtGuid == AssetDatabase.AssetPathToGUID(ArtPath));
+                    VCall("SetTitle", N(M), "Em Renamed"); VCall("SetDescription", N(M), "A new\nline."); VCall("SetImage", N(M), BlueGuid);
+                    VCall("CommitChanges");
+                    mMap = Asset<TechTreeDrillMapper>(DbMaps + "/" + M + ".asset");
+                    string mapFile = File.ReadAllText(Path.Combine(Path.GetDirectoryName(Application.dataPath), DbMaps + "/" + M + ".asset"));
+                    TechTreeData.UnityGuidToAmplitude(BlueGuid, out int ba, out int bb, out int bc, out int bd);
+                    bool IsBlue(TechTreeDrillTypes.DrillImage i) => i.Value.guid.a == ba && i.Value.guid.b == bb && i.Value.guid.c == bc && i.Value.guid.d == bd;
+                    var picto = Image("Picto", "0123456789abcdef0123456789abcdef");
+                    Check("save into assets: the title and the description are in the mapper; the image in its card and popup entries, in their places; the Picto untouched",
+                          mMap.Title == "Em Renamed" && mMap.Description == "A new\nline." && mMap.Images.Count == 3 && mMap.Images[0].serializableKey == "TechnologyPopupBackground" && IsBlue(mMap.Images[0])
+                          && mMap.Images[1].serializableKey == "Picto" && mMap.Images[1].Value.guid.a == picto.Value.guid.a && mMap.Images[1].Value.guid.d == picto.Value.guid.d
+                          && mMap.Images[2].serializableKey == "TechnologyScreenItemBackground" && IsBlue(mMap.Images[2])
+                          && mapFile.Contains("Title: Em Renamed") && mapFile.Split(new[] { "a: " + ba + "\n" }, StringSplitOptions.None).Length - 1 == 2,
+                          mMap.Title + " | " + string.Join(", ", mMap.Images.Select(i => i.serializableKey + "=" + i.Value.guid.a)) + " | blue a " + ba);
+                    Check("save: the Save line counts the texts and the image", LastSave.Contains(", 2 title / description changes, 1 image change"), LastSave);
+                    Check("save: the reload reads them back, nothing stays staged, the card shows them",
+                          Staged == 0 && N(M).Label == "Em Renamed" && N(M).BaseDescription == "A new\nline." && N(M).ArtGuid == BlueGuid && N(M).ArtPath == BluePath && viewer.EffLabel(N(M)) == "Em Renamed",
+                          "staged " + Staged + " label " + N(M).Label + " art " + N(M).ArtPath);
+                    Undo.PerformUndo();
+                    mMap = Asset<TechTreeDrillMapper>(DbMaps + "/" + M + ".asset");
+                    Check("undo after that save takes nothing of it back", mMap.Title == "Em Renamed" && IsBlue(mMap.Images[2]) && N(M).Label == "Em Renamed");
+                    // the writers on their own
+                    var lone = ScriptableObject.CreateInstance<TechTreeDrillMapper>();
+                    lone.Images = new List<TechTreeDrillTypes.DrillImage> { picto };
+                    bool wrote = TechTreeData.WriteImage(lone, TechTreeData.TechnologyImageKeys, BlueGuid);
+                    Check("image writer: a mapper without the card's or the popup's entry gets them, after the others; the others stay",
+                          wrote && string.Join(",", lone.Images.Select(i => i.serializableKey)) == "Picto,TechnologyScreenItemBackground,TechnologyPopupBackground"
+                          && lone.Images[0].Value.guid.a == picto.Value.guid.a && IsBlue(lone.Images[1]) && IsBlue(lone.Images[2]),
+                          string.Join(",", lone.Images.Select(i => i.serializableKey)));
+                    var plain = ScriptableObject.CreateInstance<TechTreeDrillPlain>();
+                    Check("image and text writers refuse what they cannot write: no GUID, no Images list, no such text field, a field that is no text",
+                          !TechTreeData.WriteImage(lone, TechTreeData.TechnologyImageKeys, "not a guid") && !TechTreeData.WriteImage(plain, TechTreeData.TechnologyImageKeys, BlueGuid)
+                          && !TechTreeData.WriteText(plain, "Title", "x") && !TechTreeData.WriteText(lone, "TechTreeX", "x") && TechTreeData.WriteText(lone, "Title", "Lone") && lone.Title == "Lone");
+                    UnityEngine.Object.DestroyImmediate(lone); UnityEngine.Object.DestroyImmediate(plain);
                     break;
                 }
                 case 12:
@@ -1104,7 +1158,7 @@ public static class TechRequireAllWindowDrill
                     NewAsset<TechTreeDrillTypes.LandUnitDefinition>("Assets/Databases/Idx/Idx_C.asset", c => c.Level = 1);
                     NewAsset<TechTreeDrillTypes.ResourceDefinition>("Assets/Elsewhere/Idx_Res.asset", r => { });
                     NewAsset<TechTreeDrillTypes.CostModifierDefinition>("Assets/Elsewhere/Idx_Cost.asset", c => { });
-                    NewAsset<TechTreeDrillMapper>("Assets/Elsewhere/Idx_Plain.asset", m => { });   // no Images list: not a UI mapper
+                    NewAsset<TechTreeDrillPlain>("Assets/Elsewhere/Idx_Plain.asset", m => { });   // no Images list: not a UI mapper
                     AssetDatabase.SaveAssets(); AssetDatabase.Refresh();
                     var built = TechTreeUnlocks.BuildIndex("Assets/VanillaReference");
                     string TitleIn(string name) => built.Mappers.TryGetValue(name, out var found) ? ((TechTreeDrillTypes.DrillMapper)found).Title : "(none)";
@@ -1279,6 +1333,30 @@ public static class TechRequireAllWindowDrill
                           TechTreeWindow.ExclusiveNote("Era6") == "Exclusive to its era: an empire can research it only while the empire's technological era is no later than Era6. Moving it to an earlier era shortens that time."
                           && TechTreeWindow.ExclusiveNote("").Contains("no later than the technology's era."));
 
+                    // ---- the card's texts and image: the GUID conversion, the notes ----
+                    // A real pair of the ENC project: Assets/Resources/Images/diplomat512.png (its .meta) and the image of
+                    // Technology_Era1_Diplomacy's UI mapper (TechnologyUIMappersENC.asset).
+                    Check("image GUID: a Unity GUID as the four ints the game's mapper stores, and back",
+                          TechTreeData.UnityGuidToAmplitude("0be8caed819adde4d9be34986d03cb03", out int ga, out int gb, out int gc, out int gd)
+                          && ga == -559116624 && gb == 1323149592 && gc == -1992037475 && gd == 817639638 && TechTreeData.AmplitudeGuidToUnity(ga, gb, gc, gd) == "0be8caed819adde4d9be34986d03cb03"
+                          && TechTreeData.UnityGuidToAmplitude("0BE8CAED819ADDE4D9BE34986D03CB03", out int ua, out _, out _, out _) && ua == ga
+                          && !TechTreeData.UnityGuidToAmplitude("0be8caed819adde4d9be34986d03cb0", out _, out _, out _, out _) && !TechTreeData.UnityGuidToAmplitude("0be8caed819adde4d9be34986d03cbzz", out _, out _, out _, out _)
+                          && !TechTreeData.UnityGuidToAmplitude(null, out _, out _, out _, out _),
+                          ga + "," + gb + "," + gc + "," + gd);
+                    Check("title note: nothing for a typed title; an empty one, a localization key kept or replaced, is said",
+                          TechTreeWindow.TextNote("Writing", "Writing", "Writing", "Text", "Text") == ""
+                          && TechTreeWindow.TextNote("Writing", "Writing", " ", "", "") == "The title is empty: the game would show no name."
+                          && TechTreeWindow.TextNote("%TechWritingTitle", "Writing", "%TechWritingTitle", "", "").StartsWith("The title is the localization key %TechWritingTitle, shown as \"Writing\".")
+                          && TechTreeWindow.TextNote("%TechWritingTitle", "Writing", "Scribes", "", "") == "This replaces the localization key %TechWritingTitle with the text itself, the same in every language."
+                          && TechTreeWindow.TextNote("A", "A", "A", "%Desc", "New").Contains("replaces the localization key %Desc"),
+                          TechTreeWindow.TextNote("%TechWritingTitle", "Writing", "%TechWritingTitle", "", ""));
+                    Check("image note: what the image is, staged or not, and where the project's other technology pictures are",
+                          TechTreeWindow.ImageNote("", "", false, "") == "No image is set." && TechTreeWindow.ImageNote(BlueGuid, "Assets/Icons/drill_blue.png", true, "Assets/Icons") == "New image (staged): drill_blue.png."
+                          && TechTreeWindow.ImageNote(BlueGuid, "Assets/Icons/drill_blue.png", true, "Assets/Resources/Images") == "New image (staged): drill_blue.png. The project's other technology pictures are in Assets/Resources/Images."
+                          && TechTreeWindow.ImageNote("0123456789abcdef0123456789abcdef", "", true, "Assets/Resources/Images") == "New image (staged): one of the game's own images."
+                          && TechTreeWindow.ImageNote(BlueGuid, "Assets/Icons/drill_blue.png", false, "Assets/Icons") == "",
+                          TechTreeWindow.ImageNote(BlueGuid, "Assets/Icons/drill_blue.png", true, "Assets/Resources/Images"));
+
                     // ---- the artwork is on top of its card (the user, 2026-11-22: the title's line ran through the images).
                     // T's artwork is opaque red. The line under the title runs from the card's left to its right, so it
                     // passes where the artwork stands; a pixel there says which of the two was drawn last.
@@ -1337,6 +1415,15 @@ public static class TechRequireAllWindowDrill
                     var faint = Around(new Vector2(cardNow.x + 350f, cardNow.y - 30f), 1);   // the artwork over the bare canvas
                     Check("artwork: a switched-off technology's artwork is drawn faint", faint.Count == 9 && faint.All(c => c.r > 70 && c.r < 170 && c.g < 60), faint.Count > 0 ? faint[0].ToString() : "-");
                     VCall("SetVisibility", N("Technology_T"), -1);
+                    // a staged image is the one the card draws (blue where T's own is red)
+                    VCall("SetImage", N("Technology_T"), BlueGuid);
+                    TechTreeWindow.AfterCanvasDrawn = Capture;
+                    viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                    TechTreeWindow.AfterCanvasDrawn = null;
+                    var staged = Around(new Vector2(cardNow.x + 350f, cardNow.y - 30f), 1);
+                    Check("image: the card draws a staged image at once", staged.Count == 9 && staged.All(Blue), staged.Count > 0 ? staged[0].ToString() : "-");
+                    VCall("SetImage", N("Technology_T"), N("Technology_T").ArtGuid);
+                    Check("    picked back to its own image: no change staged", !(bool)VCall("IsEdited", N("Technology_T")));
                     VSet("_selected", null);
 
                     // The card's row must load its image ITSELF. The side strip asks for the selected technology's icons
@@ -1392,8 +1479,13 @@ public class TechTreeDrillDefinition : ScriptableObject
 // Stands in for the game's TechnologyUIMapper: the two fields a position is written to.
 public class TechTreeDrillMapper : ScriptableObject
 {
+    public string Title = "", Description = "";
+    public List<TechTreeDrillTypes.DrillImage> Images = new List<TechTreeDrillTypes.DrillImage>();
     public int TechTreeX, TechTreeY;
 }
+
+// An asset that is none of the game's: no Images list, no texts.
+public class TechTreeDrillPlain : ScriptableObject { }
 
 // Stand-ins of the game's shapes for TechTreeUnlocks, which reads by NAME: the effect types' names, the fields'
 // names, and for a UI mapper the serialized paths Images[i].serializableKey / .Value.guid.a..d. They keep the game's

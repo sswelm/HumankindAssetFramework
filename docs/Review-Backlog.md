@@ -1899,6 +1899,19 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   The second copy is refused and stays staged. ENC keeps both in collections, where this does not arise.
 - **The registry's "unreadable" verdict when its config folder cannot be resolved** leaves a `.corrupt` copy beside
   a healthy source (seen in passing by a round-2 reviewer; older than this PR, not looked into).
+## Tech Tree viewer — title, description, image, left open (2026-11-22)
+
+- **One text for every language.** A typed title or description is the text itself; translations are not edited,
+  and a localization key is replaced, not filled.
+- **The game's own pictures** can be chosen only through "Same as…" another technology that has one; there is no
+  browser of the game's atlases.
+- **A picked picture's import settings are not checked.** ENC's technology pictures are plain textures in
+  `Assets/Resources/Images`; the side strip says where the others are when a picture comes from elsewhere. Whether
+  the mod's build needs them there was not looked into.
+- **Picto** (the small symbol) cannot be changed.
+- **A reference-only technology's mapper** is copied into the mod path on its first save, as for a position; the
+  case where its definition's copy holds the same file name is refused there too (see the left-open list above).
+
 ## Tech Tree viewer — eras and separators, left open (2026-11-22)
 
 - **The era popup is not driven by any check**; the drill stages an era by `SetEra`, as the popup does.
