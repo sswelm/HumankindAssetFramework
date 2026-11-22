@@ -22,7 +22,8 @@ using UnityEngine;
 /// LOCAL CHANGES to this file (it came with the viewer from another modder's tool), 2026-11-21: Node.ArtPath /
 /// ArtNamed / ArtGuid / BaseVisibility, AmplitudeGuidToUnity, ArtPathOf, the Visibility helpers (OnTechScreen,
 /// VisibilityName, ReadVisibility, WriteVisibility), and EnsureWritable remembering its copy and refusing to copy
-/// over an existing asset.
+/// over an existing asset. 2026-11-22: Node.Unlocks (what the technology unlocks; read by TechTreeUnlocks.cs) and
+/// ImageOf, the image reader ArtPathOf was, for any image key.
 /// </summary>
 public static class TechTreeData
 {
@@ -73,6 +74,10 @@ public static class TechTreeData
         //  - Without the TechnologyScreen bit (1) the technology gets no card on the tech screen.
         // LOCAL CHANGE 2026-11-21.
         public int BaseVisibility = VisibilityAlways;
+
+        // What the technology unlocks, as the game's card shows it: one entry per effect of the definition that is
+        // not hidden (TechTreeUnlocks.Read). LOCAL CHANGE 2026-11-22.
+        public List<TechTreeUnlocks.Unlock> Unlocks = new List<TechTreeUnlocks.Unlock>();
 
         // Convenience: the asset to ping/select (prefer the def).
         public UnityEngine.Object Asset => ActiveDef ?? ActiveMapper;
@@ -133,6 +138,10 @@ public static class TechTreeData
         var names = new HashSet<string>(dbDef.Keys);
         names.UnionWith(refDef.Keys);
 
+        // what each technology unlocks: the project's UI mappers and constructibles by name, found in one more pass
+        var unlockIndex = TechTreeUnlocks.BuildIndex(refRoot);
+        Func<string, string> localize = text => !string.IsNullOrEmpty(text) && loc.TryGetValue(text, out var shown) ? shown : text;
+
         var nodes = new List<Node>();
         foreach (var name in names)
         {
@@ -167,6 +176,11 @@ public static class TechTreeData
                 node.Era  = ResolveReferenceName(f_era?.GetValue(def));
                 node.Tier = f_tier?.GetValue(def)?.ToString() ?? "";
                 node.BaseVisibility = ReadVisibility(def);
+                try { node.Unlocks = TechTreeUnlocks.Read(def, unlockIndex, localize); }
+                catch (Exception e)
+                {
+                    if (!unlockReadWarned) { unlockReadWarned = true; Debug.LogWarning("[TechTree] what a technology unlocks could not be read (said once; its card shows no icons): " + name + ": " + e.Message); }
+                }
             }
             nodes.Add(node);
         }
@@ -195,14 +209,27 @@ public static class TechTreeData
         return sb.ToString();
     }
 
-    static bool artReadWarned;
-    // Read through the SERIALIZED form (Images[i].serializableKey / .Value.guid.a..d), which is what the asset file
-    // holds: no dependence on the C# shape of the game's image list.
-    static string ArtPathOf(UnityEngine.Object mapper, out bool named, out string guid)
+    static bool artReadWarned, unlockReadWarned;
+
+    static string ArtPathOf(UnityEngine.Object mapper, out bool named, out string guid) =>
+        ImageOf(mapper, new[] { CardImageKey }, null, out named, out guid);
+
+    /// <summary>
+    /// One image of a UI mapper as a project asset path (null when the image is not in this project), with the image
+    /// as a Unity GUID text in `guid` for the game's atlases. `keys` are tried in order; then, when `anySuffix` is
+    /// given, any other key that ends in it (a constructible's "Variation1_Small" when it has no "Default_Small").
+    /// `named` = the mapper names an image for one of them. A key that is there with an empty reference counts as
+    /// not there, except that the FIRST entry of a key is the one that counts, as in the game.
+    /// Read through the SERIALIZED form (Images[i].serializableKey / .Value.guid.a..d), which is what the asset file
+    /// holds: no dependence on the C# shape of the game's image list.
+    /// </summary>
+    internal static string ImageOf(UnityEngine.Object mapper, string[] keys, string anySuffix, out bool named, out string guid)
     {
         named = false; guid = null;
         try
         {
+            var found = new Dictionary<string, string>(StringComparer.Ordinal);   // key -> GUID text, "" for an empty reference
+            var order = new List<string>();
             using (var so = new SerializedObject(mapper))
             {
                 var images = so.FindProperty("Images");
@@ -210,21 +237,29 @@ public static class TechTreeData
                 for (int i = 0; i < images.arraySize; i++)
                 {
                     var e = images.GetArrayElementAtIndex(i);
-                    if (e.FindPropertyRelative("serializableKey")?.stringValue != CardImageKey) continue;
+                    string key = e.FindPropertyRelative("serializableKey")?.stringValue;
+                    if (string.IsNullOrEmpty(key) || found.ContainsKey(key)) continue;
                     var g = e.FindPropertyRelative("Value")?.FindPropertyRelative("guid");
                     SerializedProperty a = g?.FindPropertyRelative("a"), b = g?.FindPropertyRelative("b"), c = g?.FindPropertyRelative("c"), d = g?.FindPropertyRelative("d");
-                    if (a == null || b == null || c == null || d == null) return null;
-                    if (a.intValue == 0 && b.intValue == 0 && c.intValue == 0 && d.intValue == 0) return null;   // no image set
-                    named = true;
-                    guid = AmplitudeGuidToUnity(a.intValue, b.intValue, c.intValue, d.intValue);
-                    string path = AssetDatabase.GUIDToAssetPath(guid);
-                    return string.IsNullOrEmpty(path) ? null : path;
+                    bool empty = a == null || b == null || c == null || d == null || (a.intValue == 0 && b.intValue == 0 && c.intValue == 0 && d.intValue == 0);
+                    found[key] = empty ? "" : AmplitudeGuidToUnity(a.intValue, b.intValue, c.intValue, d.intValue);
+                    order.Add(key);
                 }
             }
+            string chosen = null;
+            foreach (string key in keys)
+                if (found.TryGetValue(key, out string g1) && g1 != "") { chosen = g1; break; }
+            if (chosen == null && !string.IsNullOrEmpty(anySuffix))
+                foreach (string key in order)
+                    if (key.EndsWith(anySuffix, StringComparison.Ordinal) && found[key] != "") { chosen = found[key]; break; }
+            if (chosen == null) return null;
+            named = true; guid = chosen;
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            return string.IsNullOrEmpty(path) ? null : path;
         }
         catch (Exception e)
         {
-            if (!artReadWarned) { artReadWarned = true; Debug.LogWarning("[TechTree] a card's image could not be read from its mapper (said once; the cards show without artwork): " + e.Message); }
+            if (!artReadWarned) { artReadWarned = true; Debug.LogWarning("[TechTree] an image could not be read from its UI mapper (said once; it is not shown): " + e.Message); }
         }
         return null;
     }
@@ -295,7 +330,7 @@ public static class TechTreeData
         return reference.GetType().GetField("serializableElementName", ALL)?.GetValue(reference) as string ?? "";
     }
 
-    static Type FindType(string fullName)
+    internal static Type FindType(string fullName)
     {
         foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
         {

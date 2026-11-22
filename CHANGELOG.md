@@ -10,6 +10,27 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Tech Tree viewer: the cards show what a technology unlocks (2026-11-22).** Asked for by the user: "so we
+  actually know what gets unlocked by a tech". A technology's unlocks are the effects stored in its own
+  definition; `editor/TechTreeUnlocks.cs` follows the game's `DepartmentOfScience.UpdateTechnologyUnlockInfo`
+  effect by effect and `TechnologyUnlockItem` for the icon. Each card gets the row of icons the game's card has
+  (up to six), and the side strip lists the entries with their titles. An unlock that names several
+  constructibles shows the one every culture gets: the game takes the highest level among those valid for the
+  player's faction, and with no player that is the one whose faction prerequisite names no culture or names the
+  cultures it is not for.
+  - **On the real data** (a scratch Unity project with copies of ENC's assets and the game's types, compared with
+    an independent reading of the asset text): 216 technologies, the same entries per technology and effect
+    (366 constructible unlocks, 94 bonuses, 19 cost changes, 11 fame gains, 8 resources, 7 actions, 5 starting
+    packages, 1 prohibition, 1 battle ability). Every constructible unlock has an icon: 172 files of the project,
+    194 from the game's atlases. Of the other 146 entries 145 have one; one action has no UI mapper under its
+    name. 55 unlocks name several constructibles, and the reader's pick matches the rule in all 55. The first
+    run did not: it took "no culture named" as the test, and the base Harbour, which names the four cultures it
+    is NOT for, lost to the Swahili harbour. The tree's build went from about 0.25 s to 0.39 s (2.5 s the first
+    time).
+  - **Checked:** 14 drill checks on stand-ins (147 in all), five planted defects caught.
+  - **Not checked:** how the icons look. No test reads a pixel and nobody has seen the row yet. The icons of
+    bonuses, resources and actions are stored as distance fields and are drawn as they are, so they will look
+    soft; the game draws them with a shader this window does not have.
 - **Tech Tree viewer: shift everything right of a card (2026-11-21).** Asked for by the user: making room in the
   tree meant moving every later card by hand. The side strip has a number of columns and a button; every card
   whose column is right of the selected card's moves by that number (negative = left), each as a staged position,

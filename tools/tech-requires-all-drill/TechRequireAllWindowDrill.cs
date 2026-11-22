@@ -48,6 +48,43 @@ public static class TechRequireAllWindowDrill
     static bool Near(Vector2 p, float x, float y) => Mathf.Abs(p.x - x) < 0.01f && Mathf.Abs(p.y - y) < 0.01f;
     static string Points(List<Vector2> path) => string.Join(" ", path.Select(q => "(" + q.x.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "," + q.y.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + ")"));
 
+    // ---- what a technology unlocks (TechTreeUnlocks): stand-ins of the game's shapes, by the names the reader looks for
+    const string IconPath = "Assets/Icons/drill_icon.png";
+    static string IconGuid()   // a real image asset of the temporary project, made once
+    {
+        if (!File.Exists(Path.Combine(Path.GetDirectoryName(Application.dataPath), IconPath)))
+        {
+            Folder("Assets/Icons");
+            var pixels = new Texture2D(4, 4);
+            File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(Application.dataPath), IconPath), pixels.EncodeToPNG());
+            UnityEngine.Object.DestroyImmediate(pixels);
+            AssetDatabase.ImportAsset(IconPath);
+        }
+        return AssetDatabase.AssetPathToGUID(IconPath);
+    }
+    // a Unity GUID text as the four ints a UI mapper stores (the reverse of TechTreeData.AmplitudeGuidToUnity)
+    static TechTreeDrillTypes.DrillImage Image(string key, string unityGuid)
+    {
+        var words = new int[4];
+        if (unityGuid != null)
+            for (int w = 0; w < 4; w++)
+                for (int b = 0; b < 4; b++)
+                {
+                    int low = Convert.ToInt32(unityGuid.Substring(w * 8 + b * 2, 1), 16), high = Convert.ToInt32(unityGuid.Substring(w * 8 + b * 2 + 1, 1), 16);
+                    words[w] |= ((high << 4) | low) << (8 * b);
+                }
+        return new TechTreeDrillTypes.DrillImage { serializableKey = key, Value = new TechTreeDrillTypes.DrillTexture { guid = new TechTreeDrillTypes.DrillGuid { a = words[0], b = words[1], c = words[2], d = words[3] } } };
+    }
+    static T Constructible<T>(string name, int level, int op, params string[] factions) where T : TechTreeDrillTypes.ConstructibleDefinition
+    {
+        var c = ScriptableObject.CreateInstance<T>(); c.name = name; c.Level = level; c.FactionPrerequisite = new TechTreeDrillTypes.FactionPrerequisite(op, factions); return c;
+    }
+    static TechTreeDrillTypes.DrillMapper Mapper(string name, string title, params TechTreeDrillTypes.DrillImage[] images)
+    {
+        var m = ScriptableObject.CreateInstance<TechTreeDrillTypes.DrillMapper>(); m.name = name; m.Title = title; m.Images = images.ToList(); return m;
+    }
+    static TechTreeDrillTypes.Reference[] Refs(params string[] names) => names.Select(n => new TechTreeDrillTypes.Reference { serializableElementName = n }).ToArray();
+
     // ---- real assets in the temporary project (the mutation run of 2026-11-21: nothing in this drill wrote one)
     const string DbDefs = "Assets/Databases/Defs", DbMaps = "Assets/Databases/Maps", RefDefs = "Assets/VanillaReference/Defs", RefMaps = "Assets/VanillaReference/Maps";
     const string ModPath = "Assets/Databases/New Additions";
@@ -104,6 +141,14 @@ public static class TechRequireAllWindowDrill
         {
             var tree = Tree();
             tree[1].BaseX = 8; tree[1].BaseY = -2; tree[2].BaseX = 16; tree[2].BaseY = 4; tree[3].BaseX = 16; tree[3].BaseY = 9;
+            // T's card carries an icon row: a project image, an entry without an icon, and more entries than fit
+            tree[2].Unlocks = new List<TechTreeUnlocks.Unlock>
+            {
+                new TechTreeUnlocks.Unlock { Effect = "UnlockConstructible", Kind = TechTreeUnlocks.Kind.Unit, ElementName = "Unit_X", Title = "Unit X", MapperFound = true, ImagePath = IconPath, ImageGuid = IconGuid() },
+                new TechTreeUnlocks.Unlock { Effect = "ApplyDescriptor", Kind = TechTreeUnlocks.Kind.Other, ElementName = "Bonus_Y", Title = "Bonus Y" },
+            };
+            for (int extra = 0; extra < 6; extra++)
+                tree[2].Unlocks.Add(new TechTreeUnlocks.Unlock { Effect = "UnlockConstructible", Kind = extra % 2 == 0 ? TechTreeUnlocks.Kind.Extension : TechTreeUnlocks.Kind.Infrastructure, ElementName = "C" + extra, Title = "C" + extra, MapperFound = true });
             return tree;
         };
         viewer = ScriptableObject.CreateInstance<TechTreeWindow>();   // OnEnable: reads the tree and the list
@@ -684,6 +729,82 @@ public static class TechRequireAllWindowDrill
                     errors.RemoveAll(e => e.Contains("[TechAll]"));
                     Check("watch: the viewer's next draw drops the stale warning", !VGet<bool>("_rulesStale") && All("Technology_T"));
                     break;
+                case 16:
+                {
+                    // ---- what a technology unlocks: the reader on stand-ins of the game's shapes (2026-11-22) ----
+                    var index = new TechTreeUnlocks.Index();
+                    void Def(TechTreeDrillTypes.ConstructibleDefinition c) { index.Constructibles[c.name] = c; }
+                    Def(Constructible<TechTreeDrillTypes.UnitDefinition>("Unit_Common", 6, 1));                       // no culture named: for everyone
+                    Def(Constructible<TechTreeDrillTypes.UnitDefinition>("Unit_Emblem", 7, 1, "Civilization_A"));     // AnyInFactionsHistory + a name: emblematic
+                    Def(Constructible<TechTreeDrillTypes.UnitDefinition>("Unit_Common_B", 6, 1));
+                    Def(Constructible<TechTreeDrillTypes.UnitDefinition>("Unit_Common_Late", 9, 1));
+                    Def(Constructible<TechTreeDrillTypes.ExtensionDistrictDefinition>("Harbour_Base", 0, 2, "Civilization_A", "Civilization_B"));   // Operator None: for everyone BUT these
+                    Def(Constructible<TechTreeDrillTypes.ExtensionDistrictDefinition>("Harbour_A", 1, 0, "Civilization_A"));                       // Any + a name: emblematic
+                    Def(Constructible<TechTreeDrillTypes.InfrastructureDefinition>("Infra_One", 3, 1));
+                    Check("unlocks: the constructible for everyone stands for an unlock, not the emblematic one of a higher level",
+                          TechTreeUnlocks.Choose(new[] { "Unit_Emblem", "Unit_Common" }, index) == "Unit_Common" && TechTreeUnlocks.Choose(new[] { "Unit_Common", "Unit_Emblem" }, index) == "Unit_Common");
+                    Check("unlocks: a prerequisite that names the cultures it is NOT for (the base Harbour) is for everyone",
+                          TechTreeUnlocks.ForEveryone(index.Constructibles["Harbour_Base"]) && !TechTreeUnlocks.ForEveryone(index.Constructibles["Harbour_A"])
+                          && TechTreeUnlocks.Choose(new[] { "Harbour_Base", "Harbour_A" }, index) == "Harbour_Base");
+                    Check("unlocks: among those for everyone the highest level, the later one on a tie (the game's rule)",
+                          TechTreeUnlocks.Choose(new[] { "Unit_Common", "Unit_Common_Late", "Unit_Common_B" }, index) == "Unit_Common_Late"
+                          && TechTreeUnlocks.Choose(new[] { "Unit_Common", "Unit_Common_B" }, index) == "Unit_Common_B" && TechTreeUnlocks.Choose(new[] { "Unit_Common_B", "Unit_Common" }, index) == "Unit_Common");
+                    Check("unlocks: only emblematic ones named: the highest of them; a name without a definition is passed over; none known: the first",
+                          TechTreeUnlocks.Choose(new[] { "Harbour_A", "Unit_Emblem" }, index) == "Unit_Emblem" && TechTreeUnlocks.Choose(new[] { "Ghost", "Infra_One" }, index) == "Infra_One"
+                          && TechTreeUnlocks.Choose(new[] { "Ghost_1", "Ghost_2" }, index) == "Ghost_1" && TechTreeUnlocks.Choose(new string[0], index) == null);
+
+                    string icon = IconGuid();
+                    const string elsewhere = "0123456789abcdef0123456789abcdef";   // a GUID no asset of this project has: one of the game's own
+                    index.Mappers["Unit_Common"] = Mapper("Unit_Common", "%UnitCommonTitle", Image("Picto", elsewhere), Image("Default_Small", icon), Image("Variation1_Small", elsewhere));
+                    index.Mappers["Harbour_Base"] = Mapper("Harbour_Base", "Harbour", Image("Default_Small", null), Image("Variation1_Small", elsewhere));
+                    index.Mappers["Infra_One"] = Mapper("Infra_One", "Infra", Image("Picto", elsewhere));                 // a constructible takes no Picto
+                    index.Mappers["Bonus_Mapper"] = Mapper("Bonus_Mapper", "A bonus", Image("Small", elsewhere));
+                    index.Mappers["Resource_R"] = Mapper("Resource_R", "Horses", Image("Small", icon), Image("Picto", elsewhere));
+                    var definition = new TechTreeDrillTypes.TechDefinition { SimulationEventEffects = new object[]
+                    {
+                        new TechTreeDrillTypes.SimulationEventEffect_UnlockConstructible { ConstructibleReferences = Refs("Unit_Emblem", "Unit_Common", "Ghost") },
+                        new TechTreeDrillTypes.SimulationEventEffect_UnlockConstructible { Hidden = true, ConstructibleReferences = Refs("Infra_One") },
+                        new TechTreeDrillTypes.SimulationEventEffect_UnlockConstructible { ConstructibleReferences = Refs("Harbour_A", "Harbour_Base") },
+                        new TechTreeDrillTypes.SimulationEventEffect_UnlockConstructible { ConstructibleReferences = Refs("Infra_One") },
+                        new TechTreeDrillTypes.SimulationEventEffect_ApplyDescriptor { Descriptor = new TechTreeDrillTypes.Reference { serializableElementName = "Effect_Raw" }, UIMapperOverride = "Bonus_Mapper" },
+                        new TechTreeDrillTypes.SimulationEventEffect_ForceCalendar(),
+                        new TechTreeDrillTypes.SimulationEventEffect_UnlockResource { ResourceReferences = Refs("Resource_R", "Resource_S") },
+                        new TechTreeDrillTypes.SimulationEventEffect_UnlockAction { ActionType = TechTreeDrillTypes.DrillAction.CuttingForest },
+                        null,
+                    } };
+                    var read = TechTreeUnlocks.Read(definition, index, text => text == "%UnitCommonTitle" ? "Warriors" : text);
+                    Check("unlocks: one entry per effect that is not hidden, one per resource, none for an effect the card does not show, in the effects' order",
+                          string.Join(",", read.Select(u => u.Effect + ":" + u.ElementName)) == "UnlockConstructible:Unit_Common,UnlockConstructible:Harbour_Base,UnlockConstructible:Infra_One,ApplyDescriptor:Bonus_Mapper,UnlockResource:Resource_R,UnlockResource:Resource_S,UnlockAction:CuttingForest",
+                          string.Join(",", read.Select(u => u.Effect + ":" + u.ElementName)));
+                    Check("unlocks: the kind by the definition's type, the count of the others an unlock names, the title through the localization",
+                          read.Count == 7 && read[0].Kind == TechTreeUnlocks.Kind.Unit && read[0].Alternatives == 2 && read[0].Title == "Warriors" && read[1].Kind == TechTreeUnlocks.Kind.Extension && read[1].Alternatives == 1
+                          && read[2].Kind == TechTreeUnlocks.Kind.Infrastructure && read[3].Kind == TechTreeUnlocks.Kind.Other && read[3].Title == "A bonus");
+                    Check("unlocks, icon: a constructible's Default_Small, found as a file of the project",
+                          read.Count == 7 && read[0].MapperFound && read[0].ImagePath == IconPath && read[0].ImageGuid == icon, read.Count == 7 ? read[0].ImagePath + " " + read[0].ImageGuid : "count " + read.Count);
+                    Check("unlocks, icon: an empty Default_Small falls to another *_Small; that image is not in the project, so only its GUID is known",
+                          read.Count == 7 && read[1].ImagePath == null && read[1].ImageGuid == elsewhere, read.Count == 7 ? read[1].ImagePath + " " + read[1].ImageGuid : "");
+                    Check("unlocks, icon: a constructible whose mapper has only a Picto names no icon; an unlock without a mapper says so",
+                          read.Count == 7 && read[2].MapperFound && read[2].ImageGuid == null && !read[5].MapperFound && read[5].Title == "Resource_S" && !read[6].MapperFound);
+                    Check("unlocks, icon: a bonus takes Small, a resource takes Picto before Small",
+                          read.Count == 7 && read[3].ImageGuid == elsewhere && read[4].ImageGuid == elsewhere && read[4].ImagePath == null, read.Count == 7 ? read[4].ImagePath + " " + read[4].ImageGuid : "");
+
+                    // the row on the card: the game's 310 x 116 card keeps 46-high icons 4 from its bottom, six fit
+                    var row = TechTreeWindow.UnlockRects(new Rect(100, 200, 310, 116), 8);
+                    Check("unlock row: six icons of 46 fit the card, along its bottom from the left",
+                          row.Count == 6 && Mathf.Abs(row[0].x - 106) < 0.01f && Mathf.Abs(row[0].y - 266) < 0.01f && Mathf.Abs(row[0].width - 46) < 0.01f && Mathf.Abs(row[1].x - 155) < 0.01f && row[5].xMax <= 410,
+                          row.Count + " first " + (row.Count > 0 ? row[0].ToString() : ""));
+                    var half = TechTreeWindow.UnlockRects(new Rect(0, 0, 155, 58), 2);
+                    Check("unlock row: scaled with the card, no more rectangles than unlocks", half.Count == 2 && Mathf.Abs(half[0].width - 23) < 0.01f && Mathf.Abs(half[0].y - 33) < 0.01f);
+                    Check("unlock list: what the side strip says per entry",
+                          read.Count == 7 && TechTreeWindow.UnlockLine(read[0]) == "Unit · Warriors  (Unit_Common)  +2 others in the same unlock"
+                          && TechTreeWindow.UnlockLine(read[1]) == "District · Harbour  (Harbour_Base)  +1 other in the same unlock"
+                          && TechTreeWindow.UnlockLine(read[2]) == "Infrastructure · Infra  (Infra_One)  — its UI mapper names no icon"
+                          && TechTreeWindow.UnlockLine(read[5]) == "Resource · Resource_S  — no UI mapper in the project, so no icon"
+                          && TechTreeWindow.UnlockLine(read[3]) == "Bonus · A bonus  (Bonus_Mapper)", read.Count == 7 ? TechTreeWindow.UnlockLine(read[0]) + " | " + TechTreeWindow.UnlockLine(read[5]) : "");
+                    Check("unlock row: the viewer's own card (T) has drawn its icons in every step, with the project image loaded",
+                          N("Technology_T").Unlocks.Count == 8 && ((System.Collections.IDictionary)typeof(TechTreeWindow).GetField("_art", Private).GetValue(viewer)).Contains(IconPath));
+                    break;
+                }
                 default:
                     Check("no error or exception was logged while the windows drew", errors.Count == 0, string.Join(" | ", errors));
                     EditorApplication.update -= Step; window.Close(); if (viewer != null) viewer.Close(); Finish(null);
@@ -724,4 +845,36 @@ public class TechTreeDrillDefinition : ScriptableObject
 public class TechTreeDrillMapper : ScriptableObject
 {
     public int TechTreeX, TechTreeY;
+}
+
+// Stand-ins of the game's shapes for TechTreeUnlocks, which reads by NAME: the effect types' names, the fields'
+// names, and for a UI mapper the serialized paths Images[i].serializableKey / .Value.guid.a..d.
+namespace TechTreeDrillTypes
+{
+    [Serializable] public class Reference { public string serializableElementName; }
+    public class SimulationEventEffect { public string UIMapperOverride = ""; public bool Hidden; }
+    public class SimulationEventEffect_UnlockConstructible : SimulationEventEffect { public Reference[] ConstructibleReferences; }
+    public class SimulationEventEffect_ApplyDescriptor : SimulationEventEffect { public Reference Descriptor; }
+    public class SimulationEventEffect_UnlockResource : SimulationEventEffect { public Reference[] ResourceReferences; }
+    public enum DrillAction { CuttingForest }
+    public class SimulationEventEffect_UnlockAction : SimulationEventEffect { public DrillAction ActionType; }
+    public class SimulationEventEffect_ForceCalendar : SimulationEventEffect { }
+    public class TechDefinition { public object[] SimulationEventEffects; }
+
+    [Serializable]
+    public struct FactionPrerequisite
+    {
+        public int Operator;   // the game's enum: Any 0, AnyInFactionsHistory 1, None 2
+        [SerializeField] string[] serializableFactionNames;
+        public FactionPrerequisite(int op, string[] names) { Operator = op; serializableFactionNames = names; }
+    }
+    public class ConstructibleDefinition : ScriptableObject { public int Level; public FactionPrerequisite FactionPrerequisite; }
+    public class UnitDefinition : ConstructibleDefinition { }
+    public class ExtensionDistrictDefinition : ConstructibleDefinition { }
+    public class InfrastructureDefinition : ConstructibleDefinition { }
+
+    [Serializable] public struct DrillGuid { public int a, b, c, d; }
+    [Serializable] public struct DrillTexture { public DrillGuid guid; }
+    [Serializable] public struct DrillImage { public DrillTexture Value; public string serializableKey; }
+    public class DrillMapper : ScriptableObject { public string Title; public List<DrillImage> Images = new List<DrillImage>(); }
 }

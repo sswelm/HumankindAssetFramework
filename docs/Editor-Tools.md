@@ -691,7 +691,17 @@ windows. **Deep dive:**
     definition exists only in the reference folder is copied into a collection under the mod path when it is first
     saved; without a matching collection there the Save is refused with a Console line and the edit stays staged.
     In ENC the reference copy is `Assets/~References` and the collections are in `Assets/Databases/Technologies`.
-  - Not shown: the unlock icons, the researched / locked states and the era headers.
+  - **What a technology unlocks.** A row of icons along the bottom of its card, where the game's card has it, and
+    the same as a list with titles in the side strip (`Unlocks (N)`). The entries are the technology definition's
+    own effects that are not hidden, as the game turns them into its icon row: one per unlocked constructible
+    (unit, district, infrastructure), one per bonus, resource, action, cost change and so on. An unlock that names
+    several constructibles (a common unit and its emblematic variants) shows the one every culture gets; the list
+    says how many others it names. Icons come from each entry's UI mapper: a file of the project, or one of the
+    game's own from its UI bundle. A card shows up to six. Frame colours: blue a unit, green a district or starting
+    package, brown an infrastructure, violet anything else; `?` marks an entry without an icon. The icons of
+    bonuses, resources and actions are the game's small one-colour pictograms, drawn as they are stored (soft at
+    the edges). Shown only: unlocks are not edited here.
+  - Not shown: the researched / locked states and the era headers.
 - **Tech Requires All** — `Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites`. A list of technologies, nothing else.
   The game unlocks a technology when **any one** of its prerequisites is researched, and its data has no field to say
   otherwise; a technology in this list unlocks only when **all** of them are. **+ Add technology** picks from the
