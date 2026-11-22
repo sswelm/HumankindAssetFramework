@@ -10,34 +10,52 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
-- **Tech Tree viewer: a technology's title, description and image (2026-11-22).** Asked for by the user: "edit more,
-  starting with the tech title and description and the ability to change the tech image".
-  - **Where they live.** All three are in the technology's UI mapper. In ENC all 214 mappers hold the title and the
-    description as the text itself (no localization key), and the image as an entry of their Images list: the card
-    (`TechnologyScreenItemBackground`) and the popup when it is researched (`TechnologyPopupBackground`), the same
-    image in all 214. 124 of those images are pictures of the project (`Assets/Resources/Images`), referenced only
-    by their GUID; 90 are the game's own. The third entry, `Picto`, is always one of the game's own and is not
-    touched.
-  - **In the side strip:** a Title field, a Description box, and an Image field for a picture of the project, with
-    "Same as…" to take the image of another technology (which can be one of the game's own). All three are staged
-    like a position; the card shows the staged title and image at once. Save writes them into the mapper, the image
-    into both of its entries.
-  - **A title or description that is a localization key** (the game's own mappers, copied from the reference
-    folder) is shown translated; a text typed here replaces the key, and the game then shows that text in every
-    language. The side strip says so.
-  - **Checked on a copy of the live ENC data** with the game's real types: a new title, description and game image
-    on Diplomacy and a project picture on Archery, saved through the window. The 1.5 MB mappers file changed in
-    exactly those lines: two texts, and the four ints of each image in the card's and the popup's entries; Picto
-    and every other technology unchanged. Archery's entries now hold the same four ints as Diplomacy's had for
-    `diplomat512.png`. A screenshot of the window shows the card and the side strip.
-  - **In the repo's drill:** 229 checks (216 before). The image's GUID conversion is held to a real pair of the
-    ENC data (`diplomat512.png` and Diplomacy's mapper). The card draws a staged image (checked by pixels). Save
-    writes texts and images into a mapper asset's file, and Undo after it takes nothing back. A mapper without one
-    of the two image entries gets it. Eight defects planted, eight caught (one only after a check for the card's
-    title was added).
-  - **Not done:** one text for every language (no per-language editing, no localization keys written); the
-    image's import settings are not checked (ENC's pictures are plain textures); a picture of the game's own can
-    be chosen only through another technology that has it.
+- **Tech Tree viewer: a technology's title, description and image (2026-11-22, PR #309; the review's fixes in the PR after it).** Asked for by the user:
+  "edit more, starting with the tech title and description and the ability to change the tech image".
+  - **Where they live.** All three are in the technology's UI mapper (inherited from `Amplitude.UI.UIMapper`). In
+    ENC's mappers file (215 mappers on 2026-11-22) 88 titles and 86 descriptions are localization keys
+    (`%Technology_Era2_08Title`, the game's own text) and the rest the text itself. The image is an entry of the
+    Images list: the card (`TechnologyScreenItemBackground`) and the "technology completed" notification and banner
+    tooltip (`TechnologyPopupBackground`), the same image in every ENC mapper (and in 94 of the game's 99). The
+    third entry, `Picto`, is used by no game screen and is not touched.
+  - **In the side strip:** a Title field and a Description box that show the text as the game does (a key
+    translated), and an Image field for a picture of the project, with **Same as…** for the image of another
+    technology (which can be one of the game's own) and **Own** to go back to the saved one. Staged like a
+    position; the card shows the staged title and image at once. Save writes them into the mapper, the image into
+    both of its entries.
+  - **Keys.** Typing the translation or the key back is no change: the key stays. A typed text replaces the key,
+    and the game then shows it in every language (the side strip says so). A typed text starting with `%` is a key
+    to the game (`TextUtils.Localize` tests the first character): the side strip names its text, or warns when the
+    project knows no such key (the game shows the key and logs an error).
+  - **Pictures reach the game through the mod's asset bundle only.** The game finds a mod's picture by its GUID
+    in the bundle (`Amplitude.Framework.AssetDatabase`), and the bundle takes what the project's
+    `AssetBundleBuildSettings` filters say; a mapper's GUID ints do not pull a picture in. ENC's settings take
+    textures from `Assets/Resources` only. The window reads the build settings and warns when a picked picture
+    is not taken (the game would show a placeholder). A texture inside another file (a font's) is refused.
+  - **Critical review (three reviewers, 2026-11-22):**
+    - The game's code: plain text is shown as is everywhere a technology's name or description appears; the
+      image GUID conversion matches the game's `Guid` on 400,007 cases; the first entry of a key is the one the
+      game reads. Found: the bundle rule (above), the `%` texts, and that the first version's claim "all of ENC's
+      titles are text" was wrong (YAML writes the keys in quotes, and the count read them as text).
+    - The window on a copy of the real data: 12 awkward strings (quotes, `%`, `:`, `#`, braces, emoji, Chinese,
+      an empty title, a 20,000-character description) saved with position, era, prerequisite and visibility edits
+      changed exactly the staged lines; staged texts survived a real script reload; Undo after a Save changed
+      nothing; a reference-only mapper was copied once. Found and fixed: the fields showed raw keys and typing
+      appended to them (a saved title became `%Technology_Era2_11Title13`); no way back to a game image (94
+      technologies have one no other shares); an embedded texture was accepted; Windows line ends came back
+      changed after a restart.
+    - Tests: of 92 planted defects 54 survived the first drill: nothing drove the side strip's fields, no
+      fixture had a key title, a description was never saved alone. Now the drill types into the real Title and
+      Description fields, has key titles, saves a description alone, records the title each card draws, and
+      its stand-in mapper inherits its texts as the game's does. Rerun of the 24 that mattered against the new drill: 5 caught, 6 changed code that was rewritten (the card's drawn title, key titles, Edit OFF and the field wiring now have checks of their own), 13 survive: the image picker and the Same as list (not driven), the Undo warnings for texts and images, an invalid GUID, a duplicate key, a failed image write, two accessors no longer used.
+  - **Checked on a copy of the live ENC data:** a title, a description and a game image on Diplomacy and a
+    project picture on Archery, staged through the window's functions and saved; the 256 KB mappers file changed
+    in exactly those lines. ENC's real build settings read by the window: `diplomat512.png` taken, a picture in
+    `Assets/Plugins` not. A key-titled technology (Covert Ops) shows its text in the fields.
+  - **In the repo's drill:** 249 checks (216 before PR #309, 229 with it).
+  - **Not done:** one text for every language (translations are not edited); a picture of the game's own only
+    through "Same as…"; the image picker and the "Same as…" list are not driven by the drill (the checks stage
+    an image as they do); nobody has seen this in the user's own Unity or in the game yet.
 - **Tech Tree viewer: a technology's era, the era separators, and the artwork on top (2026-11-22, PR #308).**
   Asked for by the user after the unlock row, with a screenshot of the game's tech screen beside the viewer's:
   "what is still missing: the ability to configure a tech node's era and the era separator display in the

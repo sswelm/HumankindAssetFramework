@@ -530,7 +530,8 @@ public static class TechRequireAllWindowDrill
                     Check("    a save while it is absent writes nothing of it and keeps it staged", Staged == 1 && Deployed == "", Deployed + " staged " + Staged);
                     TechTreeWindow.BuildTreeImpl = fullTree;
                     VCall("Reload", true, false);
-                    Check("    and with the technology back the same edits apply", (int)VCall("EffX", N(T)) == 20 && (int)VCall("EffY", N(T)) == 6 && (int)VCall("EffVisibility", N(T)) == 0 && All(T) && Prereqs(T).SequenceEqual(new[] { "Technology_A" }) && (string)VCall("EffEra", N(T)) == "Era3" && Staged == 1);
+                    Check("    and with the technology back the same edits apply, the texts and the image too", viewer.EffLabel(N(T)) == "Steam Power" && (string)VCall("EffDescription", N(T)) == "Makes\nsteam." && viewer.EffImage(N(T)) == BlueGuid
+                          && (int)VCall("EffX", N(T)) == 20 && (int)VCall("EffY", N(T)) == 6 && (int)VCall("EffVisibility", N(T)) == 0 && All(T) && Prereqs(T).SequenceEqual(new[] { "Technology_A" }) && (string)VCall("EffEra", N(T)) == "Era3" && Staged == 1);
                     // a script reload: Unity serializes the window and builds its fields again
                     VSet("_selected", N(T));
                     // Everything the window holds in memory is wiped after the freeze, mirrors included: what comes back
@@ -553,11 +554,12 @@ public static class TechRequireAllWindowDrill
                           LastSave.Contains(" · 7 skipped (no writable target"), LastSave);
                     Check("save: a saved rule switch leaves the staged set, the parts without an asset stay",
                           Deployed == T && Staged == 1 && (int)VCall("EffX", N(T)) == 20 && (int)VCall("EffVisibility", N(T)) == 0 && (string)VCall("EffEra", N(T)) == "Era3"
+                          && viewer.TitleShown(N(T)) == "Steam Power" && viewer.DescriptionShown(N(T)) == "Makes\nsteam." && viewer.EffImage(N(T)) == BlueGuid
                           && VGet<HashSet<string>>("_requireAll").Contains(T), Deployed + " staged " + Staged);
                     VCall("SetPosition", N(T), 16, 4); VCall("SetVisibility", N(T), -1); VCall("AddPrereq", N(T), "Technology_B");
                     Check("    the card shows the staged title; typed back to the saved title, description and image, they are no change",
                           viewer.EffLabel(N(T)) == "Steam Power" && N(T).Label == "Two Parents" && viewer.CardTitle(N(T)) == "STEAM POWER", viewer.CardTitle(N(T)));
-                    VCall("SetTitle", N(T), ""); VCall("SetDescription", N(T), ""); VCall("SetImage", N(T), N(T).ArtGuid);
+                    VCall("SetTitle", N(T), N(T).Label); VCall("SetDescription", N(T), ""); VCall("SetImage", N(T), N(T).ArtGuid);
                     N(T).Tier = "Tier2";
                     Check("    the era alone is still staged, and it is the era the card shows", Staged == 1 && (string)VCall("EffEra", N(T)) == "Era3" && N(T).Era == "Era2" && viewer.CardEraTier(N(T)) == "E3 · T2", "staged " + Staged + " card " + viewer.CardEraTier(N(T)));
                     VCall("SetEra", N(T), "Era2");
@@ -869,6 +871,14 @@ public static class TechRequireAllWindowDrill
                     Undo.PerformUndo();
                     mMap = Asset<TechTreeDrillMapper>(DbMaps + "/" + M + ".asset");
                     Check("undo after that save takes nothing of it back", mMap.Title == "Em Renamed" && IsBlue(mMap.Images[2]) && N(M).Label == "Em Renamed");
+                    VCall("SetDescription", N(M), "Only the description.");
+                    Check("    a description alone is a staged edit", (bool)VCall("IsEdited", N(M)) && Staged == 1);
+                    VCall("CommitChanges");
+                    string onlyFile = File.ReadAllText(Path.Combine(Path.GetDirectoryName(Application.dataPath), DbMaps + "/" + M + ".asset"));
+                    Check("save: a description alone is written to the mapper's file, and the Save line counts only it",
+                          onlyFile.Contains("Description: Only the description.") && onlyFile.Contains("Title: Em Renamed") && Staged == 0
+                          && LastSave.StartsWith("[TechTree] Saved: 0 position, 0 prerequisite, 0 visibility change(s), 1 title / description change.") && !LastSave.Contains("image"),
+                          LastSave);
                     // the writers on their own
                     var lone = ScriptableObject.CreateInstance<TechTreeDrillMapper>();
                     lone.Images = new List<TechTreeDrillTypes.DrillImage> { picto };
@@ -1343,19 +1353,109 @@ public static class TechRequireAllWindowDrill
                           && !TechTreeData.UnityGuidToAmplitude("0be8caed819adde4d9be34986d03cb0", out _, out _, out _, out _) && !TechTreeData.UnityGuidToAmplitude("0be8caed819adde4d9be34986d03cbzz", out _, out _, out _, out _)
                           && !TechTreeData.UnityGuidToAmplitude(null, out _, out _, out _, out _),
                           ga + "," + gb + "," + gc + "," + gd);
-                    Check("title note: nothing for a typed title; an empty one, a localization key kept or replaced, is said",
-                          TechTreeWindow.TextNote("Writing", "Writing", "Writing", "Text", "Text") == ""
-                          && TechTreeWindow.TextNote("Writing", "Writing", " ", "", "") == "The title is empty: the game would show no name."
-                          && TechTreeWindow.TextNote("%TechWritingTitle", "Writing", "%TechWritingTitle", "", "").StartsWith("The title is the localization key %TechWritingTitle, shown as \"Writing\".")
-                          && TechTreeWindow.TextNote("%TechWritingTitle", "Writing", "Scribes", "", "") == "This replaces the localization key %TechWritingTitle with the text itself, the same in every language."
-                          && TechTreeWindow.TextNote("A", "A", "A", "%Desc", "New").Contains("replaces the localization key %Desc"),
-                          TechTreeWindow.TextNote("%TechWritingTitle", "Writing", "%TechWritingTitle", "", ""));
-                    Check("image note: what the image is, staged or not, and where the project's other technology pictures are",
-                          TechTreeWindow.ImageNote("", "", false, "") == "No image is set." && TechTreeWindow.ImageNote(BlueGuid, "Assets/Icons/drill_blue.png", true, "Assets/Icons") == "New image (staged): drill_blue.png."
-                          && TechTreeWindow.ImageNote(BlueGuid, "Assets/Icons/drill_blue.png", true, "Assets/Resources/Images") == "New image (staged): drill_blue.png. The project's other technology pictures are in Assets/Resources/Images."
-                          && TechTreeWindow.ImageNote("0123456789abcdef0123456789abcdef", "", true, "Assets/Resources/Images") == "New image (staged): one of the game's own images."
-                          && TechTreeWindow.ImageNote(BlueGuid, "Assets/Icons/drill_blue.png", false, "Assets/Icons") == "",
-                          TechTreeWindow.ImageNote(BlueGuid, "Assets/Icons/drill_blue.png", true, "Assets/Resources/Images"));
+                    // ---- the texts: what the fields show, what a typed text means to the game (review of PR #309) ----
+                    TechTreeData.Localization = new Dictionary<string, string> { { "%S_Title", "Single Parent" }, { "%S_Desc", "Its translated text." }, { "%Known", "A known key" } };
+                    const string S = "Technology_S";
+                    string sLabel = N(S).Label, sDescription = N(S).Description, sTitleKey = N(S).TitleKey, sBaseDescription = N(S).BaseDescription;
+                    N(S).TitleKey = "%S_Title"; N(S).Label = "Single Parent"; N(S).BaseDescription = "%S_Desc"; N(S).Description = "Its translated text.";
+                    Check("texts: a title and description that are localization keys are shown translated in the fields, not as the key",
+                          viewer.TitleShown(N(S)) == "Single Parent" && viewer.DescriptionShown(N(S)) == "Its translated text." && viewer.EffLabel(N(S)) == "Single Parent",
+                          viewer.TitleShown(N(S)) + " | " + viewer.DescriptionShown(N(S)));
+                    VCall("SetTitle", N(S), "Single Parent"); VCall("SetTitle", N(S), "%S_Title"); VCall("SetDescription", N(S), "Its translated text.");
+                    Check("texts: typing the translation, or the key, is no change: the key stays", !(bool)VCall("IsEdited", N(S)));
+                    VCall("SetTitle", N(S), "Single Parent2");
+                    viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                    Check("texts: the card DRAWS the staged title", viewer.CardTitlesDrawn.TryGetValue(S, out var drawnTitle) && drawnTitle == "SINGLE PARENT2", drawnTitle ?? "not drawn");
+                    Check("texts: a changed text is staged as typed (not appended to the key), and the card shows it",
+                          viewer.TitleShown(N(S)) == "Single Parent2" && viewer.CardTitle(N(S)) == "SINGLE PARENT2" && (string)VCall("EffTitle", N(S)) == "Single Parent2");
+                    VCall("SetTitle", N(S), "%Known");
+                    Check("texts: a typed text that starts with % is a key to the game: the card shows its translation", viewer.EffLabel(N(S)) == "A known key" && viewer.TitleShown(N(S)) == "%Known");
+                    VCall("SetDescription", N(S), "two\r\nlines\rand more");
+                    Check("texts: Windows and old Mac line ends are stored as one \\n", viewer.DescriptionShown(N(S)) == "two\nlines\nand more", viewer.DescriptionShown(N(S)).Replace("\r", "\\r").Replace("\n", "\\n"));
+                    VCall("SetTitle", N(S), "Single Parent"); VCall("SetDescription", N(S), "Its translated text.");
+                    Check("    back to the saved texts: nothing staged", !(bool)VCall("IsEdited", N(S)));
+                    // typing into the REAL fields of the side strip (review C: nothing drove them): the title field stages a
+                    // title, the description box a description, and with Edit OFF neither takes a key
+                    VSet("_selected", N(S));
+                    void TypeInto(string control, string text)
+                    {
+                        viewer.FocusRequest = control;
+                        viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                        foreach (char c in text)
+                        {
+                            viewer.SendEvent(new Event { type = EventType.Layout });
+                            viewer.SendEvent(new Event { type = EventType.KeyDown, character = c, keyCode = KeyCode.None });
+                        }
+                        viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                        GUIUtility.keyboardControl = 0; EditorGUIUtility.editingTextField = false;
+                    }
+                    TypeInto(TechTreeWindow.TitleControl, "Qz");
+                    string typedTitle = viewer.TitleShown(N(S)), descriptionAfterTitle = viewer.DescriptionShown(N(S));
+                    TypeInto(TechTreeWindow.DescriptionControl, "Wx");
+                    string typedDescription = viewer.DescriptionShown(N(S)), titleAfterDescription = viewer.TitleShown(N(S));
+                    Check("side strip: typing into the title field stages a title, into the description box a description, each only its own",
+                          typedTitle.Contains("Qz") && descriptionAfterTitle == "Its translated text." && typedDescription.Contains("Wx") && titleAfterDescription == typedTitle && (bool)VCall("IsEdited", N(S)),
+                          "title '" + typedTitle + "' description '" + typedDescription + "'");
+                    VCall("SetTitle", N(S), "Single Parent"); VCall("SetDescription", N(S), "Its translated text.");
+                    VSet("_editMode", false);
+                    TypeInto(TechTreeWindow.TitleControl, "Kk");
+                    Check("side strip: with Edit OFF the title field takes no key", !(bool)VCall("IsEdited", N(S)) && viewer.TitleShown(N(S)) == "Single Parent", viewer.TitleShown(N(S)));
+                    VSet("_editMode", true);
+                    N(S).TitleKey = sTitleKey; N(S).Label = sLabel; N(S).BaseDescription = sBaseDescription; N(S).Description = sDescription;
+                    bool warn;
+                    string plain = TechTreeWindow.TextNote("Writing", null, "Text", null, out warn);
+                    Check("text note: nothing for plain texts, typed or not", plain == "" && !warn && TechTreeWindow.TextNote("Writing", "Scribes", "Text", "New", out warn) == "" && !warn);
+                    Check("text note: an empty title is a warning",
+                          TechTreeWindow.TextNote("Writing", " ", "", null, out warn) == "The title is empty: the game would show no name." && warn);
+                    string keyed = TechTreeWindow.TextNote("%TechWritingTitle", null, "%TechWritingDesc", null, out warn);
+                    Check("text note: saved keys are said to be shown translated, and that typing replaces them",
+                          keyed == "The title is the localization key %TechWritingTitle, shown here translated. Typing replaces the key: the game then shows the typed text in every language. The description is the localization key %TechWritingDesc, shown here translated. Typing replaces the key: the game then shows the typed text in every language." && !warn, keyed);
+                    Check("text note: a typed text replacing a key is said, the translations it loses too",
+                          TechTreeWindow.TextNote("%TechWritingTitle", "Scribes", "", null, out warn) == "This replaces the localization key %TechWritingTitle with the typed title, the same in every language (the game's translations of it are no longer used)." && !warn);
+                    Check("text note: a typed text starting with % is a key to the game: a known one is named with its text, an unknown one is a warning",
+                          TechTreeWindow.TextNote("Writing", "%Known", "", null, out warn) == "The title starts with %, so the game takes it as the localization key %Known (\"A known key\")." && !warn
+                          && TechTreeWindow.TextNote("Writing", null, "", "%Nope", out warn).StartsWith("The description starts with %, so the game takes it as a localization key, and the project knows no key %Nope:") && warn);
+                    TechTreeData.Localization = new Dictionary<string, string>();
+
+                    // ---- the image: notes, the bundle, the refusal ----
+                    Check("image note: what the image is, staged or not; with no build settings, where the other technology pictures are",
+                          TechTreeWindow.ImageNote("", "", false, null, "", "", out warn) == "No image is set." && !warn
+                          && TechTreeWindow.ImageNote(BlueGuid, "Assets/Icons/drill_blue.png", true, null, "", "Assets/Icons", out warn) == "New image (staged): drill_blue.png." && !warn
+                          && TechTreeWindow.ImageNote(BlueGuid, "Assets/Icons/drill_blue.png", true, null, "", "Assets/Resources/Images", out warn) == "New image (staged): drill_blue.png. The project's other technology pictures are in Assets/Resources/Images." && !warn
+                          && TechTreeWindow.ImageNote("0123456789abcdef0123456789abcdef", "", true, false, "Assets/Resources (and below)", "", out warn) == "New image (staged): one of the game's own images." && !warn
+                          && TechTreeWindow.ImageNote(BlueGuid, "Assets/Icons/drill_blue.png", false, true, "Assets/Resources (and below)", "Assets/Other", out warn) == "" && !warn);
+                    Check("image note: a picture the mod's bundle does not take is a warning, naming the folders it takes pictures from",
+                          TechTreeWindow.ImageNote(BlueGuid, "Assets/Icons/drill_blue.png", true, false, "Assets/Resources (and below)", "", out warn)
+                          == "New image (staged): drill_blue.png. This picture is not in the mod's asset bundle: the project's build settings take pictures only from Assets/Resources (and below). The game would show a placeholder; move the picture there first." && warn);
+                    // the bundle's rule on a build-settings asset of the temporary project, read as the window reads it
+                    Folder("Assets/AssetBundles");
+                    NewAsset<AssetBundleBuildSettings>("Assets/AssetBundles/Drill.BuildSettings.asset", b => b.filters = new List<AssetBundleBuildSettings.Filter>
+                    {
+                        new AssetBundleBuildSettings.Filter { Directory = "Databases", Recursive = true, Mode = 0, TypeMask = 16 },   // ScriptableObjects only
+                        new AssetBundleBuildSettings.Filter { Directory = "Resources", Recursive = true, Mode = 0, TypeMask = -1 },
+                        new AssetBundleBuildSettings.Filter { Directory = "Flat", Recursive = false, Mode = 0, TypeMask = 1 },
+                        new AssetBundleBuildSettings.Filter { Directory = "Resources/Hidden", Recursive = true, Mode = 1, TypeMask = -1 },
+                        new AssetBundleBuildSettings.Filter { SubString = "Skip", Mode = 2 },
+                    });
+                    AssetDatabase.SaveAssets();
+                    var bundles = TechTreeData.ModBundleFilters();
+                    bool? In(string path) => TechTreeData.InModBundle(path, bundles);
+                    Check("bundle: the build settings are read from the project; a picture is taken where an Include filter with the Texture bit covers its folder",
+                          bundles.Count == 1 && bundles[0].Count == 5 && In("Assets/Resources/Images/a.png") == true && In("Assets/Resources/a.png") == true && In("Assets/Flat/a.png") == true
+                          && TechTreeData.BundleTextureFolders(bundles) == "Assets/Resources (and below), Assets/Flat",
+                          bundles.Count + " settings, " + (bundles.Count > 0 ? bundles[0].Count : 0) + " filters; folders " + TechTreeData.BundleTextureFolders(bundles));
+                    Check("bundle: not taken outside those folders, below a folder that is not recursive, by a filter without the Texture bit, or where an exclusion says so",
+                          In("Assets/Icons/a.png") == false && In("Assets/Flat/Deep/a.png") == false && In("Assets/Databases/a.png") == false
+                          && In("Assets/Resources/Hidden/a.png") == false && In("Assets/Resources/SkipThis/a.png") == false && TechTreeData.InModBundle("Assets/Icons/a.png", new List<List<TechTreeData.BundleFilter>>()) == null,
+                          In("Assets/Icons/a.png") + " " + In("Assets/Flat/Deep/a.png") + " " + In("Assets/Databases/a.png") + " " + In("Assets/Resources/Hidden/a.png") + " " + In("Assets/Resources/SkipThis/a.png"));
+                    // a texture that is part of another file (a font's, a model's) cannot be an image
+                    var holder = NewAsset<TechTreeDrillPlain>("Assets/Icons/holder.asset", h => { });
+                    var inner = new Texture2D(4, 4) { name = "Inner" };
+                    AssetDatabase.AddObjectToAsset(inner, holder); AssetDatabase.SaveAssets();
+                    string innerRefusal = TechTreeWindow.ImageRefusal(inner);
+                    Check("image: a texture inside another file is refused (the game finds an image by its file); a picture file is not",
+                          innerRefusal != null && innerRefusal.Contains("holder.asset") && TechTreeWindow.ImageRefusal(AssetDatabase.LoadAssetAtPath<Texture2D>(BluePath)) == null,
+                          innerRefusal ?? "accepted");
 
                     // ---- the artwork is on top of its card (the user, 2026-11-22: the title's line ran through the images).
                     // T's artwork is opaque red. The line under the title runs from the card's left to its right, so it
@@ -1422,7 +1522,9 @@ public static class TechRequireAllWindowDrill
                     TechTreeWindow.AfterCanvasDrawn = null;
                     var staged = Around(new Vector2(cardNow.x + 350f, cardNow.y - 30f), 1);
                     Check("image: the card draws a staged image at once", staged.Count == 9 && staged.All(Blue), staged.Count > 0 ? staged[0].ToString() : "-");
-                    VCall("SetImage", N("Technology_T"), N("Technology_T").ArtGuid);
+                    VCall("ClearImage", N("Technology_T"));
+                    Check("    \"Own\" takes it back to its saved image: no change staged", !(bool)VCall("IsEdited", N("Technology_T")) && viewer.EffImage(N("Technology_T")) == N("Technology_T").ArtGuid);
+                    VCall("SetImage", N("Technology_T"), BlueGuid); VCall("SetImage", N("Technology_T"), N("Technology_T").ArtGuid);
                     Check("    picked back to its own image: no change staged", !(bool)VCall("IsEdited", N("Technology_T")));
                     VSet("_selected", null);
 
@@ -1477,11 +1579,22 @@ public class TechTreeDrillDefinition : ScriptableObject
 }
 
 // Stands in for the game's TechnologyUIMapper: the two fields a position is written to.
-public class TechTreeDrillMapper : ScriptableObject
+// The game's TechnologyUIMapper inherits Title, Description and Images from Amplitude.UI.UIMapper (review C of PR #309).
+public class TechTreeDrillUIMapper : ScriptableObject
 {
     public string Title = "", Description = "";
     public List<TechTreeDrillTypes.DrillImage> Images = new List<TechTreeDrillTypes.DrillImage>();
+}
+public class TechTreeDrillMapper : TechTreeDrillUIMapper
+{
     public int TechTreeX, TechTreeY;
+}
+
+// Stands in for the framework's AssetBundleBuildSettings: its filters by the serialized names the window reads.
+public class AssetBundleBuildSettings : ScriptableObject
+{
+    [Serializable] public class Filter { public string Directory = "", SubString = ""; public bool Recursive; public int Mode; public int TypeMask; }
+    public List<Filter> filters = new List<Filter>();
 }
 
 // An asset that is none of the game's: no Images list, no texts.
