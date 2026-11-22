@@ -666,6 +666,41 @@ public static class BakerRules
         return Math.Max(1, Math.Min((int)Math.Round(span), cap));
     }
 
+    // SPAN OUTLIERS (2026-11-22, the F100's wings, fin and tailplanes): a converted model (VRML -> Sketchfab) paints
+    // each wing with one texture inside U 0..1, but the thin leading/trailing-edge strips carry a broken projection
+    // whose U runs to +-150 within a single triangle. Measured min-to-max, those few strips made the wing a 308-tile
+    // TILED material: the whole span mapped across the cell, so the camo inside 0..1 got 1/308 of it — one pale stripe
+    // of the texture, stretched over the wing. A tiled material has an even texel density (that is what tiling is);
+    // a broken strip stretches the texture hundreds of times harder than its material's median (the F100's strips
+    // are >= 124x, every other triangle <= 1x). So the span counts only the triangles whose stretch on that axis
+    // stays within `SpanOutlierStretch` x the material's median; the strips keep the fold (they smear, as they did
+    // in the source viewer). A median of 0 or a non-finite one (an axis with no texture motion) counts every
+    // triangle, as before. Stretch = UV units per model unit, the largest over a triangle's three edges.
+    public const double SpanOutlierStretch = 50.0;
+
+    public static double EdgeStretch(double duv, double length)
+    {
+        duv = Math.Abs(duv);
+        if (double.IsNaN(duv) || double.IsNaN(length)) return double.PositiveInfinity;
+        if (duv == 0.0) return 0.0;
+        return length > 0.0 ? duv / length : double.PositiveInfinity;   // a zero-length edge carrying UV motion is the worst stretch
+    }
+
+    public static bool[] SpanCounts(IReadOnlyList<double> stretch)
+    {
+        int n = stretch?.Count ?? 0;
+        var counts = new bool[n];
+        if (n == 0) return counts;
+        var sorted = new double[n];
+        for (int i = 0; i < n; i++) sorted[i] = double.IsNaN(stretch[i]) ? double.PositiveInfinity : stretch[i];
+        Array.Sort(sorted);
+        double median = sorted[(n - 1) / 2];   // the lower median: an even split between sane and broken keeps the sane one
+        bool all = !(median > 0.0) || double.IsInfinity(median);
+        double limit = median * SpanOutlierStretch;
+        for (int i = 0; i < n; i++) counts[i] = all || (!double.IsNaN(stretch[i]) && stretch[i] <= limit);
+        return counts;
+    }
+
     // POINT-UV MATERIALS (2026-09-19, the Romanic's deck): a ripped model often paints a part with a textured
     // material whose every face carries the SAME single UV — the texture is used as a colour picker, one texel.
     // Packed as a texture, that point lands on one edge of its atlas cell (the fold maps v = 1 to 0), where the

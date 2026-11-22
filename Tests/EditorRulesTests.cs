@@ -277,6 +277,37 @@ public class NaturalOrderTests
     }
 
     [Fact]
+    public void A_broken_edge_strip_is_left_out_of_the_tiled_span()
+    {
+        // the F100's wing: 240 triangles at ~0.07 U per metre inside 0..1, 36 edge strips at >= 124x that
+        var wing = Enumerable.Repeat(0.07, 240).Concat(Enumerable.Repeat(0.07 * 124, 36)).ToList();
+        var c = BakerRules.SpanCounts(wing);
+        Assert.Equal(240, c.Count(x => x));
+        Assert.All(c.Skip(240), x => Assert.False(x));
+        // a tiled deck: an even density, a 30x spread still within the 50x limit — every triangle counts
+        Assert.All(BakerRules.SpanCounts(new[] { 2.0, 2.0, 0.5, 15.0, 60.0 }), x => Assert.True(x));
+        Assert.Equal(new[] { true, true, true, false }, BakerRules.SpanCounts(new[] { 1.0, 1.0, 50.0, 50.0001 }));   // the limit is inclusive
+        // the lower median: an even split keeps the sane half
+        Assert.Equal(new[] { true, false }, BakerRules.SpanCounts(new[] { 1.0, 1000.0 }));
+        // no texture motion on the axis (median 0) or a broken median: every triangle counts, as before the rule
+        Assert.All(BakerRules.SpanCounts(new[] { 0.0, 0.0, 0.0, 9.0 }), x => Assert.True(x));
+        Assert.All(BakerRules.SpanCounts(new[] { double.PositiveInfinity, double.NaN, 1.0 }), x => Assert.True(x));
+        // a NaN stretch is an outlier when the median is sane
+        Assert.Equal(new[] { true, true, false }, BakerRules.SpanCounts(new[] { 1.0, 1.0, double.NaN }));
+        Assert.Empty(BakerRules.SpanCounts(new double[0]));
+        Assert.Empty(BakerRules.SpanCounts(null));
+    }
+
+    [Fact]
+    public void Edge_stretch_is_uv_per_model_unit_and_a_zero_length_edge_with_motion_is_infinite()
+    {
+        Assert.Equal(0.5, BakerRules.EdgeStretch(-1.0, 2.0));
+        Assert.Equal(0.0, BakerRules.EdgeStretch(0.0, 0.0));     // a degenerate edge with no UV motion stretches nothing
+        Assert.Equal(double.PositiveInfinity, BakerRules.EdgeStretch(0.3, 0.0));
+        Assert.Equal(double.PositiveInfinity, BakerRules.EdgeStretch(double.NaN, 1.0));
+    }
+
+    [Fact]
     public void Point_uv_material_is_the_one_texel_its_whole_span_fits_in()
     {
         Assert.True(BakerRules.PointUv(0.0, 0.0, 512, 1024));            // the Romanic's deck: every face at (0, 1)

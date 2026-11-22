@@ -2227,13 +2227,22 @@ public static class UniversalBaker
             {
                 var mm0 = mf0.sharedMesh; if (mm0 == null) continue;
                 var uv0 = mm0.uv; if (uv0 == null || uv0.Length != mm0.vertexCount) continue;
+                var p0 = mm0.vertices; var w0 = mf0.transform.localToWorldMatrix;   // world space: one material's parts may sit at different scales
                 var mr1 = mf0.GetComponent<MeshRenderer>(); var mats1 = mr1 != null ? mr1.sharedMaterials : null;
                 for (int s0 = 0; s0 < Mathf.Max(1, mm0.subMeshCount); s0++)
                 {
                     var smat0 = (mats1 != null && mats1.Length > 0) ? mats1[Mathf.Min(s0, mats1.Length - 1)] : null;
                     int mi0 = smat0 != null ? matList.IndexOf(smat0) : -1; if (mi0 < 0) continue;
-                    foreach (int vi0 in mm0.GetTriangles(s0)) tileSpans[mi0].Add(uv0[vi0]);
+                    var t0 = mm0.GetTriangles(s0);
+                    for (int k0 = 0; k0 + 2 < t0.Length; k0 += 3)
+                        tileSpans[mi0].AddTriangle(uv0[t0[k0]], uv0[t0[k0 + 1]], uv0[t0[k0 + 2]],
+                            w0.MultiplyPoint3x4(p0[t0[k0]]), w0.MultiplyPoint3x4(p0[t0[k0 + 1]]), w0.MultiplyPoint3x4(p0[t0[k0 + 2]]));
                 }
+            }
+            for (int i0 = 0; i0 < tileSpans.Length; i0++)
+            {
+                string ol = tileSpans[i0].Resolve(matList[i0] != null ? matList[i0].name : "?");
+                if (ol != null) Debug.Log($"[Factory] {name} span outliers {ol}");
             }
             foreach (string line in PointSwatches(albs, tileSpans, flatSwatch, matList.Select(mm => mm != null ? mm.name : "?").ToArray())) Debug.Log($"[Factory] {name} point-UV material {line}");
             foreach (string line in PreTileAlbedos(albs, tileSpans, flatSwatch, matList.Select(mm => mm != null ? mm.name : "?").ToArray())) Debug.Log($"[Factory] {name} tiled material {line}");
@@ -2834,12 +2843,46 @@ public static class UniversalBaker
         public float SpanU => U1 - U0; public float SpanV => V1 - V0;
         public bool TiledU => Any && SpanU > (float)BakerRules.TiledSpan;
         public bool TiledV => Any && SpanV > (float)BakerRules.TiledSpan;
-        public void Add(Vector2 uv) { if (uv.x < U0) U0 = uv.x; if (uv.x > U1) U1 = uv.x; if (uv.y < V0) V0 = uv.y; if (uv.y > V1) V1 = uv.y; }
-        // the UV inside its cell: a tiled axis maps the whole span across the cell once, an untiled axis folds as before
+        // the triangles, gathered first: the span counts only those whose texture stretch is in line with the
+        // material's median (BakerRules.SpanCounts — a broken edge-strip projection must not make a part "tiled")
+        readonly List<Vector2> triUv = new List<Vector2>();
+        readonly List<double> stretchU = new List<double>(), stretchV = new List<double>();
+        public void AddTriangle(Vector2 a, Vector2 b, Vector2 c, Vector3 pa, Vector3 pb, Vector3 pc)
+        {
+            triUv.Add(a); triUv.Add(b); triUv.Add(c);
+            double lab = Vector3.Distance(pa, pb), lbc = Vector3.Distance(pb, pc), lca = Vector3.Distance(pc, pa);
+            stretchU.Add(Math.Max(BakerRules.EdgeStretch((double)b.x - a.x, lab), Math.Max(BakerRules.EdgeStretch((double)c.x - b.x, lbc), BakerRules.EdgeStretch((double)a.x - c.x, lca))));
+            stretchV.Add(Math.Max(BakerRules.EdgeStretch((double)b.y - a.y, lab), Math.Max(BakerRules.EdgeStretch((double)c.y - b.y, lbc), BakerRules.EdgeStretch((double)a.y - c.y, lca))));
+        }
+        // Measure the span from the gathered triangles. Returns a log line when outliers were left out of it, else null.
+        public string Resolve(string label)
+        {
+            var cu = BakerRules.SpanCounts(stretchU); var cv = BakerRules.SpanCounts(stretchV);
+            float ru0 = float.PositiveInfinity, ru1 = float.NegativeInfinity, rv0 = float.PositiveInfinity, rv1 = float.NegativeInfinity;
+            int outU = 0, outV = 0;
+            for (int t = 0; t < cu.Length; t++)
+                for (int k = 0; k < 3; k++)
+                {
+                    var uv = triUv[3 * t + k];
+                    if (uv.x < ru0) ru0 = uv.x; if (uv.x > ru1) ru1 = uv.x; if (uv.y < rv0) rv0 = uv.y; if (uv.y > rv1) rv1 = uv.y;
+                    if (cu[t]) { if (uv.x < U0) U0 = uv.x; if (uv.x > U1) U1 = uv.x; }
+                    if (cv[t]) { if (uv.y < V0) V0 = uv.y; if (uv.y > V1) V1 = uv.y; }
+                }
+            for (int t = 0; t < cu.Length; t++) { if (!cu[t]) outU++; if (!cv[t]) outV++; }
+            // both axes or neither: Any reads U0 alone, and every counted axis needs a value (SpanCounts keeps >= 1 triangle)
+            if (float.IsInfinity(U0) || float.IsInfinity(V0)) { U0 = ru0; U1 = ru1; V0 = rv0; V1 = rv1; }
+            triUv.Clear(); stretchU.Clear(); stretchV.Clear();
+            if ((outU == 0 && outV == 0) || (ru1 - ru0 == SpanU && rv1 - rv0 == SpanV)) return null;   // say so only when the span moved
+            return string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "'{0}': {1} / {2} triangle(s) stretch the texture more than {3}x the material's median on U / V (a broken projection, e.g. edge strips) — left out of the span: U {4:0.#} -> {5:0.#}, V {6:0.#} -> {7:0.#} tiles",
+                label, outU, outV, BakerRules.SpanOutlierStretch, ru1 - ru0, SpanU, rv1 - rv0, SpanV);
+        }
+        // the UV inside its cell: a tiled axis maps the whole span across the cell once (clamped: an outlier left out of the
+        // span stays inside its own cell), an untiled axis folds as before
         public Vector2 Cell(Vector2 uv, Rect r)
         {
-            float fu = TiledU ? (uv.x - U0) / SpanU : uv.x - Mathf.Floor(uv.x);
-            float fv = TiledV ? (uv.y - V0) / SpanV : uv.y - Mathf.Floor(uv.y);
+            float fu = TiledU ? Mathf.Clamp01((uv.x - U0) / SpanU) : uv.x - Mathf.Floor(uv.x);
+            float fv = TiledV ? Mathf.Clamp01((uv.y - V0) / SpanV) : uv.y - Mathf.Floor(uv.y);
             return new Vector2(r.x + fu * r.width, r.y + fv * r.height);
         }
     }
@@ -3174,13 +3217,22 @@ public static class UniversalBaker
         {
             var m0 = smr0.sharedMesh; if (m0 == null) continue;
             var uv0 = m0.uv; if (uv0 == null || uv0.Length != m0.vertexCount) continue;
+            var p0 = m0.vertices; var w0 = smr0.transform.localToWorldMatrix;   // bind space through the renderer: a stretch RATIO only needs one scale per part
             var mats0 = smr0.sharedMaterials;
             for (int s0 = 0; s0 < m0.subMeshCount; s0++)
             {
                 int ri0 = RectIndexFor((mats0 != null && s0 < mats0.Length) ? mats0[s0] : null, s0, baseNames, baseRaw);
                 if (ri0 < 0 || ri0 >= tileSpans.Length) continue;
-                foreach (int vi0 in m0.GetTriangles(s0)) tileSpans[ri0].Add(uv0[vi0]);
+                var t0 = m0.GetTriangles(s0);
+                for (int k0 = 0; k0 + 2 < t0.Length; k0 += 3)
+                    tileSpans[ri0].AddTriangle(uv0[t0[k0]], uv0[t0[k0 + 1]], uv0[t0[k0 + 2]],
+                        w0.MultiplyPoint3x4(p0[t0[k0]]), w0.MultiplyPoint3x4(p0[t0[k0 + 1]]), w0.MultiplyPoint3x4(p0[t0[k0 + 2]]));
             }
+        }
+        for (int i0 = 0; i0 < tileSpans.Length; i0++)
+        {
+            string ol = tileSpans[i0].Resolve(orderedAlb[i0].Key);
+            if (ol != null) Debug.Log($"[Factory] {name} span outliers {ol}");
         }
         foreach (string line in PointSwatches(albs, tileSpans, flatSwatch, orderedAlb.Select(kv => kv.Key).ToArray())) Debug.Log($"[Factory] {name} point-UV material {line}");
         foreach (string line in PreTileAlbedos(albs, tileSpans, flatSwatch, orderedAlb.Select(kv => kv.Key).ToArray())) Debug.Log($"[Factory] {name} tiled material {line}");
