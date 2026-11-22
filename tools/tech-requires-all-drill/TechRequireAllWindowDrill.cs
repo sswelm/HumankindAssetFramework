@@ -30,6 +30,8 @@ public static class TechRequireAllWindowDrill
     static string goodSource, watchedVersion;
     static Func<string, List<TechTreeData.Node>> plainTree;
 
+    static readonly List<string> saves = new List<string>();   // the viewer's "[TechTree] Saved: ..." lines
+    static string LastSave => saves.Count > 0 ? saves[saves.Count - 1] : "(none)";
     static void Check(string name, bool ok, string detail = "") { log.AppendLine((ok ? "PASS " : "FAIL ") + name + (ok || detail == "" ? "" : "   [" + detail + "]")); if (!ok) failed++; }
     static T Get<T>(string field) => (T)typeof(TechRequireAllWindow).GetField(field, Private).GetValue(window);
     static void Set(string field, object value) => typeof(TechRequireAllWindow).GetField(field, Private).SetValue(window, value);
@@ -76,6 +78,7 @@ public static class TechRequireAllWindowDrill
         UnityEngine.Object.DestroyImmediate(pixels);
         AssetDatabase.ImportAsset(ArtPath);
     }
+    static Func<List<TechTreeData.Era>> productionEras;   // the window's own reader, before the drill replaced it
     static List<TechTreeData.Era> DrillEras() => Enumerable.Range(0, 4).Select(i => new TechTreeData.Era { Name = "Era" + i, Index = i }).ToList();
     // the viewer's pixels as its last repaint left them (TechTreeWindow.AfterCanvasDrawn), rows from the bottom
     static Color32[] shot; static int shotWidth, shotHeight; static float shotScale;
@@ -217,6 +220,7 @@ public static class TechRequireAllWindowDrill
             return tree;
         };
         MakeArt();
+        if (productionEras == null) productionEras = TechTreeWindow.ErasImpl;
         TechTreeWindow.ErasImpl = DrillEras;
         viewer = ScriptableObject.CreateInstance<TechTreeWindow>();   // OnEnable: reads the tree and the list
         VSet("_editMode", true);
@@ -256,6 +260,7 @@ public static class TechRequireAllWindowDrill
                 if ((type == LogType.Error || type == LogType.Exception || type == LogType.Assert) && !msg.StartsWith("[TechTree] Tech/Mapper type not found"))
                     errors.Add(type + ": " + msg);
                 if (type == LogType.Warning && msg.StartsWith("[TechTree]")) warnings.Add(msg);
+                if (type == LogType.Log && msg.StartsWith("[TechTree] Saved:")) saves.Add(msg);
             };
             OpenWindow();
             deadline = EditorApplication.timeSinceStartup + 60;
@@ -534,13 +539,21 @@ public static class TechRequireAllWindowDrill
                           && ReferenceEquals(VGet<TechTreeData.Node>("_selected"), N(T)) && VGet<Vector2>("_pan") == panWas && VGet<float>("_zoom") == zoomWas,
                           "staged " + Staged + " selected " + (VGet<TechTreeData.Node>("_selected")?.Name ?? "none") + " pan " + VGet<Vector2>("_pan") + " zoom " + VGet<float>("_zoom"));
                     VCall("CommitChanges");   // the rule is written; position, prerequisites and visibility have no asset here and stay
+                    Check("save: the parts without an asset are counted as skipped in the Save line, the era with them",
+                          LastSave.Contains(" · 4 skipped (no writable target"), LastSave);
                     Check("save: a saved rule switch leaves the staged set, the parts without an asset stay",
-                          Deployed == T && Staged == 1 && (int)VCall("EffX", N(T)) == 20 && (int)VCall("EffVisibility", N(T)) == 0 && VGet<HashSet<string>>("_requireAll").Contains(T), Deployed + " staged " + Staged);
+                          Deployed == T && Staged == 1 && (int)VCall("EffX", N(T)) == 20 && (int)VCall("EffVisibility", N(T)) == 0 && (string)VCall("EffEra", N(T)) == "Era3"
+                          && VGet<HashSet<string>>("_requireAll").Contains(T), Deployed + " staged " + Staged);
                     VCall("SetPosition", N(T), 16, 4); VCall("SetVisibility", N(T), -1); VCall("AddPrereq", N(T), "Technology_B");
                     N(T).Tier = "Tier2";
                     Check("    the era alone is still staged, and it is the era the card shows", Staged == 1 && (string)VCall("EffEra", N(T)) == "Era3" && N(T).Era == "Era2" && viewer.CardEraTier(N(T)) == "E3 · T2", "staged " + Staged + " card " + viewer.CardEraTier(N(T)));
                     VCall("SetEra", N(T), "Era2");
                     Check("    the saved era again on the card, and no tier is no dot", viewer.CardEraTier(N(T)) == "E2 · T2" && viewer.CardEraTier(N("Technology_A")) == "E1", viewer.CardEraTier(N(T)) + " / " + viewer.CardEraTier(N("Technology_A")));
+                    VCall("SetEra", N(T), "");
+                    Check("    no era: the tier alone, no dot", viewer.CardEraTier(N(T)) == "T2", viewer.CardEraTier(N(T)));
+                    VCall("SetEra", N(T), "Era2");
+                    var erasInWindow = VGet<List<TechTreeData.Era>>("_eras");
+                    Check("the window holds the project's eras by index", string.Join(",", erasInWindow.Select(e => e.Name)) == "Era0,Era1,Era2,Era3", string.Join(",", erasInWindow.Select(e => e.Name)));
                     Check("    typed back: nothing staged", Staged == 0, "staged " + Staged);
                     VCall("SetRule", N(T), false); VCall("CommitChanges");
                     Check("    the list is empty again", Deployed == "" && Staged == 0, Deployed);
@@ -689,10 +702,60 @@ public static class TechRequireAllWindowDrill
                     Check("era separators: one between two eras that both have a card, halfway between the earlier era's right end and the later one's left end, from the STAGED era and column",
                           one.Count == 1 && one[0].LeftEra == 1 && Mathf.Abs(one[0].X - 2523f) < 0.01f,
                           one.Count == 1 ? one[0].LeftEra + " at " + one[0].X : one.Count.ToString());
+                    // ... and as the canvas DRAWS it (review C: no check observed the drawing). Zoom 0.5 and a pan that puts the
+                    // separator inside the canvas: everything the drawing records must follow the view.
+                    var viewWas = VGet<Vector2>("_pan"); float zoomWas = VGet<float>("_zoom");
+                    var drawPan = new Vector2(300f - 2523f * 0.5f, 40f);
+                    VSet("_zoom", 0.5f); VSet("_pan", drawPan);
+                    viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                    var drawn = viewer.SeparatorDraws;
+                    var d0 = drawn.Count == 1 ? drawn[0] : null;
+                    Vector2 At(Vector2 unit) => unit * 0.5f + drawPan;   // the game's units to the window, as the view says
+                    Vector2 lineTopWant = At(TechTreeWindow.EraLinePoint(2523f, -56f)), lineBottomWant = At(TechTreeWindow.EraLinePoint(2523f, 928f));
+                    Check("era separators, drawn: under the cards, the line from 56 above the first row to 928, the numerals I and II either side of it at height 436, all where the view puts them",
+                          d0 != null && d0.LeftEra == 1 && d0.CardsDrawnBefore == 0 && (d0.LineTop - lineTopWant).magnitude < 0.01f && (d0.LineBottom - lineBottomWant).magnitude < 0.01f
+                          && d0.LeftText == "I" && d0.RightText == "II" && (d0.LeftLabel - At(new Vector2(2523f - 139f, 436f))).magnitude < 0.01f && (d0.RightLabel - At(new Vector2(2523f + 139f, 436f))).magnitude < 0.01f,
+                          d0 == null ? "drawn " + drawn.Count : "top " + d0.LineTop + " want " + lineTopWant + " left " + d0.LeftText + "@" + d0.LeftLabel + " right " + d0.RightText + "@" + d0.RightLabel + " cards before " + d0.CardsDrawnBefore);
+                    Check("era separators, drawn: the line is visible and drawn piece by piece where it is inside the canvas",
+                          d0 != null && d0.PiecesDrawn >= 18 && d0.MaxAlpha > 0.5f && d0.MinAlpha < d0.MaxAlpha * 0.2f && d0.Width >= 1f,
+                          d0 == null ? "none" : d0.PiecesDrawn + " pieces, alpha " + d0.MinAlpha + ".." + d0.MaxAlpha + " width " + d0.Width);
+                    VSet("_zoom", 0.05f); VSet("_pan", new Vector2(300f - 2523f * 0.05f, 40f));
+                    viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                    Check("era separators, drawn: zoomed far out the numerals are left out, the line is not", viewer.SeparatorDraws.Count == 1 && viewer.SeparatorDraws[0].LeftText == null && viewer.SeparatorDraws[0].PiecesDrawn > 0);
+                    VSet("_pan", new Vector2(-100000f, 40f));
+                    viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                    Check("era separators, drawn: a separator outside the canvas draws no piece of its line", viewer.SeparatorDraws.Count == 1 && viewer.SeparatorDraws[0].PiecesDrawn == 0);
+                    VSet("_zoom", zoomWas); VSet("_pan", viewWas);
+                    VCall("SetVisibility", N(R0), 2);
+                    Check("    a technology in the game but not on its tech screen (Visibility without the TechnologyScreen bit) has no card: no separator", viewer.EraSeparatorsNow().Count == 0);
                     VCall("SetVisibility", N(R0), 0);
                     Check("    a technology switched off has no card: no separator", viewer.EraSeparatorsNow().Count == 0);
                     VCall("SetVisibility", N(R0), -1); VCall("SetEra", N(R0), ""); VCall("SetPosition", N(R0), 24, 8);
                     Check("    typed back: nothing staged", Staged == 0, "staged " + Staged);
+
+                    // ---- the project's eras as the window reads them (TechTreeData.Eras, not the drill's seam): the copy under
+                    // Databases wins over the reference folder's, which wins over any other; by index; the cost per tier
+                    Folder("Assets/Databases/Eras"); Folder("Assets/VanillaReference/Eras"); Folder("Assets/Elsewhere");
+                    void EraAsset(string path, int index, params string[] costs) => NewAsset<Amplitude.Mercury.Data.Simulation.EraDefinition>(path, e =>
+                    {
+                        e.EraIndex = index;
+                        e.TechnologyCostRpnPerTier = costs.Select((c, i) => new Amplitude.Mercury.Data.Simulation.EraDefinition.TechnologyCostAndTier { Tier = (Amplitude.Mercury.Data.Simulation.TechnologyTiers)i, TechnologyCostRpnReference = new TechTreeDrillTypes.Reference(c) })
+                                                       .Where(c => c.TechnologyCostRpnReference.ElementName != "-").ToArray();
+                    });
+                    EraAsset("Assets/Databases/Eras/EraB.asset", 2, "B_T1", "", "B_T3");
+                    EraAsset("Assets/VanillaReference/Eras/EraB.asset", 5, "wrong", "wrong", "wrong");
+                    EraAsset("Assets/VanillaReference/Eras/EraA.asset", 1, "A_T1");
+                    EraAsset("Assets/Elsewhere/EraA.asset", 7, "wrong");
+                    EraAsset("Assets/Elsewhere/EraC.asset", 0, "-", "C_T2");
+                    AssetDatabase.SaveAssets();
+                    var read = TechTreeData.Eras("Assets/VanillaReference");
+                    string Shown(TechTreeData.Era e) => e.Name + "=" + e.Index + "[" + string.Join("|", e.TierCosts ?? new string[0]) + "]";
+                    var fromWindow = productionEras();
+                    var fromReader = TechTreeData.Eras(TechTreeData.ReferenceFolder);   // the machine's reference folder, read only
+                    Check("eras: the window's own reader is TechTreeData.Eras (the drill puts its own in after keeping it)",
+                          fromWindow.Count > 0 && string.Join(" ", fromWindow.Select(Shown)) == string.Join(" ", fromReader.Select(Shown)), string.Join(" ", fromWindow.Select(Shown)) + " / " + string.Join(" ", fromReader.Select(Shown)));
+                    Check("eras, read from the project: Databases over the reference folder over elsewhere, by index, each with its cost per tier (by the entry's Tier, empty where none)",
+                          string.Join(" ", read.Select(Shown)) == "EraC=0[|C_T2] EraA=1[A_T1] EraB=2[B_T1||B_T3]", string.Join(" ", read.Select(Shown)));
 
                     VSet("_pan", new Vector2(-123, 45)); VSet("_zoom", 0.7f);   // a view no framing produces
                     VCall("SetPosition", N(M), 20, 6); VCall("RemovePrereq", N(M), "Technology_B"); VCall("SetVisibility", N(M), 0); VCall("SetEra", N(M), "Era3");
@@ -701,6 +764,7 @@ public static class TechRequireAllWindowDrill
                     Check("save into assets: X and Y are in the mapper, each in its own field", mMap.TechTreeX == 20 && mMap.TechTreeY == 6, mMap.TechTreeX + "," + mMap.TechTreeY);
                     Check("save into assets: prerequisites and visibility are in the definition", NamesOf(mDef).SequenceEqual(new[] { "Technology_A" }) && mDef.Visibility == TechTreeDrillDefinition.Flags.Never, string.Join(",", NamesOf(mDef)) + " " + mDef.Visibility);
                     string mFile = File.ReadAllText(Path.Combine(Path.GetDirectoryName(Application.dataPath), DbDefs + "/" + M + ".asset"));
+                    Check("save: the Save line counts the era with the other parts", LastSave.StartsWith("[TechTree] Saved: 1 position, 1 prerequisite, 1 visibility change(s), 1 era change"), LastSave);
                     Check("save into assets: the era is in the definition's FILE, as the one string the game's reference keeps, beside the prerequisites and the visibility of the same save",
                           TechTreeData.ReadEra(mDef) == "Era3" && mFile.Contains("serializableElementName: Era3") && !mFile.Contains("Era1") && mFile.Contains("- Technology_A") && !mFile.Contains("- Technology_B") && mFile.Contains("Visibility: 0"),
                           TechTreeData.ReadEra(mDef) + " | " + mFile.Replace("\n", " ").Replace("\r", ""));
@@ -722,7 +786,8 @@ public static class TechRequireAllWindowDrill
                     // positions back in memory, silently, and the next Save wrote the old values over them.
                     Undo.PerformUndo();
                     mMap = Asset<TechTreeDrillMapper>(DbMaps + "/" + M + ".asset"); mDef = Asset<TechTreeDrillDefinition>(DbDefs + "/" + M + ".asset");
-                    Check("undo after a save takes nothing of the save back", mMap.TechTreeX == 20 && mMap.TechTreeY == 6 && mDef.Visibility == TechTreeDrillDefinition.Flags.Never && NamesOf(mDef).SequenceEqual(new[] { "Technology_A" })
+                    Check("undo after a save takes nothing of the save back, the era either", mMap.TechTreeX == 20 && mMap.TechTreeY == 6 && mDef.Visibility == TechTreeDrillDefinition.Flags.Never && NamesOf(mDef).SequenceEqual(new[] { "Technology_A" })
+                          && TechTreeData.ReadEra(mDef) == "Era2" && N(M).Era == "Era2"
                           && (int)VCall("EffX", N(M)) == 20 && Staged == 0, mMap.TechTreeX + "," + mMap.TechTreeY + " " + mDef.Visibility);
                     // An undo from elsewhere that does change a technology in memory is shown AND said
                     int warnedBefore = warnings.Count(w => w.Contains("Undo / Redo changed"));
@@ -1126,7 +1191,8 @@ public static class TechRequireAllWindowDrill
                     // era 0 at columns 0 and 6, era 1 at 12 and 20, era 3 at 30, era 2 without a card: the right end of
                     // era 0 is 6 * 74 + 310 = 754, the left end of era 1 is 888, halfway 821; no separator beside era 2
                     Check("era separators: halfway between the right end of an era and the left end of the next; none beside an era without a card",
-                          Separators(4, Card(1, 20), Card(0, 6), Card(3, 30), Card(0, 0), Card(1, 12)) == "0|1@821", Separators(4, Card(1, 20), Card(0, 6), Card(3, 30), Card(0, 0), Card(1, 12)));
+                          Separators(4, Card(1, 20), Card(0, 6), Card(3, 30), Card(0, 0), Card(1, 12)) == "0|1@821" && Separators(4, Card(1, 12), Card(0, 0), Card(1, 20), Card(0, 6)) == "0|1@821",
+                          Separators(4, Card(1, 20), Card(0, 6), Card(3, 30), Card(0, 0), Card(1, 12)) + " / " + Separators(4, Card(1, 12), Card(0, 0), Card(1, 20), Card(0, 6)));
                     // a later era's card LEFT of an earlier era's: (5 * 74 + 310 + 1 * 74) / 2 = 377, inside the overlap
                     Check("era separators: where two eras overlap the separator is inside the overlap, as in the game; every pair of neighbours gets its own",
                           Separators(3, Card(0, 5), Card(1, 1)) == "0|1@377" && Separators(3, Card(0, 0), Card(1, 10), Card(2, 20)) == "0|1@525 1|2@1265",
@@ -1134,7 +1200,8 @@ public static class TechRequireAllWindowDrill
                     Check("era separators: an era index the project does not have is no era; fewer than two eras, no separator",
                           Separators(2, Card(0, 0), Card(-1, 3), Card(2, 9)) == "" && Separators(2, Card(0, 0), Card(1, 9), Card(5, 2)) == "0|1@488" && Separators(1, Card(0, 0)) == "" && Separators(0) == "");
                     Check("era numerals: the game's Roman numerals, nothing for the era before the first",
-                          TechTreeWindow.ToRoman(0) == "" && TechTreeWindow.ToRoman(1) == "I" && TechTreeWindow.ToRoman(4) == "IV" && TechTreeWindow.ToRoman(5) == "V" && TechTreeWindow.ToRoman(6) == "VI"
+                          TechTreeWindow.ToRoman(0) == "" && TechTreeWindow.ToRoman(1) == "I" && TechTreeWindow.ToRoman(2) == "II" && TechTreeWindow.ToRoman(3) == "III" && TechTreeWindow.ToRoman(4) == "IV"
+                          && TechTreeWindow.ToRoman(5) == "V" && TechTreeWindow.ToRoman(6) == "VI" && TechTreeWindow.ToRoman(7) == "VII" && TechTreeWindow.ToRoman(8) == "VIII"
                           && TechTreeWindow.ToRoman(9) == "IX" && TechTreeWindow.ToRoman(14) == "XIV" && TechTreeWindow.ToRoman(40) == "XL" && TechTreeWindow.ToRoman(1994) == "MCMXCIV" && TechTreeWindow.ToRoman(-2) == "");
                     // The game's numerals: at half its content's height (920 / 2) less the 24 above the first row = 436, whatever
                     // the cards. The line crosses that height 13 right of the separator's place (measured on the user's
@@ -1160,8 +1227,11 @@ public static class TechRequireAllWindowDrill
                     Check("era choice: an era the project does not have, or none, stays the first entry, so opening the list changes nothing",
                           string.Join(",", foreign) == "Era9,Era0,Era1,Era5" && foreignAt == 0 && foreignLabels[0] == "Era9  (not an era of this project)"
                           && string.Join(",", noEra) == ",Era0,Era1,Era5" && noEraAt == 0 && noEraLabels[0] == "(no era)", string.Join(" / ", foreignLabels) + " | " + string.Join(" / ", noEraLabels));
+                    Check("era choice: a pick of another entry asks for that era; the same entry, or one outside the list, asks for nothing",
+                          TechTreeWindow.PickedEra(choice, choiceAt, 1) == "Era1" && TechTreeWindow.PickedEra(choice, choiceAt, choiceAt) == null
+                          && TechTreeWindow.PickedEra(choice, choiceAt, -1) == null && TechTreeWindow.PickedEra(choice, choiceAt, choice.Length) == null && TechTreeWindow.PickedEra(away, awayAt, 0) == "Era9");
                     Check("era note: nothing for an era of the project; a missing or unknown era is said; with no eras read, nothing is held against the name",
-                          TechTreeWindow.EraNote(projectEras, "Era1") == "" && TechTreeWindow.EraNote(projectEras, "").StartsWith("This technology names no era.")
+                          TechTreeWindow.EraNote(projectEras, "Era1") == "" && TechTreeWindow.EraNote(projectEras, "Era0") == "" && TechTreeWindow.EraNote(projectEras, "").StartsWith("This technology names no era.")
                           && TechTreeWindow.EraNote(projectEras, "Era9") == "The era 'Era9' is not one of this project's eras (Era0, Era1, Era5). The game would not find it."
                           && TechTreeWindow.EraNote(new List<TechTreeData.Era>(), "Era9") == "" && TechTreeWindow.EraIndexOf(projectEras, "Era5") == 5 && TechTreeWindow.EraIndexOf(projectEras, "Era9") == -1 && TechTreeWindow.EraIndexOf(projectEras, null) == -1,
                           TechTreeWindow.EraNote(projectEras, "Era9"));
@@ -1232,6 +1302,18 @@ public static class TechRequireAllWindowDrill
                     Check("artwork: the selected card's gold edge is drawn over a neighbour's artwork; inside the card the artwork stays on top",
                           edge.Count == 1 && gold(edge[0]) && inside.Count == 9 && inside.All(Red),
                           "edge " + (edge.Count > 0 ? edge[0].ToString() : "-") + " inside " + (inside.Count > 0 ? inside[0].ToString() : "-"));
+                    // the artworks of one draw only: the list is rebuilt per repaint (without that, old rectangles were drawn again)
+                    viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                    var artList = (System.Collections.IList)typeof(TechTreeWindow).GetField("_artDraws", Private).GetValue(viewer);
+                    Check("artwork: each repaint draws the artworks of that view, once", artList.Count == 1, artList.Count + " artworks listed");
+                    // a technology without a card in the game is faint, its artwork too
+                    VCall("SetVisibility", N("Technology_T"), 0);
+                    TechTreeWindow.AfterCanvasDrawn = Capture;
+                    viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                    TechTreeWindow.AfterCanvasDrawn = null;
+                    var faint = Around(new Vector2(cardNow.x + 350f, cardNow.y - 30f), 1);   // the artwork over the bare canvas
+                    Check("artwork: a switched-off technology's artwork is drawn faint", faint.Count == 9 && faint.All(c => c.r > 70 && c.r < 170 && c.g < 60), faint.Count > 0 ? faint[0].ToString() : "-");
+                    VCall("SetVisibility", N("Technology_T"), -1);
                     VSet("_selected", null);
 
                     // The card's row must load its image ITSELF. The side strip asks for the selected technology's icons
@@ -1298,6 +1380,13 @@ public class TechTreeDrillMapper : ScriptableObject
 // subclasses, and the constructible base type has the game's full name (the index finds it by that).
 namespace Amplitude.Mercury.Data.Simulation
 {
+    public enum TechnologyTiers { Tier1, Tier2, Tier3, Tier4 }
+    public class EraDefinition : ScriptableObject
+    {
+        [Serializable] public struct TechnologyCostAndTier { public TechnologyTiers Tier; public TechTreeDrillTypes.Reference TechnologyCostRpnReference; }
+        public int EraIndex;
+        public TechnologyCostAndTier[] TechnologyCostRpnPerTier;
+    }
     public abstract class ConstructibleDefinition : ScriptableObject { public int Level; public TechTreeDrillTypes.FactionPrerequisite FactionPrerequisite; }
 }
 

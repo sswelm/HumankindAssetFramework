@@ -654,6 +654,8 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 
         bool showLabels = _zoom >= LABEL_MIN_ZOOM;
 
+        _artOrigin = new Vector2(canvas.x, canvas.y);
+        _cardsDrawn = 0;
         DrawEraSeparators(local);   // under the links and the cards, as in the game
 
         // links, routed as the game routes them (from the effective prerequisites)
@@ -704,7 +706,6 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         // of its own card, over its title, the title's line and its unlock row; a card that comes later in the game's
         // list of technologies is drawn over an earlier card's artwork, which this window does not copy.
         _artDraws.Clear();
-        _artOrigin = new Vector2(canvas.x, canvas.y);
         foreach (var n in _nodes)
         {
             Rect r = NodeRect(n);
@@ -720,6 +721,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             fill.a *= fade; if (!selected) edge.a *= fade;
             GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, fill, 0, radius);
             GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, edge, selected ? 2f : 1f, radius);
+            _cardsDrawn++;
             GUI.color = new Color(1f, 1f, 1f, fade);   // the texts; reset at the end of this card
 
             // the artwork, over the card's right end and standing out of it: remembered, drawn after the cards
@@ -889,11 +891,25 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         return EraSeparators(cards, eraCount);
     }
 
+    /// <summary>What the last repaint drew of the era separators, in the window's coordinates (for the drill).</summary>
+    internal sealed class SeparatorDraw
+    {
+        public int LeftEra;
+        public Vector2 LineTop, LineBottom;         // the whole line's ends, drawn or not
+        public int PiecesDrawn; public float MaxAlpha, MinAlpha = 1f, Width;
+        public string LeftText, RightText; public Vector2 LeftLabel, RightLabel;   // null texts: no numerals at this zoom
+        public int CardsDrawnBefore;                // how many cards were already drawn: 0 = under the cards
+    }
+    internal readonly List<SeparatorDraw> SeparatorDraws = new List<SeparatorDraw>();
+    int _cardsDrawn;
+
     void DrawEraSeparators(Rect local)
     {
+        SeparatorDraws.Clear();
         if (_eras.Count < 2) return;
         var separators = EraSeparatorsNow();
         if (separators.Count == 0) return;
+        Vector2 origin = new Vector2(_artOrigin.x, _artOrigin.y);   // the clip's place in the window
         float width = Mathf.Clamp(1.5f * _zoom, 1f, 2.5f);
         int fontSize = Mathf.RoundToInt(ERA_LABEL_SIZE * _zoom);
         var numberStyle = fontSize >= 6
@@ -902,6 +918,10 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         const int pieces = 20;
         foreach (var separator in separators)
         {
+            var record = new SeparatorDraw { LeftEra = separator.LeftEra, CardsDrawnBefore = _cardsDrawn };
+            Vector2 top = EraLinePoint(separator.X, ERA_LINE_TOP), bottom = EraLinePoint(separator.X, ERA_LINE_BOTTOM);
+            record.LineTop = U2S(top.x, top.y) + origin; record.LineBottom = U2S(bottom.x, bottom.y) + origin;
+            SeparatorDraws.Add(record);
             // the line fades in over its first third and out over its last (the prefab's alpha keys: 0.3 and 0.7)
             for (int i = 0; i < pieces; i++)
             {
@@ -912,12 +932,16 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 if (Mathf.Max(sa.x, sb.x) < local.xMin || Mathf.Min(sa.x, sb.x) > local.xMax || sb.y < local.yMin || sa.y > local.yMax) continue;
                 Handles.color = new Color(ERA_LINE.r, ERA_LINE.g, ERA_LINE.b, ERA_LINE.a * alpha);
                 Handles.DrawAAPolyLine(width, sa, sb);
+                record.PiecesDrawn++; record.MaxAlpha = Mathf.Max(record.MaxAlpha, Handles.color.a); record.MinAlpha = Mathf.Min(record.MinAlpha, Handles.color.a); record.Width = width;
             }
             if (numberStyle == null) continue;
             Vector2 half = new Vector2(75f, 65f) * _zoom;   // the game's label box is 150 x 130
             Vector2 left = U2S(separator.X - ERA_LABEL_OFFSET, ERA_LABEL_Y), right = U2S(separator.X + ERA_LABEL_OFFSET, ERA_LABEL_Y);
-            GUI.Label(new Rect(left.x - half.x, left.y - half.y, 2 * half.x, 2 * half.y), ToRoman(separator.LeftEra), numberStyle);
-            GUI.Label(new Rect(right.x - half.x, right.y - half.y, 2 * half.x, 2 * half.y), ToRoman(separator.LeftEra + 1), numberStyle);
+            string leftText = ToRoman(separator.LeftEra), rightText = ToRoman(separator.LeftEra + 1);
+            GUI.Label(new Rect(left.x - half.x, left.y - half.y, 2 * half.x, 2 * half.y), leftText, numberStyle);
+            GUI.Label(new Rect(right.x - half.x, right.y - half.y, 2 * half.x, 2 * half.y), rightText, numberStyle);
+            record.LeftText = leftText; record.RightText = rightText;
+            record.LeftLabel = left + origin; record.RightLabel = right + origin;
         }
         Handles.color = Color.white;
     }
@@ -1207,8 +1231,8 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 string[] eraNames = EraChoices(_eras, EffEra(n), n.Era, out string[] eraLabels, out int eraAt);
                 using (new EditorGUI.DisabledScope(_eras.Count == 0))
                 {
-                    int eraPicked = EditorGUILayout.Popup(eraAt, eraLabels);
-                    if (eraPicked != eraAt && eraPicked >= 0 && eraPicked < eraNames.Length) SetEra(n, eraNames[eraPicked]);
+                    string eraNow = PickedEra(eraNames, eraAt, EditorGUILayout.Popup(eraAt, eraLabels));
+                    if (eraNow != null) SetEra(n, eraNow);
                 }
                 EditorGUILayout.EndHorizontal();
 
@@ -1394,6 +1418,10 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         labels = shown.ToArray();
         return names.ToArray();
     }
+
+    /// <summary>The era the popup's pick asks for; null when nothing changed or the pick is out of the list.</summary>
+    internal static string PickedEra(string[] names, int at, int picked) =>
+        picked != at && names != null && picked >= 0 && picked < names.Length ? names[picked] : null;
 
     /// <summary>What the side strip says about a technology's era; "" when it is one of the project's.</summary>
     internal static string EraNote(IList<TechTreeData.Era> eras, string era)

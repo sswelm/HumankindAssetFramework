@@ -504,12 +504,15 @@ public static class TechTreeData
     /// other, as for the UI mappers of the unlocks. Empty when the project holds no era definitions (or not the
     /// game's types).
     /// </summary>
-    internal static List<Era> Eras()
+    internal static List<Era> Eras() => Eras(ReferenceFolder);
+
+    /// <summary>The same, with the reference folder given (the drill: the machine's EditorPrefs are not its to read or write).</summary>
+    internal static List<Era> Eras(string refRoot)
     {
         var type = FindType("Amplitude.Mercury.Data.Simulation.EraDefinition");
         if (type == null) return new List<Era>();
         var f_index = type.GetField("EraIndex", ALL);
-        string refRoot = ReferenceFolder;
+        if (f_index == null) return new List<Era>();   // not the game's shape: no eras rather than every era at index 0
         var eras = new Dictionary<string, Era>(StringComparer.Ordinal);
         var ranks = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var o in LoadAllOfType(type))
@@ -518,7 +521,9 @@ public static class TechTreeData
             int rank = Under(o, DatabasesRoot) ? 2 : Under(o, refRoot) ? 1 : 0;
             if (ranks.TryGetValue(o.name, out int had) && had >= rank) continue;
             int index;
-            try { index = Convert.ToInt32(f_index?.GetValue(o)); }
+            object value = f_index.GetValue(o);
+            if (value == null) continue;
+            try { index = Convert.ToInt32(value); }
             catch (Exception) { continue; }
             eras[o.name] = new Era { Name = o.name, Index = index, TierCosts = TierCostsOf(o) }; ranks[o.name] = rank;
         }

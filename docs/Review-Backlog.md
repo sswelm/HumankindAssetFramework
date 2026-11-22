@@ -1901,22 +1901,21 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   a healthy source (seen in passing by a round-2 reviewer; older than this PR, not looked into).
 ## Tech Tree viewer — eras and separators, left open (2026-11-22)
 
-- **The separator's slant and colour are measured on a screenshot**, not derived. The game's line is a gradient in
-  an image stretched over the content's height, drawn with a stroke material; its angle in the prefab (5.63 rad in
-  the image's own space) did not give the 21 degrees the screenshot shows for the ENC tree, so the screenshot's
-  value is used as a constant. A tree of another height may lean differently in the game.
-- **Not drawn:** the dark shade on one side of the line, and the era number the game centres in each era's span
-  (`RefreshEraNumbers`, much fainter than the separator's numerals).
-- **The labels' height** is half the tree's extent from row 0 to the last card's bottom. The game uses half its
-  content's height; measured on one screenshot the two agree within the reading error.
-- **Making a title smaller in front of the artwork is not in a check on a drawn card** (the calculation is). A
-  planted defect that removes the call survives the drill.
-- **A card's fifth and sixth unlock icons can be under its artwork**, as in the game, where the artwork is opaque
-  at its lower left. Nothing in the side strip is hidden.
-- **The tier and `IsExclusiveToEra` cannot be edited.** The research cost comes from the era's cost for the
-  technology's tier.
-- **An era change is not held against the prerequisites**: a technology can be put in an era before its own
-  prerequisites' eras. The game's data allows it; the viewer says nothing.
+- **The era popup is not driven by any check**; the drill stages an era by `SetEra`, as the popup does.
+- **Every artwork is drawn over every card**, the user's choice. In the game a card later in the game's list of
+  technologies covers an earlier card's artwork (19 artwork boxes overlap another card in ENC, 7 in vanilla; an
+  upper bound, by rectangles). A card's fifth and sixth unlock icons are under its own artwork, in the game too.
+- **Read off one screenshot of the game:** the line's colour, and that it crosses the numerals' height 13 right of
+  the separator's place. The slant is the line texture's own (derived), the numerals' height the content's.
+- **The numerals' height assumes the game's 16:9 content** (920 at 1080 lines); another aspect ratio was not read.
+- **Not drawn:** the dark shade on one side of the line, and the faint era number the game centres in each era's
+  span (`RefreshEraNumbers`).
+- **An era with an index gap or a duplicate index**: the game indexes an array by EraIndex and fails; the window
+  draws. An era name the project does not have: the game fails to build its technology list; the window skips
+  the card and the side strip warns.
+- **The tier and `IsExclusiveToEra` cannot be edited**, and an era earlier than a prerequisite's era is not
+  warned about.
+- **A Reload reads the project's eras in a full asset scan of its own** (about 40 ms on the ENC copy).
 
 ## Tech Tree viewer — the unlock row, left open by the review of PR #307 (2026-11-22)
 
