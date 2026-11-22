@@ -851,6 +851,53 @@ public class MaxReaderTests : IDisposable
     }
 
     [Fact]
+    public void The_temporary_file_of_a_conversion_is_named_no_longer_than_its_target()
+    {
+        // A target Windows can hold must not fail for the length of the file that is written before it: with a longer
+        // temporary name every target of 224 to 259 characters was refused (measured on Unity's Mono and on .NET).
+        foreach (string name in new[] { "a.glb", "Ship_max.glb", new string('n', 60) + "_max.glb" })
+        {
+            string target = Path.Combine(dir, name), temporary = MaxModel.TemporaryBeside(target);
+            Assert.Equal(Path.GetDirectoryName(target), Path.GetDirectoryName(temporary));
+            Assert.EndsWith(".tmp", temporary);
+            Assert.True(Path.GetFileName(temporary).Length <= name.Length, name + " -> " + Path.GetFileName(temporary));
+        }
+
+        var scene = new Sc(); int root = scene.Root();
+        scene.Node("Deck", root, scene.Prs(Id, NoRot, One), scene.Mesh(Tri, Face(0, 1, 2)));
+        string deep = Path.Combine(dir, new string('d', 236 - dir.Length - 1));
+        Directory.CreateDirectory(deep);
+        string max = Path.Combine(deep, "Ship.max"), glb = MaxModel.DefaultGlbPath(max);
+        Assert.InRange(Path.GetFullPath(glb).Length, 224, 259);
+        System.IO.File.WriteAllBytes(max, scene.File());
+
+        Assert.NotNull(MaxModel.ConvertToGlb(max, glb, null, out bool unchanged));   // a new file: the move
+        byte[] original = System.IO.File.ReadAllBytes(glb);
+        System.IO.File.WriteAllBytes(glb, new byte[] { 1, 2, 3 });
+        Assert.NotNull(MaxModel.ConvertToGlb(max, glb, null, out unchanged, () => true));   // other bytes: the replacement
+        Assert.False(unchanged);
+        Assert.Equal(original, System.IO.File.ReadAllBytes(glb));
+        Assert.Empty(Directory.GetFiles(deep, "*.tmp"));
+    }
+
+    [Fact]
+    public void A_temporary_name_that_is_taken_fails_the_conversion_and_deletes_no_file_it_did_not_make()
+    {
+        var scene = new Sc(); int root = scene.Root();
+        scene.Node("Deck", root, scene.Prs(Id, NoRot, One), scene.Mesh(Tri, Face(0, 1, 2)));
+        string max = Path.Combine(dir, "Ship.max"), glb = Path.Combine(dir, "a.glb");
+        System.IO.File.WriteAllBytes(max, scene.File());
+        // the target's name leaves room for one random character: every name the conversion can choose is taken
+        foreach (char c in "0123456789abcdef") System.IO.File.WriteAllText(Path.Combine(dir, c + ".tmp"), "not the reader's");
+
+        Assert.Throws<IOException>(() => MaxModel.ConvertToGlb(max, glb, null, out _));
+        string[] left = Directory.GetFiles(dir, "*.tmp");
+        Assert.Equal(16, left.Length);
+        Assert.All(left, f => Assert.Equal("not the reader's", System.IO.File.ReadAllText(f)));
+        Assert.False(System.IO.File.Exists(glb));
+    }
+
+    [Fact]
     public void A_container_that_claims_more_than_the_file_holds_is_refused_before_it_is_paid_for()
     {
         // more allocation sectors declared than the file has sectors

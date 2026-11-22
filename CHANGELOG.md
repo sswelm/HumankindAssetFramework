@@ -162,6 +162,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   **Still not run:** the pickers on screen - the dialogs' text, the window layout, and the YES to overwriting a file
   the reader did not write (batch mode answers every dialog No). Nothing was compared with 3ds Max itself. All four
   sample files are of one 3ds Max generation.
+  - **After the merge, the same day:** an existing `name_max.glb` now asks before it is replaced whenever the
+    conversion would change its bytes, also when its generator line names the reader: a HAF tool that rewrites the
+    copy keeps that line, and the edits were replaced unasked (#303). The copy is written to a temporary file beside
+    it first. That temporary file's name is now no longer than the copy's own: with 37 characters added, a copy
+    whose path is 224 to 259 characters long was refused where the plain write before #303 had worked (measured on
+    Unity's Mono and on .NET at 235 characters). A temporary name that is taken fails the conversion and deletes
+    nothing. The write after "Overwrite" never runs in a batch-mode editor (every dialog answers No); it was run on
+    Unity's own Mono outside the editor: a new copy, a replaced one and an unchanged one, each also at a path of 238
+    characters. `Tests/MaxReaderTests.cs`: 100 tests (104 cases); each of the two fixes put back fails a test.
 - **The tech screen marks a technology that needs ALL its prerequisites (2026-11-21).** A technology in the Tech
   Requires All list now carries a mark in front of its title on the tech screen, and its tooltip ends with a line that
   names the prerequisites it waits for, in italics behind the same mark: *Requires both Multimedia Computer and

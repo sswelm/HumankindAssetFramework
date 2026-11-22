@@ -314,7 +314,7 @@ What this drill is not:
   models' output changed: ten of those kinds, and one in the transform arithmetic whose effect stayed inside the
   tolerance. `Tests/MaxReaderTests.cs` holds each of them, on files built byte by byte.
 
-**`Tests/MaxReaderTests.cs` and what was planted against it** (97 tests, 101 cases). The review of 2026-11-21 planted defects
+**`Tests/MaxReaderTests.cs` and what was planted against it** (100 tests, 104 cases). The review of 2026-11-21 planted defects
 in five passes:
 
 | Who, against which tests | Planted | Caught by a test | Not caught |
@@ -379,8 +379,19 @@ decoder, one from a TGA through the reader's own). **Not in the push gate** (sam
 - **Usage:** `tools/max_unity_drill.sh [file.max ...]`, the same `HAF_MAX_ROOTS`. `UNITY` is Unity's `Editor/Data`
   folder, `UNITY_EDITOR` the editor's executable. The temporary project is removed after a pass and kept after a
   failure; its path is printed either way.
-- Batch mode exercises the cancellation path. `MaxReaderTests` exercises the write after confirmation. The dialogs'
-  appearance, the window layout, the keyboard focus and the pickers require a live editor session to inspect.
+- Batch mode exercises the cancellation path. `MaxReaderTests` exercises the write after confirmation, on .NET. The
+  dialogs' appearance, the window layout, the keyboard focus and the pickers require a live editor session to inspect.
+- **The write after confirmation on Unity's Mono** (the replacement of an existing copy through a temporary file) runs
+  in no drill: the editor's dialog cannot be answered Yes in batch mode. It was run by hand on 2026-11-21 with the
+  stand-alone drill's executable under Unity's own `MonoBleedingEdge/bin/mono.exe`
+  (`mono maxdrill.exe convert file.max copy.glb`, which replaces without asking): a new copy, a copy with other bytes
+  (replaced, equal to the first, no temporary file left) and an unchanged copy (write time kept), each also at a copy
+  path of 238 characters. That length is the case the first form of the temporary file failed: its name was 37
+  characters longer than the copy's, so a copy of 224 to 259 characters was refused (`DirectoryNotFoundException` on
+  Mono, `PathTooLongException` on .NET) where the plain write before it had worked. The temporary file's name is now
+  no longer than the copy's own (`MaxModel.TemporaryBeside`), and two tests hold it: the name's length with a
+  conversion at 249 characters, and a taken temporary name that must fail the conversion and delete nothing. Each fix
+  put back fails a test.
 
 **The tools after the door, driven in a batch-mode Unity editor** (round 3 of the review, a harness of the reviewer's
 own, not kept in the repository): on copies of the four converted files, the Cutter's and Fuser's analysis, split and

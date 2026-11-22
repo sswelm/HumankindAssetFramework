@@ -12,7 +12,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   that may stand in the wrong place); the dialog shows it cut to a length, the Console holds it whole. Textures are
   looked for beside the file, one folder down and one up; faces whose picture is missing keep their UVs; a picture's
   alpha shows the material's colour. Picking the same `.max` again leaves an unchanged copy untouched and asks before
-  replacing an existing GLB with different bytes. Animation and
+  replacing an existing GLB with different bytes (a copy in a deeply nested folder, with a path of 224 to 259
+  characters, converts again: the temporary file it is written to first no longer has a longer name). Animation and
   opacity maps are not read. The copy needs a folder that can be written to. See *3ds Max files* in the Editor Tools
   reference.
 - **Vehicle Lab: the preview plays again after Generate** (2026-11-14, user report). With the C# backend the
