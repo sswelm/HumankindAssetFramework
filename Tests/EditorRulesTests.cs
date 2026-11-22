@@ -276,26 +276,53 @@ public class NaturalOrderTests
         Assert.Equal(1, BakerRules.TileRepeats(double.NaN, 769, 48));
     }
 
+    // stretch per triangle; area 100 each except the LAST, which is small (1)
+    static bool[] Spans(params double[] stretch) =>
+        BakerRules.SpanCounts(stretch, stretch.Select((_, i) => i == stretch.Length - 1 ? 1.0 : 100.0).ToArray());
+
     [Fact]
     public void A_broken_edge_strip_is_left_out_of_the_tiled_span()
     {
-        // the F100's wing: 240 triangles at ~0.07 U per metre inside 0..1, 36 edge strips at >= 124x that
-        var wing = Enumerable.Repeat(0.07, 240).Concat(Enumerable.Repeat(0.07 * 124, 36)).ToList();
-        var c = BakerRules.SpanCounts(wing);
+        // the F100's wing (Ellipse07): 240 triangles at ~0.07 U per metre inside 0..1, 36 edge strips at >= 124x that,
+        // together 3.35% of the wing's area
+        var stretch = Enumerable.Repeat(0.07, 240).Concat(Enumerable.Repeat(0.07 * 124, 36)).ToArray();
+        var area = Enumerable.Repeat(31.0 / 240, 240).Concat(Enumerable.Repeat(1.07 / 36, 36)).ToArray();
+        var c = BakerRules.SpanCounts(stretch, area);
         Assert.Equal(240, c.Count(x => x));
         Assert.All(c.Skip(240), x => Assert.False(x));
-        // a tiled deck: an even density, a 30x spread still within the 50x limit — every triangle counts
-        Assert.All(BakerRules.SpanCounts(new[] { 2.0, 2.0, 0.5, 15.0, 60.0 }), x => Assert.True(x));
-        Assert.Equal(new[] { true, true, true, false }, BakerRules.SpanCounts(new[] { 1.0, 1.0, 50.0, 50.0001 }));   // the limit is inclusive
+        // a tiled deck: the worst triangle 30x the median, still within the 50x limit — every triangle counts
+        Assert.All(Spans(2.0, 2.0, 0.5, 15.0, 60.0), x => Assert.True(x));
+        // the broken-strip shape itself: a zero-length edge carrying UV motion (infinite stretch) beside a sane median
+        Assert.Equal(new[] { true, true, false }, Spans(1.0, 1.0, double.PositiveInfinity));
+        Assert.Equal(new[] { true, true, true, false }, Spans(1.0, 1.0, 50.0, 50.0001));   // the limit is inclusive
         // the lower median: an even split keeps the sane half
-        Assert.Equal(new[] { true, false }, BakerRules.SpanCounts(new[] { 1.0, 1000.0 }));
+        Assert.Equal(new[] { true, false }, Spans(1.0, 1000.0));
         // no texture motion on the axis (median 0) or a broken median: every triangle counts, as before the rule
-        Assert.All(BakerRules.SpanCounts(new[] { 0.0, 0.0, 0.0, 9.0 }), x => Assert.True(x));
-        Assert.All(BakerRules.SpanCounts(new[] { double.PositiveInfinity, double.NaN, 1.0 }), x => Assert.True(x));
+        Assert.All(Spans(0.0, 0.0, 0.0, 9.0), x => Assert.True(x));
+        Assert.All(Spans(double.PositiveInfinity, double.NaN, 1.0), x => Assert.True(x));
         // a NaN stretch is an outlier when the median is sane
-        Assert.Equal(new[] { true, true, false }, BakerRules.SpanCounts(new[] { 1.0, 1.0, double.NaN }));
-        Assert.Empty(BakerRules.SpanCounts(new double[0]));
-        Assert.Empty(BakerRules.SpanCounts(null));
+        Assert.Equal(new[] { true, true, false }, Spans(1.0, 1.0, double.NaN));
+        Assert.Empty(BakerRules.SpanCounts(new double[0], new double[0]));
+        Assert.Empty(BakerRules.SpanCounts(null, null));
+        Assert.All(BakerRules.SpanCounts(new[] { 1.0, 1000.0 }, null), x => Assert.True(x));   // no areas: as before
+    }
+
+    [Fact]
+    public void Outliers_holding_a_large_share_of_the_part_are_a_real_part_of_it()
+    {
+        // review A: 300 small rivets at 0.005 tiles/m outvote 20 plating faces at 1 tile/m by count, but the plating
+        // is most of the part's area — every triangle counts, the plating stays tiled
+        var stretch = Enumerable.Repeat(0.005, 300).Concat(Enumerable.Repeat(1.0, 20)).ToArray();
+        var area = Enumerable.Repeat(0.0004, 300).Concat(Enumerable.Repeat(10.0, 20)).ToArray();
+        Assert.All(BakerRules.SpanCounts(stretch, area), x => Assert.True(x));
+        // review B: a median at float noise (60% of the triangles carry no texture motion on the axis, 40% do)
+        stretch = Enumerable.Repeat(1e-8, 60).Concat(Enumerable.Repeat(0.05, 40)).ToArray();
+        Assert.All(BakerRules.SpanCounts(stretch, Enumerable.Repeat(1.0, 100).ToArray()), x => Assert.True(x));
+        // the area limit: 15% of the part is still left out, a hair more is not
+        Assert.Equal(new[] { true, false }, BakerRules.SpanCounts(new[] { 1.0, 1000.0 }, new[] { 85.0, 15.0 }));
+        Assert.All(BakerRules.SpanCounts(new[] { 1.0, 1000.0 }, new[] { 84.9, 15.1 }), x => Assert.True(x));
+        // a part with no area to judge by: every triangle counts
+        Assert.All(BakerRules.SpanCounts(new[] { 1.0, 1.0, 1000.0 }, new[] { 0.0, 0.0, 0.0 }), x => Assert.True(x));
     }
 
     [Fact]

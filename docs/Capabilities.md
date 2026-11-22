@@ -128,7 +128,9 @@ can do; it is not an ordered tutorial. Start with [Getting started](Getting-Star
   gather. Proven on the AH-1 Cobra: 51 materials spread across U 0→23 / V −11→0 (100% outside [0,1]) baked **black** until
   the per-vertex fold; an island wholly in one tile subtracts a uniform integer (lossless), and only a triangle straddling
   a tile edge smears. Genuine *repeat*-tiling (a small texture spanning [0,N]) remains outside what an atlas can do.
-  Two special cases are recognised before packing: a **tiled** material (its UV span exceeds 1.5 tiles) gets its
+  Two special cases are recognised before packing: a **tiled** material (its UV span exceeds 1.5 tiles, measured over
+  the triangles that stretch the texture no more than 50× the material's median, so a broken edge-strip projection
+  cannot make a part tiled) gets its
   texture repeated inside its cell and its span mapped linearly across it, and a **point-UV** material (every UV
   inside one texel of its texture — a ripped model using the texture as a colour picker, like the Romanic's deck)
   packs as an 8 px swatch of that texel pinned to the cell centre, so neither the cell edge nor the mip average of

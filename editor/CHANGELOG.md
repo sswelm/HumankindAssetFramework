@@ -9,9 +9,11 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   F100). A converted model painted each wing inside one texture tile, but its thin leading/trailing-edge strips had a
   broken projection running to ±150 tiles; the bake took that as a 308-tile *tiled* material and spread the whole range
   over the atlas cell, so the camo showed as one pale stripe. The tiled-material span now leaves out triangles that
-  stretch the texture more than 50× their material's median; those strips smear as in the source viewer, the rest maps
-  as authored. The console names each material whose span moved. Of the 45 GLBs in the ENCReload registry, only the
-  F100's bake output changes.
+  stretch the texture more than 50× their material's median, as long as they hold at most 15% of the material's area
+  (more than that and they are a real part of it: every triangle counts, as before). Left-out strips smear as in the
+  source viewer, or clamp to the cell's edge if the material stays tiled; the flat-colour (point-UV) test is unchanged.
+  The console names each material whose tiled span moved. Measured on the span rule over the 45 GLBs in the
+  ENCReload registry, only the F100's bake output changes; the F100 was then checked in a Unity bake.
 - **3ds Max files (`.max`) in the Model Cutter, Model Fuser, Vehicle Lab and Model Factory** (2026-11-21, user
   request). Pick a `.max` in the file picker (or type its path and press **Convert .max**): it is converted to
   `name_max.glb` beside the file — no 3ds Max and no Blender needed — and the tool works on that copy. A report says

@@ -672,11 +672,19 @@ public static class BakerRules
     // TILED material: the whole span mapped across the cell, so the camo inside 0..1 got 1/308 of it — one pale stripe
     // of the texture, stretched over the wing. A tiled material has an even texel density (that is what tiling is);
     // a broken strip stretches the texture hundreds of times harder than its material's median (the F100's strips
-    // are >= 124x, every other triangle <= 1x). So the span counts only the triangles whose stretch on that axis
-    // stays within `SpanOutlierStretch` x the material's median; the strips keep the fold (they smear, as they did
-    // in the source viewer). A median of 0 or a non-finite one (an axis with no texture motion) counts every
-    // triangle, as before. Stretch = UV units per model unit, the largest over a triangle's three edges.
+    // are >= 54x, every other triangle <= 1x). A triangle is left out of the span on an axis when its stretch exceeds
+    // `SpanOutlierStretch` x the material's (lower, per-triangle) median stretch — but only while the left-out
+    // triangles together hold at most `SpanOutlierAreaShare` of the material's surface area (the F100's strips:
+    // 0.25 .. 6.35%). Past that the "outliers" are a real part of the material, not broken strips: dense small
+    // triangles at a low density (rivets) outvoting the large faces that carry the real tiling, or a median sitting
+    // at float noise because most triangles carry no texture motion on the axis (the Steam Frigate's and Bremen's
+    // planks: ~40% of the area) — every triangle counts then, as before the rule. So it does for a median of 0 or a
+    // non-finite one. When the axis ends up untiled the strips keep the fold (they smear, as they did in the source
+    // viewer); on an axis that stays tiled they clamp to the cell's edge (TileSpan.Cell). The point-UV test reads the
+    // UNFILTERED span (a jittered colour-picker majority must never drop the faces that carry a real texture).
+    // Stretch = UV units per model unit, the largest over a triangle's three edges.
     public const double SpanOutlierStretch = 50.0;
+    public const double SpanOutlierAreaShare = 0.15;
 
     public static double EdgeStretch(double duv, double length)
     {
@@ -686,18 +694,28 @@ public static class BakerRules
         return length > 0.0 ? duv / length : double.PositiveInfinity;   // a zero-length edge carrying UV motion is the worst stretch
     }
 
-    public static bool[] SpanCounts(IReadOnlyList<double> stretch)
+    public static bool[] SpanCounts(IReadOnlyList<double> stretch, IReadOnlyList<double> area)
     {
         int n = stretch?.Count ?? 0;
         var counts = new bool[n];
-        if (n == 0) return counts;
+        for (int i = 0; i < n; i++) counts[i] = true;
+        if (n == 0 || area == null || area.Count != n) return counts;
         var sorted = new double[n];
         for (int i = 0; i < n; i++) sorted[i] = double.IsNaN(stretch[i]) ? double.PositiveInfinity : stretch[i];
         Array.Sort(sorted);
         double median = sorted[(n - 1) / 2];   // the lower median: an even split between sane and broken keeps the sane one
-        bool all = !(median > 0.0) || double.IsInfinity(median);
-        double limit = median * SpanOutlierStretch;
-        for (int i = 0; i < n; i++) counts[i] = all || (!double.IsNaN(stretch[i]) && stretch[i] <= limit);
+        if (!(median > 0.0) || double.IsInfinity(median)) return counts;
+        double limit = median * SpanOutlierStretch, total = 0.0, left = 0.0;
+        var cand = new bool[n];
+        for (int i = 0; i < n; i++)
+        {
+            double a = area[i] > 0.0 && !double.IsInfinity(area[i]) ? area[i] : 0.0;
+            total += a;
+            cand[i] = !(stretch[i] <= limit);   // a NaN stretch is past the limit
+            if (cand[i]) left += a;
+        }
+        if (!(total > 0.0) || left > total * SpanOutlierAreaShare) return counts;   // no area to judge by, or too much of the part
+        for (int i = 0; i < n; i++) counts[i] = !cand[i];
         return counts;
     }
 
