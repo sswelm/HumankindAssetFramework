@@ -2236,7 +2236,7 @@ public static class UniversalBaker
                     var t0 = mm0.GetTriangles(s0);
                     for (int k0 = 0; k0 + 2 < t0.Length; k0 += 3)
                         tileSpans[mi0].AddTriangle(uv0[t0[k0]], uv0[t0[k0 + 1]], uv0[t0[k0 + 2]],
-                            w0.MultiplyPoint3x4(p0[t0[k0]]), w0.MultiplyPoint3x4(p0[t0[k0 + 1]]), w0.MultiplyPoint3x4(p0[t0[k0 + 2]]));
+                            p0[t0[k0]], p0[t0[k0 + 1]], p0[t0[k0 + 2]], w0);
                 }
             }
             for (int i0 = 0; i0 < tileSpans.Length; i0++)
@@ -2849,13 +2849,17 @@ public static class UniversalBaker
         // material's median (BakerRules.SpanCounts — a broken edge-strip projection must not make a part "tiled")
         readonly List<Vector2> triUv = new List<Vector2>();
         readonly List<double> stretchU = new List<double>(), stretchV = new List<double>(), area = new List<double>();
-        public void AddTriangle(Vector2 a, Vector2 b, Vector2 c, Vector3 pa, Vector3 pb, Vector3 pc)
+        public void AddTriangle(Vector2 a, Vector2 b, Vector2 c, Vector3 pa, Vector3 pb, Vector3 pc, Matrix4x4 localToWorld)
         {
             triUv.Add(a); triUv.Add(b); triUv.Add(c);
-            double lab = Vector3.Distance(pa, pb), lbc = Vector3.Distance(pb, pc), lca = Vector3.Distance(pc, pa);
+            // Transform edges so a large world translation cannot round away small distances between points.
+            Vector3 ab = localToWorld.MultiplyVector(pb - pa);
+            Vector3 bc = localToWorld.MultiplyVector(pc - pb);
+            Vector3 ac = localToWorld.MultiplyVector(pc - pa);
+            double lab = ab.magnitude, lbc = bc.magnitude, lca = ac.magnitude;
             stretchU.Add(Math.Max(BakerRules.EdgeStretch((double)b.x - a.x, lab), Math.Max(BakerRules.EdgeStretch((double)c.x - b.x, lbc), BakerRules.EdgeStretch((double)a.x - c.x, lca))));
             stretchV.Add(Math.Max(BakerRules.EdgeStretch((double)b.y - a.y, lab), Math.Max(BakerRules.EdgeStretch((double)c.y - b.y, lbc), BakerRules.EdgeStretch((double)a.y - c.y, lca))));
-            area.Add(0.5 * Vector3.Cross(pb - pa, pc - pa).magnitude);
+            area.Add(0.5 * Vector3.Cross(ab, ac).magnitude);
         }
         // Measure the span from the gathered triangles. Returns a log line when outliers were left out of it, else null.
         public string Resolve(string label)
@@ -2875,7 +2879,11 @@ public static class UniversalBaker
             RawU0 = ru0; RawU1 = ru1; RawV0 = rv0; RawV1 = rv1;
             // both axes or neither: Any reads U0 alone, and every counted axis needs a value (SpanCounts keeps >= 1 triangle)
             if (float.IsInfinity(U0) || float.IsInfinity(V0)) { U0 = ru0; U1 = ru1; V0 = rv0; V1 = rv1; }
-            triUv.Clear(); stretchU.Clear(); stretchV.Clear(); area.Clear();
+            // Remapping only needs the resolved bounds. Release the buffers before atlas and mesh allocation.
+            triUv.Clear(); triUv.TrimExcess();
+            stretchU.Clear(); stretchU.TrimExcess();
+            stretchV.Clear(); stretchV.TrimExcess();
+            area.Clear(); area.TrimExcess();
             // say so only when it changes the bake: a span moved on an axis that was or is tiled (an untiled axis folds
             // each UV and never reads the bounds; flat swatches are skipped by the callers)
             bool movedU = ru1 - ru0 != SpanU && (ru1 - ru0 > (float)BakerRules.TiledSpan || TiledU);
@@ -3234,7 +3242,7 @@ public static class UniversalBaker
                 var t0 = m0.GetTriangles(s0);
                 for (int k0 = 0; k0 + 2 < t0.Length; k0 += 3)
                     tileSpans[ri0].AddTriangle(uv0[t0[k0]], uv0[t0[k0 + 1]], uv0[t0[k0 + 2]],
-                        w0.MultiplyPoint3x4(p0[t0[k0]]), w0.MultiplyPoint3x4(p0[t0[k0 + 1]]), w0.MultiplyPoint3x4(p0[t0[k0 + 2]]));
+                        p0[t0[k0]], p0[t0[k0 + 1]], p0[t0[k0 + 2]], w0);
             }
         }
         for (int i0 = 0; i0 < tileSpans.Length; i0++)
