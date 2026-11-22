@@ -63,7 +63,7 @@ script compares its exit code with a load-only control (139). On 2026-11-21, wit
 beside it, one run of three exited 127 after `DRILL PASS` and was reported as a failure; two reruns exited 139. A
 failure of that shape (every check passed, only the exit code differs) is the runtime's exit, not the hooks: rerun.
 `bash tools/tech_requires_all_unity_drill.sh` drives the real Tech Requires All window and the Tech Tree viewer in one
-temporary Unity project and reads every deployed list back with the plugin's parser: 132 checks (14 before PR #301,
+temporary Unity project and reads every deployed list back with the plugin's parser: 133 checks (14 before PR #301,
 which were the list window's own: add, save, reopen, remove). The viewer's part:
 - **The two windows on one list.** The OR / AND switch is staged and written on Save; an open list window without
   unsaved changes follows, one with unsaved changes keeps them and has its save refused; the viewer picks up the list

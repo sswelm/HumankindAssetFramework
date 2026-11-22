@@ -518,6 +518,8 @@ public static class TechRequireAllWindowDrill
                         moved = (int)typeof(TechTreeWindow).GetMethod("ShiftRightOf", Private).Invoke(viewer, shiftArgs);
                         Check("shift: a card in the anchor's own column is not right of it", moved == 0 && Staged == 0 && (int)VCall("EffX", N("Technology_S")) == 16);
                         Check("shift: the field starts at 6 columns, one card's step in the tree", TechTreeWindow.DefaultShift == 6 && VGet<int>("_shiftBy") == 6);
+                        Check("side strip: its rows are laid out to the strip's width, and it never scrolls sideways",
+                              TechTreeWindow.SideContentWidth(300) == 272 && VGet<Vector2>("_sideScroll").x == 0);
                         Check("shift: the limit as a function",
                               TechTreeWindow.ShiftLimit(8, new[] { 16, 16 }, -20) == -7 && TechTreeWindow.ShiftLimit(8, new[] { 9, 30 }, -3) == 0 && TechTreeWindow.ShiftLimit(8, new int[0], -3) == 0
                               && TechTreeWindow.ShiftLimit(8, new[] { 16 }, 5) == 5 && TechTreeWindow.ShiftLimit(8, new[] { 16 }, -4) == -4);

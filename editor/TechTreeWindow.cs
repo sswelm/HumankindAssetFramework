@@ -787,10 +787,17 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 
     // ── Side strip ────────────────────────────────────────────────────────────
     Vector2 _sideScroll;
+    /// <summary>The width the side strip's rows get: the strip without its frame and the room of a vertical scroll bar.</summary>
+    internal static float SideContentWidth(float stripWidth) => Mathf.Max(60f, stripWidth - 28f);
     void DrawSide(Rect side)
     {
         GUILayout.BeginArea(side, EditorStyles.helpBox);
-        _sideScroll = EditorGUILayout.BeginScrollView(_sideScroll);
+        // The strip scrolls up and down only, and its content is laid out to the strip's own width. Before, one row
+        // that asked for more (the Shift button's text) gave the strip a horizontal bar, and scrolled along it the
+        // left end of every row was out of sight (the user's screenshot, 2026-11-22).
+        _sideScroll.x = 0;
+        _sideScroll = EditorGUILayout.BeginScrollView(_sideScroll, false, false, GUIStyle.none, GUI.skin.verticalScrollbar, GUIStyle.none);
+        EditorGUILayout.BeginVertical(GUILayout.Width(SideContentWidth(side.width)));
 
         if (_selected == null)
             EditorGUILayout.LabelField("Click a node to inspect.", EditorStyles.wordWrappedMiniLabel);
@@ -834,6 +841,9 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.Label(new GUIContent("Shift", "Moves EVERY card whose column is right of this card's by that many columns (negative = to the left). This card and the cards in its own column stay. Staged like a drag: Save writes it, the opposite number takes it back."), GUILayout.Width(54));
                 _shiftBy = EditorGUILayout.IntField(_shiftBy, GUILayout.Width(46));
+                GUILayout.Label("columns", EditorStyles.miniLabel);
+                EditorGUILayout.EndHorizontal();
+                // the button on a row of its own: its text is as long as the strip is wide
                 using (new EditorGUI.DisabledScope(rightOf == 0 || _shiftBy == 0))
                     if (GUILayout.Button(ShiftLabel(rightOf, _shiftBy), EditorStyles.miniButton))
                     {
@@ -842,7 +852,6 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                         _shiftNote = ShiftNote(moved, asked, applied); _shiftNoteFor = n.Name;
                         GUIUtility.keyboardControl = 0;
                     }
-                EditorGUILayout.EndHorizontal();
                 if (_shiftNote != "" && _shiftNoteFor == n.Name) EditorGUILayout.LabelField(_shiftNote, EditorStyles.wordWrappedMiniLabel);
 
                 // in the game or switched off (TechnologyDefinition.Visibility), staged like the rest
@@ -900,6 +909,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             { Selection.activeObject = n.Asset; EditorGUIUtility.PingObject(n.Asset); }
         }
 
+        EditorGUILayout.EndVertical();
         EditorGUILayout.EndScrollView();
         GUILayout.EndArea();
     }
