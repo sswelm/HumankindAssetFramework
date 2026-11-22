@@ -1903,14 +1903,16 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
 
 - **One text for every language.** A typed title or description is the text itself; translations are not edited,
   and a localization key is replaced, not filled.
+- **The image picker and "Same as…" are not driven by the drill**; the checks stage an image as they do. The
+  drill types into the two text fields.
 - **The game's own pictures** can be chosen only through "Same as…" another technology that has one; there is no
-  browser of the game's atlases.
-- **A picked picture's import settings are not checked.** ENC's technology pictures are plain textures in
-  `Assets/Resources/Images`; the side strip says where the others are when a picture comes from elsewhere. Whether
-  the mod's build needs them there was not looked into.
-- **Picto** (the small symbol) cannot be changed.
-- **A reference-only technology's mapper** is copied into the mod path on its first save, as for a position; the
-  case where its definition's copy holds the same file name is refused there too (see the left-open list above).
+  browser of the game's atlases, and the list has no thumbnails.
+- **The bundle check reads the project's build settings by their serialized fields** (`filters`: Directory,
+  SubString, Recursive, Mode, TypeMask), as the framework's editor keeps them; a picked picture still needs the
+  bundle rebuilt before the game shows it. Nothing was run in the game.
+- **Picto** (unused by the game's screens) cannot be changed.
+- **The staged title** is shown on the card, in the side strip's header and on the prerequisite buttons, not in
+  the Tech Requires All window or the pickers.
 
 ## Tech Tree viewer — eras and separators, left open (2026-11-22)
 

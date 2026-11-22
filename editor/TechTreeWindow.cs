@@ -742,6 +742,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         // of its own card, over its title, the title's line and its unlock row; a card that comes later in the game's
         // list of technologies is drawn over an earlier card's artwork, which this window does not copy.
         _artDraws.Clear();
+        CardTitlesDrawn.Clear();
         foreach (var n in _nodes)
         {
             Rect r = NodeRect(n);
@@ -781,7 +782,9 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             // title, upper case as in the game, over the divider. The game does not shrink or cut a long title: its
             // label grows to the text's width and runs on under the artwork, which covers it (the review of
             // 2026-11-22, the game's Title label: autoAdjustWidth without a maximum). The same here.
-            GUI.Label(new Rect(r.x + pad, r.y, r.width - 2 * pad - (IsEdited(n) ? 10f * _zoom : 0), titleH), CardTitle(n), titleStyle);
+            string cardTitle = CardTitle(n);
+            CardTitlesDrawn[n.Name] = cardTitle;
+            GUI.Label(new Rect(r.x + pad, r.y, r.width - 2 * pad - (IsEdited(n) ? 10f * _zoom : 0), titleH), cardTitle, titleStyle);
             EditorGUI.DrawRect(new Rect(r.x + pad, r.y + titleH, r.width - 2 * pad, 1f), new Color(1f, 1f, 1f, 0.22f));
 
             // under it, where the game shows the turns: era and tier, and the AND rule where it has an effect
@@ -853,6 +856,9 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 
     /// <summary>Called when a repaint has drawn the canvas (for the drill, which reads the window's pixels there).</summary>
     internal static Action<TechTreeWindow> AfterCanvasDrawn;
+
+    /// <summary>The titles the last repaint drew on the cards, by technology (for the drill).</summary>
+    internal readonly Dictionary<string, string> CardTitlesDrawn = new Dictionary<string, string>(StringComparer.Ordinal);
 
     struct ArtDraw { public Rect Rect; public Texture Texture; public Rect Uv; public float Fade; public TechTreeData.Node Node; }
     readonly List<ArtDraw> _artDraws = new List<ArtDraw>();
@@ -1447,10 +1453,16 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     string _imageRefusal = "";                              // why the last picked picture was refused
     List<List<TechTreeData.BundleFilter>> _bundleFilters;   // the project's bundle filters, read when first needed after a Reload
 
+    internal const string TitleControl = "TechTree.Title", DescriptionControl = "TechTree.Description";
+    /// <summary>A text field to give the keyboard to at the next draw (the drill types into the real fields with it).</summary>
+    internal string FocusRequest;
+
     void DrawCardTexts(TechTreeData.Node n, float width)
     {
+        if (FocusRequest != null && Event.current.type == EventType.Layout) { EditorGUI.FocusTextInControl(FocusRequest); FocusRequest = null; }
         EditorGUILayout.BeginHorizontal();
         GUILayout.Label(new GUIContent("Title", "The technology's name as the game shows it, on its card and everywhere else. Save writes it into the technology's UI mapper (Title), the same in every language."), GUILayout.Width(54));
+        GUI.SetNextControlName(TitleControl);
         string title = EditorGUILayout.TextField(TitleShown(n));
         EditorGUILayout.EndHorizontal();
         if (title != TitleShown(n)) SetTitle(n, title);
@@ -1461,6 +1473,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         string shownDescription = DescriptionShown(n);
         float lines = _descriptionStyle.lineHeight > 0 ? _descriptionStyle.lineHeight : 13f;
         float descriptionHeight = Mathf.Clamp(_descriptionStyle.CalcHeight(new GUIContent(shownDescription), width - 4f) + lines, 3f * lines + 6f, 16f * lines + 6f);   // + one line: the measure ran one short in the strip
+        GUI.SetNextControlName(DescriptionControl);
         string description = EditorGUILayout.TextArea(shownDescription, _descriptionStyle, GUILayout.Height(descriptionHeight));
         if (description != shownDescription) SetDescription(n, description);
 

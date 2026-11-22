@@ -665,11 +665,15 @@ windows. **Deep dive:**
     nearest card would reach the selected card's column; the line under the button says what was moved.
   - **Title, Description, Image.** At the top of the side strip, staged like a position; the card shows the staged
     title and image at once. Save writes them into the technology's UI mapper: the Title and the Description as the
-    text the game shows (the same in every language), the image into the card's and the popup's entries
-    (`TechnologyScreenItemBackground`, `TechnologyPopupBackground`). Pick a picture of the project, or use
-    **Same as…** to take the image of another technology, which can be one of the game's own. A title or
-    description that is a localization key (`%...`) is shown translated; a text typed here replaces the key, and
-    the side strip says so. The small `Picto` image is not changed.
+    text the game shows, the image into the card's and the notification's entries (`TechnologyScreenItemBackground`,
+    `TechnologyPopupBackground`). The small `Picto` image is not changed.
+    - Many titles and descriptions are localization keys (`%...`, the game's own text): the fields show the text.
+      Typing it back is no change; a different text replaces the key, the same in every language. A text that
+      starts with `%` is a key to the game: the side strip names its text, or warns when the key is unknown.
+    - The image: pick a picture of the project, or **Same as…** another technology's image (which can be one of
+      the game's own); **Own** (or None in the field) goes back to the saved one. A picture reaches the game only
+      through the mod's asset bundle: the side strip warns when the project's build settings do not take the
+      picked one (ENC's take pictures from `Assets/Resources` only). A texture inside another file is refused.
   - **Era.** A choice under the position: the project's eras by index, each with its Roman numeral (`V  ·  Era5`;
     the first era has none, as in the game). Staged like a drag; Save writes it to the technology's definition
     (`EraReference`). In the game a technology's era decides when an empire can research it (not before the
@@ -710,7 +714,7 @@ windows. **Deep dive:**
   - **Artwork.** A card shows its image as the game does, standing out of its right end. A mod's own image is the
     project file the mapper's `TechnologyScreenItemBackground` reference resolves to. One of the game's own is
     taken from the game's UI bundle (`AssetBundles/Mercury.Data.UI`); nothing is copied into the project. Of ENC's
-    216 technologies 124 show a project image, 88 one of the game's and 4 none (they have no mapper). The side
+    technologies on 2026-11-21, 124 showed a project image, 88 one of the game's and 4 none (they had no mapper). The side
     strip's `Image:` line names the file or the atlas, or says why there is no image; **Reload** tries a failed
     read again.
   - **Reference folder and mod path** (the two fields at the right of the toolbar). A technology whose mapper or

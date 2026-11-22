@@ -530,7 +530,8 @@ public static class TechRequireAllWindowDrill
                     Check("    a save while it is absent writes nothing of it and keeps it staged", Staged == 1 && Deployed == "", Deployed + " staged " + Staged);
                     TechTreeWindow.BuildTreeImpl = fullTree;
                     VCall("Reload", true, false);
-                    Check("    and with the technology back the same edits apply", (int)VCall("EffX", N(T)) == 20 && (int)VCall("EffY", N(T)) == 6 && (int)VCall("EffVisibility", N(T)) == 0 && All(T) && Prereqs(T).SequenceEqual(new[] { "Technology_A" }) && (string)VCall("EffEra", N(T)) == "Era3" && Staged == 1);
+                    Check("    and with the technology back the same edits apply, the texts and the image too", viewer.EffLabel(N(T)) == "Steam Power" && (string)VCall("EffDescription", N(T)) == "Makes\nsteam." && viewer.EffImage(N(T)) == BlueGuid
+                          && (int)VCall("EffX", N(T)) == 20 && (int)VCall("EffY", N(T)) == 6 && (int)VCall("EffVisibility", N(T)) == 0 && All(T) && Prereqs(T).SequenceEqual(new[] { "Technology_A" }) && (string)VCall("EffEra", N(T)) == "Era3" && Staged == 1);
                     // a script reload: Unity serializes the window and builds its fields again
                     VSet("_selected", N(T));
                     // Everything the window holds in memory is wiped after the freeze, mirrors included: what comes back
@@ -553,6 +554,7 @@ public static class TechRequireAllWindowDrill
                           LastSave.Contains(" · 7 skipped (no writable target"), LastSave);
                     Check("save: a saved rule switch leaves the staged set, the parts without an asset stay",
                           Deployed == T && Staged == 1 && (int)VCall("EffX", N(T)) == 20 && (int)VCall("EffVisibility", N(T)) == 0 && (string)VCall("EffEra", N(T)) == "Era3"
+                          && viewer.TitleShown(N(T)) == "Steam Power" && viewer.DescriptionShown(N(T)) == "Makes\nsteam." && viewer.EffImage(N(T)) == BlueGuid
                           && VGet<HashSet<string>>("_requireAll").Contains(T), Deployed + " staged " + Staged);
                     VCall("SetPosition", N(T), 16, 4); VCall("SetVisibility", N(T), -1); VCall("AddPrereq", N(T), "Technology_B");
                     Check("    the card shows the staged title; typed back to the saved title, description and image, they are no change",
@@ -869,6 +871,14 @@ public static class TechRequireAllWindowDrill
                     Undo.PerformUndo();
                     mMap = Asset<TechTreeDrillMapper>(DbMaps + "/" + M + ".asset");
                     Check("undo after that save takes nothing of it back", mMap.Title == "Em Renamed" && IsBlue(mMap.Images[2]) && N(M).Label == "Em Renamed");
+                    VCall("SetDescription", N(M), "Only the description.");
+                    Check("    a description alone is a staged edit", (bool)VCall("IsEdited", N(M)) && Staged == 1);
+                    VCall("CommitChanges");
+                    string onlyFile = File.ReadAllText(Path.Combine(Path.GetDirectoryName(Application.dataPath), DbMaps + "/" + M + ".asset"));
+                    Check("save: a description alone is written to the mapper's file, and the Save line counts only it",
+                          onlyFile.Contains("Description: Only the description.") && onlyFile.Contains("Title: Em Renamed") && Staged == 0
+                          && LastSave.StartsWith("[TechTree] Saved: 0 position, 0 prerequisite, 0 visibility change(s), 1 title / description change.") && !LastSave.Contains("image"),
+                          LastSave);
                     // the writers on their own
                     var lone = ScriptableObject.CreateInstance<TechTreeDrillMapper>();
                     lone.Images = new List<TechTreeDrillTypes.DrillImage> { picto };
@@ -1354,6 +1364,8 @@ public static class TechRequireAllWindowDrill
                     VCall("SetTitle", N(S), "Single Parent"); VCall("SetTitle", N(S), "%S_Title"); VCall("SetDescription", N(S), "Its translated text.");
                     Check("texts: typing the translation, or the key, is no change: the key stays", !(bool)VCall("IsEdited", N(S)));
                     VCall("SetTitle", N(S), "Single Parent2");
+                    viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                    Check("texts: the card DRAWS the staged title", viewer.CardTitlesDrawn.TryGetValue(S, out var drawnTitle) && drawnTitle == "SINGLE PARENT2", drawnTitle ?? "not drawn");
                     Check("texts: a changed text is staged as typed (not appended to the key), and the card shows it",
                           viewer.TitleShown(N(S)) == "Single Parent2" && viewer.CardTitle(N(S)) == "SINGLE PARENT2" && (string)VCall("EffTitle", N(S)) == "Single Parent2");
                     VCall("SetTitle", N(S), "%Known");
@@ -1362,6 +1374,33 @@ public static class TechRequireAllWindowDrill
                     Check("texts: Windows and old Mac line ends are stored as one \\n", viewer.DescriptionShown(N(S)) == "two\nlines\nand more", viewer.DescriptionShown(N(S)).Replace("\r", "\\r").Replace("\n", "\\n"));
                     VCall("SetTitle", N(S), "Single Parent"); VCall("SetDescription", N(S), "Its translated text.");
                     Check("    back to the saved texts: nothing staged", !(bool)VCall("IsEdited", N(S)));
+                    // typing into the REAL fields of the side strip (review C: nothing drove them): the title field stages a
+                    // title, the description box a description, and with Edit OFF neither takes a key
+                    VSet("_selected", N(S));
+                    void TypeInto(string control, string text)
+                    {
+                        viewer.FocusRequest = control;
+                        viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                        foreach (char c in text)
+                        {
+                            viewer.SendEvent(new Event { type = EventType.Layout });
+                            viewer.SendEvent(new Event { type = EventType.KeyDown, character = c, keyCode = KeyCode.None });
+                        }
+                        viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                        GUIUtility.keyboardControl = 0; EditorGUIUtility.editingTextField = false;
+                    }
+                    TypeInto(TechTreeWindow.TitleControl, "Qz");
+                    string typedTitle = viewer.TitleShown(N(S)), descriptionAfterTitle = viewer.DescriptionShown(N(S));
+                    TypeInto(TechTreeWindow.DescriptionControl, "Wx");
+                    string typedDescription = viewer.DescriptionShown(N(S)), titleAfterDescription = viewer.TitleShown(N(S));
+                    Check("side strip: typing into the title field stages a title, into the description box a description, each only its own",
+                          typedTitle.Contains("Qz") && descriptionAfterTitle == "Its translated text." && typedDescription.Contains("Wx") && titleAfterDescription == typedTitle && (bool)VCall("IsEdited", N(S)),
+                          "title '" + typedTitle + "' description '" + typedDescription + "'");
+                    VCall("SetTitle", N(S), "Single Parent"); VCall("SetDescription", N(S), "Its translated text.");
+                    VSet("_editMode", false);
+                    TypeInto(TechTreeWindow.TitleControl, "Kk");
+                    Check("side strip: with Edit OFF the title field takes no key", !(bool)VCall("IsEdited", N(S)) && viewer.TitleShown(N(S)) == "Single Parent", viewer.TitleShown(N(S)));
+                    VSet("_editMode", true);
                     N(S).TitleKey = sTitleKey; N(S).Label = sLabel; N(S).BaseDescription = sBaseDescription; N(S).Description = sDescription;
                     bool warn;
                     string plain = TechTreeWindow.TextNote("Writing", null, "Text", null, out warn);
@@ -1540,10 +1579,14 @@ public class TechTreeDrillDefinition : ScriptableObject
 }
 
 // Stands in for the game's TechnologyUIMapper: the two fields a position is written to.
-public class TechTreeDrillMapper : ScriptableObject
+// The game's TechnologyUIMapper inherits Title, Description and Images from Amplitude.UI.UIMapper (review C of PR #309).
+public class TechTreeDrillUIMapper : ScriptableObject
 {
     public string Title = "", Description = "";
     public List<TechTreeDrillTypes.DrillImage> Images = new List<TechTreeDrillTypes.DrillImage>();
+}
+public class TechTreeDrillMapper : TechTreeDrillUIMapper
+{
     public int TechTreeX, TechTreeY;
 }
 
