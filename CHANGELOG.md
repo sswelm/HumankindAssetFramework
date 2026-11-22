@@ -28,8 +28,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     numeral on each side. Its place is the game's own rule (`TechnologyScreen.BindAllSeparators`): halfway
     between the right end of the earlier era's rightmost card and the left end of the later era's leftmost card,
     counting the cards the game's screen shows (with the TechnologyScreen visibility bit and a UI mapper). It
-    follows staged eras and positions. The numerals sit at a fixed height, as in the game (the game's content
-    half, 460, less the 24 above the first row); the line's slant is its texture's (47 across per 120 up).
+    follows staged eras and positions; the line's slant is its texture's (47 across per 120 up). The Roman
+    numerals are pinned to the TOP of the view, beside the line, so they stay in sight while scrolling (the user,
+    after seeing the first version; the game has them at half its content's height). Zoomed out they keep a
+    readable size (14 px) and are less faint.
   - **Artwork on top.** Every card's artwork is drawn after every card, so no title line, card edge or icon of
     any card crosses it: the user's choice. In the game the artwork is the last child of its own card (over its
     title, the title's line and its unlock row), but a card later in the game's list covers an earlier card's
@@ -52,7 +54,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
       folder, the separators as drawn (place, numerals, height, the pan, culling), the visibility bit, numerals
       that repeat (II, III, VIII), a card list whose leftmost card is not last, the artwork list per repaint, a
       faint artwork, the Save line, Undo after an era Save. Rerun against the fixed drill: of the 58 that had survived, 28 are caught now; 18 changed code that no longer exists (the two that still apply were planted again on the new code, and are caught); 12 survive: an equivalent guard, the production tree build's era read (it needs the game's types), the era popup's disabled state and its warning box (not driven), the skipped count when only the era write fails, the era written last (not load-bearing), an empty staged era (unreachable), the case of era names, gaps in era indices, a log text, a note text and a colour reset.
-  - **In the repo's drill:** 214 checks (170 before this PR). The draw order is checked by pixels: an opaque red
+  - **In the repo's drill:** 216 checks (170 before this PR). The draw order is checked by pixels: an opaque red
     artwork read back where the title's line crosses it, over the neighbouring card, and the selected card's edge
     over it.
   - **Not done, and not checked:**

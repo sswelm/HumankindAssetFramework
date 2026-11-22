@@ -63,7 +63,7 @@ script compares its exit code with a load-only control (139). On 2026-11-21, wit
 beside it, one run of three exited 127 after `DRILL PASS` and was reported as a failure; two reruns exited 139. A
 failure of that shape (every check passed, only the exit code differs) is the runtime's exit, not the hooks: rerun.
 `bash tools/tech_requires_all_unity_drill.sh` drives the real Tech Requires All window and the Tech Tree viewer in one
-temporary Unity project and reads every deployed list back with the plugin's parser: 214 checks (14 before PR #301,
+temporary Unity project and reads every deployed list back with the plugin's parser: 216 checks (14 before PR #301,
 which were the list window's own: add, save, reopen, remove). The viewer's part:
 - **The two windows on one list.** The OR / AND switch is staged and written on Save; an open list window without
   unsaved changes follows, one with unsaved changes keeps them and has its save refused; the viewer picks up the list
@@ -75,7 +75,7 @@ which were the list window's own: add, save, reopen, remove). The viewer's part:
   its definition's file, and an Undo after a Save takes nothing of it back.
 - **Staged edits:** kept across a reload that does not find the technology, and across a round trip of the window
   through Unity's own serializer with everything in memory wiped (all six kinds of edit, the selection, the view).
-- **Eras, separators and the artwork's place** (2026-11-22, 44 checks).
+- **Eras, separators and the artwork's place** (2026-11-22, 46 checks).
   - The era is a staged edit: it survives the serializer round trip with the other kinds and a save while its
     technology is absent (the Save keeps it staged), typing the saved era back clears it, and the card shows the
     staged era.
@@ -91,8 +91,9 @@ which were the list window's own: add, save, reopen, remove). The viewer's part:
     an era without a card, overlapping eras, an index the project does not have) and through the window on
     asset-backed cards (a technology without a UI mapper, switched off, or without the TechnologyScreen bit does
     not count; the staged era and column do). The separators as DRAWN, from what the drawing records: under the
-    cards, the line's ends and the numerals where the view puts them at a zoom and pan of the drill's choosing,
-    no numerals far out, no piece of a line outside the canvas.
+    cards, the line's ends where the view puts them at a zoom and pan of the drill's choosing; the numerals at the
+    top of the view beside the line, staying there when scrolled, at the line's top end where the line begins
+    below the view's top, and at a readable size far out; no piece of a line outside the canvas.
   - The Roman numerals (repeating ones too), the line's lean and height, the side strip's choice (a saved era
     the project does not have stays choosable; no eras found) and notes, the cost warning and the era-exclusive
     note.

@@ -712,16 +712,39 @@ public static class TechRequireAllWindowDrill
                     var d0 = drawn.Count == 1 ? drawn[0] : null;
                     Vector2 At(Vector2 unit) => unit * 0.5f + drawPan;   // the game's units to the window, as the view says
                     Vector2 lineTopWant = At(TechTreeWindow.EraLinePoint(2523f, -56f)), lineBottomWant = At(TechTreeWindow.EraLinePoint(2523f, 928f));
-                    Check("era separators, drawn: under the cards, the line from 56 above the first row to 928, the numerals I and II either side of it at height 436, all where the view puts them",
+                    // The numerals are pinned to the top of the view (the user, 2026-11-22), beside the line where it crosses
+                    // that height: the line's own place there is read from the line's two ends the drawing recorded.
+                    float canvasTop = ((Vector2)typeof(TechTreeWindow).GetField("_artOrigin", Private).GetValue(viewer)).y;
+                    float LineXAt(TechTreeWindow.SeparatorDraw d, float y) => Mathf.Lerp(d.LineTop.x, d.LineBottom.x, Mathf.InverseLerp(d.LineTop.y, d.LineBottom.y, y));
+                    bool Beside(TechTreeWindow.SeparatorDraw d, float gap) =>
+                        d.LeftLabel.y == d.RightLabel.y && Mathf.Abs((d.LeftLabel.x + d.RightLabel.x) * 0.5f - LineXAt(d, d.LeftLabel.y)) < 0.05f && Mathf.Abs(d.RightLabel.x - d.LeftLabel.x - gap) < 0.05f;
+                    Check("era separators, drawn: under the cards, the line from 56 above the first row to 928 where the view puts it; the numerals I and II either side of it, at the game's size (100 at zoom 1), at the TOP of the view",
                           d0 != null && d0.LeftEra == 1 && d0.CardsDrawnBefore == 0 && (d0.LineTop - lineTopWant).magnitude < 0.01f && (d0.LineBottom - lineBottomWant).magnitude < 0.01f
-                          && d0.LeftText == "I" && d0.RightText == "II" && (d0.LeftLabel - At(new Vector2(2523f - 139f, 436f))).magnitude < 0.01f && (d0.RightLabel - At(new Vector2(2523f + 139f, 436f))).magnitude < 0.01f,
-                          d0 == null ? "drawn " + drawn.Count : "top " + d0.LineTop + " want " + lineTopWant + " left " + d0.LeftText + "@" + d0.LeftLabel + " right " + d0.RightText + "@" + d0.RightLabel + " cards before " + d0.CardsDrawnBefore);
+                          && d0.LeftText == "I" && d0.RightText == "II" && d0.FontSize == 50 && Beside(d0, 139f) && d0.LeftLabel.y - canvasTop > 4f && d0.LeftLabel.y - canvasTop < 4f + 32.5f + 0.05f,
+                          d0 == null ? "drawn " + drawn.Count : "top " + d0.LineTop + " want " + lineTopWant + " left " + d0.LeftText + "@" + d0.LeftLabel + " right " + d0.RightText + "@" + d0.RightLabel
+                          + " size " + d0.FontSize + " canvas top " + canvasTop + " cards before " + d0.CardsDrawnBefore);
                     Check("era separators, drawn: the line is visible and drawn piece by piece where it is inside the canvas",
                           d0 != null && d0.PiecesDrawn >= 18 && d0.MaxAlpha > 0.5f && d0.MinAlpha < d0.MaxAlpha * 0.2f && d0.Width >= 1f,
                           d0 == null ? "none" : d0.PiecesDrawn + " pieces, alpha " + d0.MinAlpha + ".." + d0.MaxAlpha + " width " + d0.Width);
+                    float pinnedY = d0 != null ? d0.LeftLabel.y : float.NaN;
+                    VSet("_pan", drawPan + new Vector2(0f, -150f));   // scrolled down: the tree moves up, the numerals stay
+                    viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                    var scrolled = viewer.SeparatorDraws.Count == 1 ? viewer.SeparatorDraws[0] : null;
+                    Check("era separators, drawn: scrolled up or down, the numerals stay at the top of the view, still beside the line",
+                          scrolled != null && Mathf.Abs(scrolled.LeftLabel.y - pinnedY) < 0.01f && Mathf.Abs(scrolled.LineTop.y - (d0.LineTop.y - 150f)) < 0.01f && Beside(scrolled, 139f),
+                          scrolled == null ? "none" : scrolled.LeftLabel + " was y " + pinnedY + " line top " + scrolled.LineTop);
+                    VSet("_pan", drawPan + new Vector2(0f, 260f));    // the line starts below the view's top: the numerals stay at its top end
+                    viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                    var below = viewer.SeparatorDraws.Count == 1 ? viewer.SeparatorDraws[0] : null;
+                    Check("era separators, drawn: where the line begins below the view's top, the numerals sit at the line's top end",
+                          below != null && below.LineTop.y > canvasTop + 40f && Mathf.Abs(below.LeftLabel.y - below.LineTop.y) < 0.01f && Beside(below, 139f),
+                          below == null ? "none" : below.LeftLabel + " line top " + below.LineTop);
                     VSet("_zoom", 0.05f); VSet("_pan", new Vector2(300f - 2523f * 0.05f, 40f));
                     viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
-                    Check("era separators, drawn: zoomed far out the numerals are left out, the line is not", viewer.SeparatorDraws.Count == 1 && viewer.SeparatorDraws[0].LeftText == null && viewer.SeparatorDraws[0].PiecesDrawn > 0);
+                    var far = viewer.SeparatorDraws.Count == 1 ? viewer.SeparatorDraws[0] : null;
+                    Check("era separators, drawn: zoomed far out the numerals keep a readable size (14) and are less faint than the game's; the line is drawn too",
+                          far != null && far.LeftText == "I" && far.FontSize == 14 && far.LabelAlpha > 0.5f && far.PiecesDrawn > 0 && Beside(far, 2f * 139f * 0.14f),
+                          far == null ? "none" : "size " + far.FontSize + " alpha " + far.LabelAlpha + " gap " + (far.RightLabel.x - far.LeftLabel.x));
                     VSet("_pan", new Vector2(-100000f, 40f));
                     viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
                     Check("era separators, drawn: a separator outside the canvas draws no piece of its line", viewer.SeparatorDraws.Count == 1 && viewer.SeparatorDraws[0].PiecesDrawn == 0);

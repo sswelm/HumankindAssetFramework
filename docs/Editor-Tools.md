@@ -675,7 +675,8 @@ windows. **Deep dive:**
     - An era that is not one of the project's (or none) stays in the list as its first entry, also after another
       era was staged, and a note says so.
   - **Era separators.** Between two eras that both have a card on the game's tech screen the canvas draws the
-    game's separator: a slanted line with the two Roman numerals beside it, at the height the game puts them. It
+    game's separator: a slanted line with the two Roman numerals beside it. The numerals are pinned to the top of
+    the view, so they stay in sight while you scroll (in the game they sit at half its screen's height). It
     stands where the game puts it: halfway between the right end of the earlier era's rightmost card and the left
     end of the later era's leftmost card. Where a card of the later era sits left of a card of the earlier one,
     that is inside the overlap, and the line runs behind those cards. It follows staged eras and positions. A

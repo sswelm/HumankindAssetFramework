@@ -43,7 +43,7 @@ using UnityEngine;
 ///  - The era (asked for by the user, 2026-11-22): a technology's era is a choice in the side strip, staged and
 ///    saved like the rest (TechnologyDefinition.EraReference), and the canvas draws the game's era separators: the
 ///    slanted line with a Roman numeral on each side, where the game's TechnologyScreen.BindAllSeparators puts it
-///    (EraSeparators). The side strip warns where an era change would make a technology free, and says when an
+///    (EraSeparators); its numerals are pinned to the top of the view, the user's choice. The side strip warns where an era change would make a technology free, and says when an
 ///    era-exclusive technology can be researched. A card's artwork is drawn after EVERY card, so nothing of a card
 ///    crosses it: the user's choice. In the game the artwork is the last child of its own card (over its title, the
 ///    title's line and its unlock row), but a later card can cover an earlier card's artwork.
@@ -240,6 +240,12 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     const float ERA_LINE_TOP = -56f, ERA_LINE_BOTTOM = 928f;
     const float ERA_SLANT = 47f / 120f;    // units to the right per unit up
     const float ERA_LINE_SHIFT = 13f;      // the line at the numerals' height, right of the separator's place
+    // The numerals are PINNED to the top of the view (asked for by the user, 2026-11-22: "so I can always see it"),
+    // where the game has them at ERA_LABEL_Y: they stand beside the line where it crosses the view's top, at the
+    // game's size and faintness when zoomed in, never smaller than ERA_LABEL_MIN pixels and less faint when small.
+    const int   ERA_LABEL_MIN = 14;
+    const float ERA_LABEL_TOP_GAP = 4f;    // pixels between the view's top and the numerals' box
+    const float ERA_NUMBER_SMALL_ALPHA = 0.55f;
     static readonly Color ERA_NUMBER = new Color(0.4706f, 0.4196f, 0.5294f, 0.149f);
     // The prefab's line colour is (0.30, 0.30, 0.54, 0.56) under a stroke material this window does not have; drawn
     // as a plain line that is all but invisible on the canvas, so it is the colour the line HAS on the screenshot.
@@ -897,7 +903,8 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         public int LeftEra;
         public Vector2 LineTop, LineBottom;         // the whole line's ends, drawn or not
         public int PiecesDrawn; public float MaxAlpha, MinAlpha = 1f, Width;
-        public string LeftText, RightText; public Vector2 LeftLabel, RightLabel;   // null texts: no numerals at this zoom
+        public string LeftText, RightText; public Vector2 LeftLabel, RightLabel;
+        public int FontSize; public float LabelAlpha;
         public int CardsDrawnBefore;                // how many cards were already drawn: 0 = under the cards
     }
     internal readonly List<SeparatorDraw> SeparatorDraws = new List<SeparatorDraw>();
@@ -911,10 +918,16 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         if (separators.Count == 0) return;
         Vector2 origin = new Vector2(_artOrigin.x, _artOrigin.y);   // the clip's place in the window
         float width = Mathf.Clamp(1.5f * _zoom, 1f, 2.5f);
-        int fontSize = Mathf.RoundToInt(ERA_LABEL_SIZE * _zoom);
-        var numberStyle = fontSize >= 6
-            ? new GUIStyle(EditorStyles.label) { alignment = TextAnchor.MiddleCenter, fontSize = Mathf.Min(fontSize, 255), wordWrap = false, clipping = TextClipping.Overflow, normal = { textColor = ERA_NUMBER } }
-            : null;
+        // the numerals: the game's size where that is ERA_LABEL_MIN or more, and the game's box and gap at that size
+        int fontSize = Mathf.Clamp(Mathf.RoundToInt(ERA_LABEL_SIZE * _zoom), ERA_LABEL_MIN, 255);
+        float scale = fontSize / ERA_LABEL_SIZE;
+        float faint = Mathf.Lerp(ERA_NUMBER_SMALL_ALPHA, ERA_NUMBER.a, Mathf.InverseLerp(ERA_LABEL_MIN, ERA_LABEL_SIZE, fontSize));
+        var numberStyle = new GUIStyle(EditorStyles.label) { alignment = TextAnchor.MiddleCenter, fontSize = fontSize, wordWrap = false, clipping = TextClipping.Overflow,
+                                                             normal = { textColor = new Color(ERA_NUMBER.r, ERA_NUMBER.g, ERA_NUMBER.b, faint) } };
+        Vector2 half = new Vector2(75f, 65f) * scale;   // the game's label box is 150 x 130 at size 100
+        float offset = ERA_LABEL_OFFSET * scale;
+        // the height: at the view's top, but never past the line's ends (in the game's units, then back on screen)
+        float labelUnitY = Mathf.Clamp((local.yMin + ERA_LABEL_TOP_GAP + half.y - _pan.y) / _zoom, ERA_LINE_TOP, ERA_LINE_BOTTOM);
         const int pieces = 20;
         foreach (var separator in separators)
         {
@@ -934,13 +947,12 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 Handles.DrawAAPolyLine(width, sa, sb);
                 record.PiecesDrawn++; record.MaxAlpha = Mathf.Max(record.MaxAlpha, Handles.color.a); record.MinAlpha = Mathf.Min(record.MinAlpha, Handles.color.a); record.Width = width;
             }
-            if (numberStyle == null) continue;
-            Vector2 half = new Vector2(75f, 65f) * _zoom;   // the game's label box is 150 x 130
-            Vector2 left = U2S(separator.X - ERA_LABEL_OFFSET, ERA_LABEL_Y), right = U2S(separator.X + ERA_LABEL_OFFSET, ERA_LABEL_Y);
+            Vector2 onLine = EraLinePoint(separator.X, labelUnitY), at = U2S(onLine.x, onLine.y);
+            Vector2 left = new Vector2(at.x - offset, at.y), right = new Vector2(at.x + offset, at.y);
             string leftText = ToRoman(separator.LeftEra), rightText = ToRoman(separator.LeftEra + 1);
             GUI.Label(new Rect(left.x - half.x, left.y - half.y, 2 * half.x, 2 * half.y), leftText, numberStyle);
             GUI.Label(new Rect(right.x - half.x, right.y - half.y, 2 * half.x, 2 * half.y), rightText, numberStyle);
-            record.LeftText = leftText; record.RightText = rightText;
+            record.LeftText = leftText; record.RightText = rightText; record.FontSize = fontSize; record.LabelAlpha = faint;
             record.LeftLabel = left + origin; record.RightLabel = right + origin;
         }
         Handles.color = Color.white;
