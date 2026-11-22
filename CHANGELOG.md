@@ -10,6 +10,40 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Tech Tree viewer: a technology's era, the era separators, and the artwork on top (2026-11-22).** Asked for by
+  the user after the unlock row, with a screenshot of the game's tech screen beside the viewer's: "what is still
+  missing: the ability to configure a tech node's era and the era separator display in the viewer. Also the tech
+  image should be drawn always on top, not be crossed by the title line."
+  - **Era.** The side strip has an era choice (the project's `EraDefinition`s by index, each with its Roman
+    numeral). It is staged like every other edit and Save writes it to the technology's definition
+    (`EraReference`). The game takes two things from it: which side of the era separators the card belongs to, and
+    the technology's research cost (the era's cost for its tier, unless the technology has its own).
+  - **Era separators.** The canvas draws the game's separator between two eras: a slanted line with a Roman numeral
+    on each side. The place is the game's own rule (`TechnologyScreen.BindAllSeparators`): halfway between the right
+    end of the earlier era's rightmost card and the left end of the later era's leftmost card, counting only the
+    cards the game's screen shows. It follows staged eras and positions, so a card dragged across it or switched to
+    another era moves the line at once.
+  - **Artwork on top.** A card's artwork is drawn after every card. In the game it is the last child of its card,
+    over the title, the title's line and the unlock row; in the viewer the line ran through it. A title is made
+    smaller until it ends before its card's artwork (the game gives the title a box that ends there).
+  - **Checked on a copy of the live ENC data**, in a scratch Unity project with the game's real types:
+    - The five separators the window computes (I|II to V|VI) equal the ones calculated from the asset text by a
+      separate script. The V|VI one is at 18137 units; read off the user's screenshot of the game it is about 18135.
+    - An era saved through the window changed one line of the 1.5 MB definitions file (`Era6` to `Era5` in that
+      technology's entry) and nothing else, and the separator had moved with the staged era before the save.
+    - Screenshots of the real window: the separators, the era choice, the artwork over the title's line.
+  - **In the repo's drill:** 193 checks (170 before). New: the era as a staged edit (kept across a script reload,
+    typed back, shown on the card), an era saved into a real asset file alone and together with prerequisites and
+    visibility, a reference-only technology's era going into its one copy, the separator rule on built cases and
+    through the window, the numerals, the side strip's choice, and the artwork's place in the draw order BY PIXELS
+    (an opaque red artwork, read back from the window where the title's line crosses it). 32 defects planted: 31
+    caught. The one that survives: the title is not made smaller at all. The fit is checked as a calculation, not
+    on a drawn card.
+  - **Not exact:** the line's slant (21 degrees) and colour are measured on the user's screenshot. In the game's
+    prefab the line is a gradient in a stretched image with its own material, which this window does not have.
+    Not drawn: the dark shade beside the line, and the large faint numeral the game puts in the middle of each era.
+  - **Not done:** the tier, and `IsExclusiveToEra`. A card's fifth and sixth unlock icons are under its artwork
+    where the artwork is opaque there, as in the game.
 - **Tech Tree viewer: the cards show what a technology unlocks (2026-11-22, PR #307).** Asked for by the user:
   "so we actually know what gets unlocked by a tech". Each card has a row of icons along its bottom, where the
   game's card has it, and the side strip lists the entries by name. Shown only; unlocks are not edited here.

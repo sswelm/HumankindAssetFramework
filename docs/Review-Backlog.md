@@ -1899,6 +1899,25 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   The second copy is refused and stays staged. ENC keeps both in collections, where this does not arise.
 - **The registry's "unreadable" verdict when its config folder cannot be resolved** leaves a `.corrupt` copy beside
   a healthy source (seen in passing by a round-2 reviewer; older than this PR, not looked into).
+## Tech Tree viewer — eras and separators, left open (2026-11-22)
+
+- **The separator's slant and colour are measured on a screenshot**, not derived. The game's line is a gradient in
+  an image stretched over the content's height, drawn with a stroke material; its angle in the prefab (5.63 rad in
+  the image's own space) did not give the 21 degrees the screenshot shows for the ENC tree, so the screenshot's
+  value is used as a constant. A tree of another height may lean differently in the game.
+- **Not drawn:** the dark shade on one side of the line, and the era number the game centres in each era's span
+  (`RefreshEraNumbers`, much fainter than the separator's numerals).
+- **The labels' height** is half the tree's extent from row 0 to the last card's bottom. The game uses half its
+  content's height; measured on one screenshot the two agree within the reading error.
+- **Making a title smaller in front of the artwork is not in a check on a drawn card** (the calculation is). A
+  planted defect that removes the call survives the drill.
+- **A card's fifth and sixth unlock icons can be under its artwork**, as in the game, where the artwork is opaque
+  at its lower left. Nothing in the side strip is hidden.
+- **The tier and `IsExclusiveToEra` cannot be edited.** The research cost comes from the era's cost for the
+  technology's tier.
+- **An era change is not held against the prerequisites**: a technology can be put in an era before its own
+  prerequisites' eras. The game's data allows it; the viewer says nothing.
+
 ## Tech Tree viewer — the unlock row, left open by the review of PR #307 (2026-11-22)
 
 - **The row was never laid beside the running game's tech screen.** Its reference is the game's code

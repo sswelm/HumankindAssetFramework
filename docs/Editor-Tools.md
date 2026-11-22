@@ -663,6 +663,17 @@ windows. **Deep dive:**
     gap. The selected card and the cards in its own column stay. Each moved card is a staged position like a
     drag's, so Save writes them and the opposite number takes the shift back. A shift to the left stops where the
     nearest card would reach the selected card's column; the line under the button says what was moved.
+  - **Era.** A choice under the position: the project's eras by index, each with its Roman numeral (`V  ·  Era5`).
+    Staged like a drag; Save writes it to the technology's definition (`EraReference`). The game uses a
+    technology's era for the era separators of its tech screen and for the technology's research cost (the era's
+    cost for its tier, unless the technology has a cost of its own). A technology whose era is not one of the
+    project's keeps it as the first entry of the list, and a note says so.
+  - **Era separators.** Between two eras that both have a card on the game's tech screen the canvas draws the
+    game's separator: a slanted line with the two Roman numerals beside it, at half the tree's height. It stands
+    where the game puts it: halfway between the right end of the earlier era's rightmost card and the left end of
+    the later era's leftmost card. Where a card of the later era sits left of a card of the earlier one, that is
+    inside the overlap, and the line runs behind those cards. It follows staged eras and positions. A technology
+    that is switched off or has no UI mapper has no card in the game and does not count.
   - The side strip scrolls up and down only; its rows are laid out to its width.
   - **In the game / Switched off** (`TechnologyDefinition.Visibility`). `Never` does more than hide a technology: the
     game creates a technology for an empire only when its Visibility is not `Never`, so by the game's own rules a
@@ -716,7 +727,10 @@ windows. **Deep dive:**
       striped overlay of some unit classes, and the emblematic decoration.
     - Unlocks are not edited here. The internal name of a technology sits behind era and tier on its card,
       without the `Technology_` prefix, from zoom 0.6 up.
-  - Not shown: the researched / locked states and the era headers.
+  - A card's artwork is drawn on top of every card: nothing of a card crosses it, as in the game, and a title is
+    made smaller until it ends before its card's artwork.
+  - Not shown: the researched / locked states, the era buttons above the game's tree, and the large faint numeral
+    the game puts in the middle of each era.
 - **Tech Requires All** — `Tools ▸ HAF ▸ Tech Tree ▸ Requires All Prerequisites`. A list of technologies, nothing else.
   The game unlocks a technology when **any one** of its prerequisites is researched, and its data has no field to say
   otherwise; a technology in this list unlocks only when **all** of them are. **+ Add technology** picks from the

@@ -63,7 +63,7 @@ script compares its exit code with a load-only control (139). On 2026-11-21, wit
 beside it, one run of three exited 127 after `DRILL PASS` and was reported as a failure; two reruns exited 139. A
 failure of that shape (every check passed, only the exit code differs) is the runtime's exit, not the hooks: rerun.
 `bash tools/tech_requires_all_unity_drill.sh` drives the real Tech Requires All window and the Tech Tree viewer in one
-temporary Unity project and reads every deployed list back with the plugin's parser: 170 checks (14 before PR #301,
+temporary Unity project and reads every deployed list back with the plugin's parser: 193 checks (14 before PR #301,
 which were the list window's own: add, save, reopen, remove). The viewer's part:
 - **The two windows on one list.** The OR / AND switch is staged and written on Save; an open list window without
   unsaved changes follows, one with unsaved changes keeps them and has its save refused; the viewer picks up the list
@@ -74,7 +74,26 @@ which were the list window's own: add, save, reopen, remove). The viewer's part:
   reads them back, a reference-only definition is copied once for two parts, a standalone mapper is not copied over
   its definition's file, and an Undo after a Save takes nothing of it back.
 - **Staged edits:** kept across a reload that does not find the technology, and across a round trip of the window
-  through Unity's own serializer with everything in memory wiped (all five kinds of edit, the selection, the view).
+  through Unity's own serializer with everything in memory wiped (all six kinds of edit, the selection, the view).
+- **Eras, separators and the artwork's place** (2026-11-22, 23 checks).
+  - The era is a staged edit: it survives the serializer round trip with the other kinds, a save while its
+    technology is absent, and typing the saved era back clears it; the card shows the staged era.
+  - Saved into real asset files of the temporary project. The definition stand-in has the game's kind of era
+    reference (a struct that keeps one serialized string). An era saved with prerequisites and visibility in one
+    Save: all three are read back from the FILE's text. An era alone is a Save too and leaves the other values. A
+    reference-only technology's era goes into its one copy. An asset without an era reference, and no era, are
+    refused.
+  - The separator rule on built cases (the halfway point, no separator beside an era without a card, overlapping
+    eras, an index the project does not have) and through the window on asset-backed cards: a technology without a
+    UI mapper or switched off does not count, and the staged era and column do.
+  - The Roman numerals, the line's lean, the side strip's choice and note, the title's fit as a calculation.
+  - **The draw order, by pixels.** One card has an opaque red artwork. After a repaint the drill reads the
+    window's pixels (`TechTreeWindow.AfterCanvasDrawn`): red where the title's line crosses the artwork and on the
+    card's face under it, with two control points (the card's face left of the artwork is not red, the artwork
+    outside the card is).
+  - Planted: 32 defects, 31 caught. Not caught: removing the call that makes a title smaller on a drawn card.
+  - On the real data (scratch project, not in the repo): the window's five separators against a calculation from
+    the asset text, and an era saved into a copy of the real definitions file, diffed.
 - **What a technology unlocks** (2026-11-22, 37 checks), on stand-ins that have the game's SHAPES, because the
   reader works by name and by shape: the override is absent unless set, the faction rule is an enum, a reference
   is a struct with a private field, `UnitDefinition` is abstract with a concrete subclass, and the constructible
