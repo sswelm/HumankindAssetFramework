@@ -1899,6 +1899,29 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   The second copy is refused and stays staged. ENC keeps both in collections, where this does not arise.
 - **The registry's "unreadable" verdict when its config folder cannot be resolved** leaves a `.corrupt` copy beside
   a healthy source (seen in passing by a round-2 reviewer; older than this PR, not looked into).
+## Tech Tree viewer — the unlock row, left open by the review of PR #307 (2026-11-22)
+
+- **The row was never laid beside the running game's tech screen.** Its reference is the game's code
+  (`UpdateTechnologyUnlockInfo`, `TechnologyUnlocksComparer`, `TechnologyUnlockItem`), written out a second time by a
+  reviewer and run against the reader on the real data: no difference on 217 ENC and 93 vanilla technologies. A
+  screenshot of the game's screen next to the viewer's would close it.
+- **One row, for a culture with nothing of its own.** The game builds the row for the player's culture. What other
+  cultures get is in the side strip and, where nobody else gets it, faint after the row. A culture picker would
+  show a real culture's card; not built.
+- **Not drawn:** the striped overlay of some unit classes and specialties (23 ENC entries: naval transports, siege
+  weapons, militia) and the emblematic decoration.
+- **The DLC an effect needs is said, not tested** (5 ENC entries need the diplomacy expansion). The game hides
+  those from a player without it.
+- **A resource's UI mapper is found by the entry's name.** The game goes through the definition that owns the
+  resource's type. The same mapper unless two resource definitions share a type; none in ENC do.
+- **Ordering constructibles that have no constructible mapper** follows the kind of definition by the class's
+  NAME (`ExtensionDistrictDefinition`, ...), where the game reads the definition's `ConstructibleType`. No
+  comparison in the ENC or vanilla data takes that branch (474 of 474 go by `SortPriority`).
+- **How the row looks is in no check**: frame colours, the faint draw and amber edge of another culture's entry,
+  the `+N` box. Judged from batch-mode screenshots of the real window.
+- **The icon copies stay in memory until the scripts reload** (about 19 MB for ENC's 227 game icons). Reload drops
+  only the failed ones.
+
 ## Data contract — low (editor ⇄ plugin)
 
 - **`rotorSpinBones` / `rotorSpinSpeed`** are plugin-only fields with no editor `ModelDef` field. *Partly addressed
