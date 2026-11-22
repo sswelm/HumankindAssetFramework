@@ -1144,11 +1144,19 @@ public static class TechRequireAllWindowDrill
                           Near(onLine, 1013f, 436f) && Near(above, 1060f, 316f) && Near(below, 966f, 556f),
                           onLine + " " + above + " " + below);
                     var projectEras = new List<TechTreeData.Era> { new TechTreeData.Era { Name = "Era0", Index = 0 }, new TechTreeData.Era { Name = "Era1", Index = 1 }, new TechTreeData.Era { Name = "Era5", Index = 5 } };
-                    var choice = TechTreeWindow.EraChoices(projectEras, "Era5", out var choiceLabels, out int choiceAt);
-                    var foreign = TechTreeWindow.EraChoices(projectEras, "Era9", out var foreignLabels, out int foreignAt);
-                    var noEra = TechTreeWindow.EraChoices(projectEras, null, out var noEraLabels, out int noEraAt);
-                    Check("era choice: the project's eras by index, each with its numeral; the technology's own era is the one shown",
-                          string.Join(",", choice) == "Era0,Era1,Era5" && choiceAt == 2 && string.Join(" / ", choiceLabels) == "0  ·  Era0 / I  ·  Era1 / V  ·  Era5", string.Join(" / ", choiceLabels) + " at " + choiceAt);
+                    var choice = TechTreeWindow.EraChoices(projectEras, "Era5", "Era1", out var choiceLabels, out int choiceAt);
+                    var foreign = TechTreeWindow.EraChoices(projectEras, "Era9", "Era9", out var foreignLabels, out int foreignAt);
+                    var noEra = TechTreeWindow.EraChoices(projectEras, null, null, out var noEraLabels, out int noEraAt);
+                    Check("era choice: the project's eras by index, each with its numeral (none for the first, as in the game); the staged era is the one shown",
+                          string.Join(",", choice) == "Era0,Era1,Era5" && choiceAt == 2 && string.Join(" / ", choiceLabels) == "Era0 / I  ·  Era1 / V  ·  Era5", string.Join(" / ", choiceLabels) + " at " + choiceAt);
+                    var away = TechTreeWindow.EraChoices(projectEras, "Era1", "Era9", out var awayLabels, out int awayAt);
+                    var awayNone = TechTreeWindow.EraChoices(projectEras, "Era1", "", out var awayNoneLabels, out int awayNoneAt);
+                    Check("era choice: a SAVED era the project does not have stays in the list after another era is staged, so it can be chosen back",
+                          string.Join(",", away) == "Era9,Era0,Era1,Era5" && awayAt == 2 && awayLabels[0] == "Era9  (not an era of this project)"
+                          && string.Join(",", awayNone) == ",Era0,Era1,Era5" && awayNoneAt == 2 && awayNoneLabels[0] == "(no era)", string.Join(" / ", awayLabels) + " at " + awayAt);
+                    var empty = TechTreeWindow.EraChoices(new List<TechTreeData.Era>(), "Era5", "Era5", out var emptyLabels, out int emptyAt);
+                    Check("era choice: with no eras read in the project the list says so, and holds the technology's era",
+                          string.Join(",", empty) == "Era5" && emptyAt == 0 && emptyLabels[0] == "Era5  (no eras found in this project)", string.Join(" / ", emptyLabels));
                     Check("era choice: an era the project does not have, or none, stays the first entry, so opening the list changes nothing",
                           string.Join(",", foreign) == "Era9,Era0,Era1,Era5" && foreignAt == 0 && foreignLabels[0] == "Era9  (not an era of this project)"
                           && string.Join(",", noEra) == ",Era0,Era1,Era5" && noEraAt == 0 && noEraLabels[0] == "(no era)", string.Join(" / ", foreignLabels) + " | " + string.Join(" / ", noEraLabels));
@@ -1198,6 +1206,33 @@ public static class TechRequireAllWindowDrill
                     Check("artwork: drawn on top of its card: neither the title's line nor the card's face shows through it",
                           onArt.Count == 49 && onArt.All(Red) && onCard.Count == 49 && onCard.All(Red),
                           "on the line " + onArt.Count(Red) + " of " + onArt.Count + " red, on the face " + onCard.Count(Red) + " of " + onCard.Count);
+
+                    // T's artwork stands over S's card (S is five rows under T). A click there: the artwork is on top, so T.
+                    // Then S selected: its gold edge must show over T's artwork (review B, 2026-11-22: a neighbour's
+                    // artwork covered the selected card's edge).
+                    var sCard = (Rect)VCall("NodeRect", N("Technology_S"));
+                    var tArt = TechTreeWindow.ArtRect(cardNow);
+                    var both = Rect.MinMaxRect(Mathf.Max(sCard.xMin, tArt.xMin), Mathf.Max(sCard.yMin, tArt.yMin), Mathf.Min(sCard.xMax, tArt.xMax), Mathf.Min(sCard.yMax, tArt.yMax));
+                    // NodeRect, ArtRect and NodeAt all speak the window's coordinates (the canvas's clip is the window's own offset)
+                    Vector2 click = both.center, beside = new Vector2(sCard.x + 20f, sCard.y + 60f), canvasOnly = new Vector2(tArt.xMax - 5f, tArt.yMin + 5f);
+                    var hit = (TechTreeData.Node)VCall("NodeAt", click);
+                    var besideHit = (TechTreeData.Node)VCall("NodeAt", beside);
+                    var emptyHit = (TechTreeData.Node)VCall("NodeAt", canvasOnly);
+                    Check("artwork: a click where an artwork stands over another card selects the artwork's card; beside the artwork, the card under the click; on the canvas, nothing",
+                          both.width > 20f && both.height > 20f && hit != null && hit.Name == "Technology_T" && besideHit != null && besideHit.Name == "Technology_S"
+                          && !cardNow.Contains(canvasOnly) && !sCard.Contains(canvasOnly) && emptyHit == null,
+                          "overlap " + both + " hit " + (hit?.Name ?? "none") + " beside " + (besideHit?.Name ?? "none") + " empty " + (emptyHit?.Name ?? "none"));
+                    VSet("_selected", N("Technology_S"));
+                    TechTreeWindow.AfterCanvasDrawn = Capture;
+                    viewer.SendEvent(new Event { type = EventType.Layout }); viewer.SendEvent(new Event { type = EventType.Repaint });
+                    TechTreeWindow.AfterCanvasDrawn = null;
+                    var edge = Around(new Vector2(both.center.x, sCard.yMin + 0.5f), 0);   // the top edge of S, under T's artwork
+                    var inside = Around(new Vector2(both.center.x, both.center.y), 1);     // inside S, under T's artwork: still red
+                    bool gold(Color32 c) => c.r > 200 && c.g > 170 && c.b > 90 && c.b < 190;
+                    Check("artwork: the selected card's gold edge is drawn over a neighbour's artwork; inside the card the artwork stays on top",
+                          edge.Count == 1 && gold(edge[0]) && inside.Count == 9 && inside.All(Red),
+                          "edge " + (edge.Count > 0 ? edge[0].ToString() : "-") + " inside " + (inside.Count > 0 ? inside[0].ToString() : "-"));
+                    VSet("_selected", null);
 
                     // The card's row must load its image ITSELF. The side strip asks for the selected technology's icons
                     // too (a planted "the row is never drawn" survived on that, 2026-11-22), so: nothing selected, the
