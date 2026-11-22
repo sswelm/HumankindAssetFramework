@@ -47,6 +47,10 @@ using UnityEngine;
 ///    era-exclusive technology can be researched. A card's artwork is drawn after EVERY card, so nothing of a card
 ///    crosses it: the user's choice. In the game the artwork is the last child of its own card (over its title, the
 ///    title's line and its unlock row), but a later card can cover an earlier card's artwork.
+///  - The title, the description and the image of a technology (asked for by the user, 2026-11-22), staged and
+///    saved into its UI mapper like a position: Title and Description as the text the game shows, the image into
+///    the card's and the popup's entries (TechTreeData.TechnologyImageKeys). A project picture, or the image of
+///    another technology (which covers the game's own).
 ///  - Shift: every card right of the selected one moved by a number of columns, as one staged edit per card
 ///    (ShiftRightOf; asked for by the user, 2026-11-21, to make room in the tree without moving cards one by one).
 /// </summary>
@@ -60,7 +64,10 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         public bool? RequireAll;         // staged rule: true = ALL prerequisites (AND), false = any one (OR); null = unchanged
         public int? Visibility;          // staged TechnologyDefinition.Visibility (null = unchanged)
         public string Era;               // staged era name, TechnologyDefinition.EraReference (null = unchanged)
-        public bool IsEmpty => X == null && Y == null && Prereqs == null && RequireAll == null && Visibility == null && Era == null;
+        public string Title, Description;   // staged mapper texts (null = unchanged)
+        public string Image;             // staged image as a Unity GUID text (null = unchanged)
+        public bool IsEmpty => X == null && Y == null && Prereqs == null && RequireAll == null && Visibility == null && Era == null
+                               && Title == null && Description == null && Image == null;
     }
     readonly Dictionary<string, Pending> _pending = new();
 
@@ -70,9 +77,9 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     struct PendingRecord
     {
         public string name;
-        public bool hasX, hasY, hasPrereqs, hasRule, hasVisibility, hasEra;
+        public bool hasX, hasY, hasPrereqs, hasRule, hasVisibility, hasEra, hasTitle, hasDescription, hasImage;
         public int x, y, visibility;
-        public string era;
+        public string era, title, description, image;
         public bool requireAll;
         public List<string> prereqs;
     }
@@ -100,6 +107,9 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 hasRule = p.RequireAll.HasValue, requireAll = p.RequireAll ?? false,
                 hasVisibility = p.Visibility.HasValue, visibility = p.Visibility ?? 0,
                 hasEra = p.Era != null, era = p.Era ?? "",
+                hasTitle = p.Title != null, title = p.Title ?? "",
+                hasDescription = p.Description != null, description = p.Description ?? "",
+                hasImage = p.Image != null, image = p.Image ?? "",
             });
         }
         if (_selected != null) _selectedName = _selected.Name;
@@ -118,6 +128,9 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 RequireAll = r.hasRule ? r.requireAll : (bool?)null,
                 Visibility = r.hasVisibility ? r.visibility : (int?)null,
                 Era = r.hasEra ? (r.era ?? "") : null,
+                Title = r.hasTitle ? (r.title ?? "") : null,
+                Description = r.hasDescription ? (r.description ?? "") : null,
+                Image = r.hasImage ? (r.image ?? "") : null,
             };
             if (!p.IsEmpty) _pending[r.name] = p;
         }
@@ -314,6 +327,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             foreach (var n in _nodes)
                 if (before.TryGetValue(n.Name, out var was)
                     && (was.BaseX != n.BaseX || was.BaseY != n.BaseY || was.BaseVisibility != n.BaseVisibility || (was.Era ?? "") != (n.Era ?? "")
+                        || (was.TitleKey ?? "") != (n.TitleKey ?? "") || (was.BaseDescription ?? "") != (n.BaseDescription ?? "") || (was.ArtGuid ?? "") != (n.ArtGuid ?? "")
                         || !(was.BasePrereqs ?? new string[0]).SequenceEqual(n.BasePrereqs ?? new string[0])))
                 { changed++; if (example == null) example = n.Label ?? n.Name; }
         if (changed > 0)
@@ -326,7 +340,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     }
 
     internal static string UndoNote(int changed, string example) =>
-        $"Undo / Redo changed {changed} technolog{(changed == 1 ? "y" : "ies")} in memory ({example}{(changed > 1 ? ", ..." : "")}): position, era, prerequisites or visibility " +
+        $"Undo / Redo changed {changed} technolog{(changed == 1 ? "y" : "ies")} in memory ({example}{(changed > 1 ? ", ..." : "")}): position, era, title, description, image, prerequisites or visibility " +
         "are now different from the file on disk, and the next save of the project writes them as they are shown here. Redo (or Undo) once more takes this back.";
 
     // Seam for the drill (tools/tech_requires_all_unity_drill.sh): its temporary project holds no technology assets.
@@ -396,6 +410,13 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         _pending.TryGetValue(n.Name, out var p) && p.Prereqs != null ? p.Prereqs : (IReadOnlyList<string>)n.BasePrereqs;
     int EffVisibility(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Visibility.HasValue ? p.Visibility.Value : n.BaseVisibility;
     bool Hidden(TechTreeData.Node n) => !TechTreeData.OnTechScreen(EffVisibility(n));
+    /// <summary>The title as stored (staged or saved): the text, or a "%..." key.</summary>
+    string EffTitle(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Title != null ? p.Title : (n.TitleKey ?? "");
+    /// <summary>The title as shown: a staged one as typed, the saved one as the game shows it.</summary>
+    internal string EffLabel(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Title != null ? p.Title : (n.Label ?? n.Name ?? "");
+    string EffDescription(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Description != null ? p.Description : (n.BaseDescription ?? "");
+    /// <summary>The card's image as a Unity GUID text (staged or saved); null when none is named.</summary>
+    internal string EffImage(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Image != null ? p.Image : n.ArtGuid;
     string EffEra(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Era != null ? p.Era : (n.Era ?? "");
     /// <summary>The game's index of that era (EraDefinition.EraIndex); -1 for a name the project has no era for.</summary>
     internal static int EraIndexOf(IList<TechTreeData.Era> eras, string name)
@@ -716,7 +737,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         {
             Rect r = NodeRect(n);
             Rect artRect = ArtRect(r);
-            if (!r.Overlaps(local) && !(n.ArtNamed && artRect.Overlaps(local))) continue;
+            if (!r.Overlaps(local) && !((n.ArtNamed || EffImage(n) != n.ArtGuid) && artRect.Overlaps(local))) continue;
 
             bool selected = n == _selected;
             bool hidden = Hidden(n);
@@ -751,7 +772,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             // title, upper case as in the game, over the divider. The game does not shrink or cut a long title: its
             // label grows to the text's width and runs on under the artwork, which covers it (the review of
             // 2026-11-22, the game's Title label: autoAdjustWidth without a maximum). The same here.
-            GUI.Label(new Rect(r.x + pad, r.y, r.width - 2 * pad - (IsEdited(n) ? 10f * _zoom : 0), titleH), (n.Label ?? n.Name ?? "").ToUpperInvariant(), titleStyle);
+            GUI.Label(new Rect(r.x + pad, r.y, r.width - 2 * pad - (IsEdited(n) ? 10f * _zoom : 0), titleH), CardTitle(n), titleStyle);
             EditorGUI.DrawRect(new Rect(r.x + pad, r.y + titleH, r.width - 2 * pad, 1f), new Color(1f, 1f, 1f, 0.22f));
 
             // under it, where the game shows the turns: era and tier, and the AND rule where it has an effect
@@ -827,6 +848,9 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     struct ArtDraw { public Rect Rect; public Texture Texture; public Rect Uv; public float Fade; public TechTreeData.Node Node; }
     readonly List<ArtDraw> _artDraws = new List<ArtDraw>();
     Vector2 _artOrigin;   // where the canvas's clip started in the window when the artworks were drawn (NodeAt)
+    /// <summary>The title as a card shows it: upper case, as in the game, from the STAGED title.</summary>
+    internal string CardTitle(TechTreeData.Node n) => EffLabel(n).ToUpperInvariant();
+
     /// <summary>The era and tier as a card shows them ("E5 · T3"), from the STAGED era.</summary>
     internal string CardEraTier(TechTreeData.Node n)
     {
@@ -963,7 +987,13 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 
     // The card's image: the project's own file, else the game's own from its atlases. `uv` is the part of the
     // texture to draw, `aspect` the image's width over its height.
-    bool TryArt(TechTreeData.Node n, out Texture tex, out Rect uv, out float aspect) => TryImage(n.ArtPath, n.ArtGuid, out tex, out uv, out aspect);
+    bool TryArt(TechTreeData.Node n, out Texture tex, out Rect uv, out float aspect)
+    {
+        string guid = EffImage(n);
+        if (guid == n.ArtGuid) return TryImage(n.ArtPath, n.ArtGuid, out tex, out uv, out aspect);
+        string path = string.IsNullOrEmpty(guid) ? null : AssetDatabase.GUIDToAssetPath(guid);   // a staged image: a file of the project, or one of the game's own
+        return TryImage(string.IsNullOrEmpty(path) ? null : path, guid, out tex, out uv, out aspect);
+    }
 
     // One image of a UI mapper: the project's own file by its path, else the game's own by its GUID from the atlases.
     bool TryImage(string path, string guid, out Texture tex, out Rect uv, out float aspect)
@@ -1187,7 +1217,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         else
         {
             var n = _selected;
-            EditorGUILayout.LabelField(n.Label, EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(EffLabel(n), EditorStyles.boldLabel);
             EditorGUILayout.LabelField(n.Name, EditorStyles.miniLabel);
 
             // state line
@@ -1201,10 +1231,15 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             string artProblem = TechTreeVanillaArt.Problem;
             if (gameImage && TechTreeVanillaArt.Atlas(shown.Output) == null)
             { gameImage = false; artProblem = "the atlas " + shown.Output + " did not load (Reload tries again)"; }
-            EditorGUILayout.LabelField(ArtLine(n, gameImage ? shown.Output : null, artProblem), EditorStyles.wordWrappedMiniLabel);
+            if (EffImage(n) == n.ArtGuid)
+                EditorGUILayout.LabelField(ArtLine(n, gameImage ? shown.Output : null, artProblem), EditorStyles.wordWrappedMiniLabel);
 
             if (!_editMode)
-                EditorGUILayout.HelpBox("Edit is OFF, so the position, the game switch, the rule and the prerequisites are greyed out. Switch on \"Edit\" at the top left to change them.", MessageType.Info);
+                EditorGUILayout.HelpBox("Edit is OFF, so the title, description, image, position, era, game switch, rule and prerequisites are greyed out. Switch on \"Edit\" at the top left to change them.", MessageType.Info);
+
+            // the card's title, description and image, staged like the rest and saved into the UI mapper
+            using (new EditorGUI.DisabledScope(!_editMode))
+                DrawCardTexts(n, SideContentWidth(side.width));
 
             // the position as numbers (grid cells), staged exactly like a drag on the canvas
             using (new EditorGUI.DisabledScope(!_editMode))
@@ -1397,6 +1432,114 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     internal static int SwitchedVisibility(int baseVisibility, bool inGame) =>
         !inGame ? TechTreeData.VisibilityNever
         : baseVisibility != TechTreeData.VisibilityNever ? baseVisibility : TechTreeData.VisibilityAlways;
+
+    // ── The card's title, description and image ──────────────────────────────
+    GUIStyle _descriptionStyle;
+
+    void DrawCardTexts(TechTreeData.Node n, float width)
+    {
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.Label(new GUIContent("Title", "The technology's name as the game shows it, on its card and everywhere else. Save writes it into the technology's UI mapper (Title), the same in every language."), GUILayout.Width(54));
+        string title = EditorGUILayout.TextField(EffTitle(n));
+        EditorGUILayout.EndHorizontal();
+        if (title != EffTitle(n)) SetTitle(n, title);
+
+        GUILayout.Label(new GUIContent("Description", "The text the game shows in the technology's tooltip. Save writes it into the technology's UI mapper (Description), the same in every language."));
+        if (_descriptionStyle == null) _descriptionStyle = new GUIStyle(EditorStyles.textArea) { wordWrap = true };
+        // as high as its text (the real descriptions are 3 to 6 lines at this width), within 3 and 16 lines
+        string shownDescription = EffDescription(n);
+        float lines = _descriptionStyle.lineHeight > 0 ? _descriptionStyle.lineHeight : 13f;
+        float descriptionHeight = Mathf.Clamp(_descriptionStyle.CalcHeight(new GUIContent(shownDescription), width - 4f) + lines, 3f * lines + 6f, 16f * lines + 6f);   // + one line: the measure ran one short in the strip
+        string description = EditorGUILayout.TextArea(shownDescription, _descriptionStyle, GUILayout.Height(descriptionHeight));
+        if (description != EffDescription(n)) SetDescription(n, description);
+
+        string textNote = TextNote(n.TitleKey, n.Label, EffTitle(n), n.BaseDescription, EffDescription(n));
+        if (textNote != "") EditorGUILayout.HelpBox(textNote, MessageType.Info);
+
+        // the image: a picture of the project, or the image of another technology (the game's own ones too)
+        string image = EffImage(n);
+        string imagePath = string.IsNullOrEmpty(image) ? "" : AssetDatabase.GUIDToAssetPath(image);
+        var current = string.IsNullOrEmpty(imagePath) ? null : AssetDatabase.LoadAssetAtPath<Texture2D>(imagePath);
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.Label(new GUIContent("Image", "The technology's picture: on its card and in the popup when it is researched (both image entries of its UI mapper; they are the same image in all of ENC's technologies). Pick a picture of the project, or take the image of another technology, which can be one of the game's own."), GUILayout.Width(54));
+        var picked = (Texture2D)EditorGUILayout.ObjectField(current, typeof(Texture2D), false);
+        if (GUILayout.Button(new GUIContent("Same as…", "The image of another technology: one of the project's pictures or one of the game's own."), EditorStyles.miniButton, GUILayout.Width(68)))
+        {
+            var others = _nodes.Where(o => o != n && !string.IsNullOrEmpty(EffImage(o))).ToList();
+            new TechPickerDropdown(new AdvancedDropdownState(), others, name => { if (_byName.TryGetValue(name, out var other)) SetImage(n, EffImage(other)); }, "Image of").Show(GUILayoutUtility.GetLastRect());
+        }
+        EditorGUILayout.EndHorizontal();
+        if (picked != current && picked != null) SetImage(n, AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(picked)));
+        string imageNote = ImageNote(image, imagePath, image != n.ArtGuid, CommonImageFolder());
+        if (imageNote != "") EditorGUILayout.LabelField(imageNote, EditorStyles.wordWrappedMiniLabel);
+    }
+
+    /// <summary>
+    /// What the side strip says about the texts. A title or description that is a localization key ("%...") is
+    /// shown translated; one typed here replaces the key with the text itself, the same in every language.
+    /// </summary>
+    internal static string TextNote(string baseTitle, string shownTitle, string title, string baseDescription, string description)
+    {
+        var notes = new List<string>();
+        if (title.Trim() == "") notes.Add("The title is empty: the game would show no name.");
+        bool titleKey = baseTitle != null && baseTitle.StartsWith("%", StringComparison.Ordinal), descriptionKey = baseDescription != null && baseDescription.StartsWith("%", StringComparison.Ordinal);
+        if (titleKey && title == baseTitle) notes.Add("The title is the localization key " + baseTitle + ", shown as \"" + shownTitle + "\". A title typed here replaces the key: the game then shows that text in every language.");
+        else if (titleKey) notes.Add("This replaces the localization key " + baseTitle + " with the text itself, the same in every language.");
+        if (descriptionKey && description != baseDescription) notes.Add("The description replaces the localization key " + baseDescription + " with the text itself, the same in every language.");
+        return string.Join(" ", notes);
+    }
+
+    /// <summary>
+    /// What the side strip says about the image. `changed` = it is a staged one. `commonFolder` = where most of the
+    /// project's technology pictures are, said when a picked picture is elsewhere ("" to say nothing).
+    /// </summary>
+    internal static string ImageNote(string guid, string path, bool changed, string commonFolder)
+    {
+        if (string.IsNullOrEmpty(guid)) return "No image is set.";
+        string what = !string.IsNullOrEmpty(path) ? System.IO.Path.GetFileName(path) : "one of the game's own images";
+        string note = changed ? "New image (staged): " + what + "." : "";
+        if (!string.IsNullOrEmpty(path) && !string.IsNullOrEmpty(commonFolder) && System.IO.Path.GetDirectoryName(path).Replace('\\', '/') != commonFolder)
+            note += (note == "" ? "" : " ") + "The project's other technology pictures are in " + commonFolder + ".";
+        return note;
+    }
+
+    // where most of the technologies' pictures that are files of the project are ("" for none)
+    string CommonImageFolder()
+    {
+        var folders = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var o in _nodes)
+            if (!string.IsNullOrEmpty(o.ArtPath))
+            {
+                string folder = System.IO.Path.GetDirectoryName(o.ArtPath).Replace('\\', '/');
+                folders[folder] = folders.TryGetValue(folder, out int k) ? k + 1 : 1;
+            }
+        return folders.Count == 0 ? "" : folders.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key, StringComparer.Ordinal).First().Key;
+    }
+
+    void SetTitle(TechTreeData.Node n, string title)
+    {
+        var p = Stage(n);
+        p.Title = title != (n.TitleKey ?? "") ? title : null;   // equal to base = no change
+        DropIfClean(n);
+        Repaint();
+    }
+
+    void SetDescription(TechTreeData.Node n, string description)
+    {
+        var p = Stage(n);
+        p.Description = description != (n.BaseDescription ?? "") ? description : null;
+        DropIfClean(n);
+        Repaint();
+    }
+
+    void SetImage(TechTreeData.Node n, string unityGuid)
+    {
+        if (!TechTreeData.UnityGuidToAmplitude(unityGuid, out _, out _, out _, out _)) return;   // not an asset of the project or the game
+        var p = Stage(n);
+        p.Image = unityGuid != n.ArtGuid ? unityGuid : null;
+        DropIfClean(n);
+        Repaint();
+    }
 
     // ── The era of a technology ───────────────────────────────────────────────
     /// <summary>
@@ -1610,26 +1753,35 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         GUIUtility.keyboardControl = 0;
         // Each PART leaves the overlay when it is written, and only then: a skipped part stays staged, a written one
         // does not (it stayed staged with a skipped one, and was written again by the next Save; review 2026-11-21).
-        int pos = 0, pre = 0, vis = 0, eras = 0, skipped = 0, absent = 0;
+        int pos = 0, pre = 0, vis = 0, eras = 0, texts = 0, images = 0, skipped = 0, absent = 0;
         foreach (var kv in _pending)
         {
             if (!_byName.TryGetValue(kv.Key, out var node)) { absent++; continue; }   // not in the tree right now: kept
             var p = kv.Value;
 
-            if (p.X.HasValue || p.Y.HasValue)
+            // ONE writable mapper for all of its parts: the position, the texts, the image
+            bool positionStaged = p.X.HasValue || p.Y.HasValue;
+            if (positionStaged || p.Title != null || p.Description != null || p.Image != null)
             {
                 var mapper = TechTreeData.EnsureWritable(node, true, _modPath);
-                if (mapper != null)
+                if (mapper == null) skipped += (positionStaged ? 1 : 0) + (p.Title != null ? 1 : 0) + (p.Description != null ? 1 : 0) + (p.Image != null ? 1 : 0);
+                else
                 {
                     // NOT registered with Undo, on purpose (review 2026-11-21, executed on the real ENC data). With it,
                     // a later Ctrl+Z — pressed to take back a staged drag, which Undo never held — took the SAVED
                     // positions back in memory while the file kept them, said nothing, and the next Save wrote the
                     // old values over the saved ones under "Saved: 1 position".
-                    TechTreeData.WritePosition(mapper, p.X ?? node.BaseX, p.Y ?? node.BaseY);
+                    if (positionStaged)
+                    {
+                        TechTreeData.WritePosition(mapper, p.X ?? node.BaseX, p.Y ?? node.BaseY);
+                        pos++; p.X = null; p.Y = null;
+                    }
+                    if (p.Title != null) { if (TechTreeData.WriteText(mapper, "Title", p.Title)) { texts++; p.Title = null; } else skipped++; }
+                    if (p.Description != null) { if (TechTreeData.WriteText(mapper, "Description", p.Description)) { texts++; p.Description = null; } else skipped++; }
                     EditorUtility.SetDirty(mapper);
-                    pos++; p.X = null; p.Y = null;
+                    // the image LAST: it is written through the serialized form, which takes the object as the writes above left it
+                    if (p.Image != null) { if (TechTreeData.WriteImage(mapper, TechTreeData.TechnologyImageKeys, p.Image)) { images++; p.Image = null; } else skipped++; }
                 }
-                else skipped++;
             }
 
             // ONE writable definition for all of its parts.
@@ -1680,7 +1832,8 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         // after an unsettled write, which may have landed.
         if (pre > 0 || (rules.Count > 0 && outcome != RegistryRules.SaveOutcome.Refused)) TechRequireAllWindow.RefreshOpenWindows();
 
-        Debug.Log($"[TechTree] Saved: {pos} position, {pre} prerequisite, {vis} visibility change(s)" + (eras > 0 ? $", {eras} era change{(eras == 1 ? "" : "s")}" : "") + ruleNote
+        Debug.Log($"[TechTree] Saved: {pos} position, {pre} prerequisite, {vis} visibility change(s)" + (eras > 0 ? $", {eras} era change{(eras == 1 ? "" : "s")}" : "")
+                + (texts > 0 ? $", {texts} title / description change{(texts == 1 ? "" : "s")}" : "") + (images > 0 ? $", {images} image change{(images == 1 ? "" : "s")}" : "") + ruleNote
                 + (skipped > 0 ? $" · {skipped} skipped (no writable target — see step 5; those edits are KEPT staged)" : "")
                 + (absent > 0 ? $" · {absent} technolog{(absent == 1 ? "y" : "ies")} with staged edits {(absent == 1 ? "is" : "are")} not in the tree right now: those edits are KEPT staged (Revert discards them)" : "") + ".");
         foreach (var k in _pending.Where(kv => kv.Value.IsEmpty).Select(kv => kv.Key).ToList()) _pending.Remove(k);

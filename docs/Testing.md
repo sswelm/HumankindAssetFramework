@@ -63,7 +63,7 @@ script compares its exit code with a load-only control (139). On 2026-11-21, wit
 beside it, one run of three exited 127 after `DRILL PASS` and was reported as a failure; two reruns exited 139. A
 failure of that shape (every check passed, only the exit code differs) is the runtime's exit, not the hooks: rerun.
 `bash tools/tech_requires_all_unity_drill.sh` drives the real Tech Requires All window and the Tech Tree viewer in one
-temporary Unity project and reads every deployed list back with the plugin's parser: 216 checks (14 before PR #301,
+temporary Unity project and reads every deployed list back with the plugin's parser: 229 checks (14 before PR #301,
 which were the list window's own: add, save, reopen, remove). The viewer's part:
 - **The two windows on one list.** The OR / AND switch is staged and written on Save; an open list window without
   unsaved changes follows, one with unsaved changes keeps them and has its save refused; the viewer picks up the list
@@ -75,6 +75,11 @@ which were the list window's own: add, save, reopen, remove). The viewer's part:
   its definition's file, and an Undo after a Save takes nothing of it back.
 - **Staged edits:** kept across a reload that does not find the technology, and across a round trip of the window
   through Unity's own serializer with everything in memory wiped (all six kinds of edit, the selection, the view).
+- **Title, description and image** (2026-11-22, 13 checks): staged with the other kinds (kept across a save while
+  the technology has no asset, and across the serializer round trip), typed back to no change, the card's title.
+  Saved into a real mapper asset: the texts and both image entries read back from the FILE, Picto untouched, the
+  Save line, Undo after the Save. The writers on their own (a missing entry is added, what cannot be written is
+  refused); the image GUID conversion against a real ENC pair; the notes; the card drawing a staged image (pixels).
 - **Eras, separators and the artwork's place** (2026-11-22, 46 checks).
   - The era is a staged edit: it survives the serializer round trip with the other kinds and a save while its
     technology is absent (the Save keeps it staged), typing the saved era back clears it, and the card shows the

@@ -663,6 +663,13 @@ windows. **Deep dive:**
     gap. The selected card and the cards in its own column stay. Each moved card is a staged position like a
     drag's, so Save writes them and the opposite number takes the shift back. A shift to the left stops where the
     nearest card would reach the selected card's column; the line under the button says what was moved.
+  - **Title, Description, Image.** At the top of the side strip, staged like a position; the card shows the staged
+    title and image at once. Save writes them into the technology's UI mapper: the Title and the Description as the
+    text the game shows (the same in every language), the image into the card's and the popup's entries
+    (`TechnologyScreenItemBackground`, `TechnologyPopupBackground`). Pick a picture of the project, or use
+    **Same as…** to take the image of another technology, which can be one of the game's own. A title or
+    description that is a localization key (`%...`) is shown translated; a text typed here replaces the key, and
+    the side strip says so. The small `Picto` image is not changed.
   - **Era.** A choice under the position: the project's eras by index, each with its Roman numeral (`V  ·  Era5`;
     the first era has none, as in the game). Staged like a drag; Save writes it to the technology's definition
     (`EraReference`). In the game a technology's era decides when an empire can research it (not before the

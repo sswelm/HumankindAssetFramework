@@ -10,6 +10,34 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Tech Tree viewer: a technology's title, description and image (2026-11-22).** Asked for by the user: "edit more,
+  starting with the tech title and description and the ability to change the tech image".
+  - **Where they live.** All three are in the technology's UI mapper. In ENC all 214 mappers hold the title and the
+    description as the text itself (no localization key), and the image as an entry of their Images list: the card
+    (`TechnologyScreenItemBackground`) and the popup when it is researched (`TechnologyPopupBackground`), the same
+    image in all 214. 124 of those images are pictures of the project (`Assets/Resources/Images`), referenced only
+    by their GUID; 90 are the game's own. The third entry, `Picto`, is always one of the game's own and is not
+    touched.
+  - **In the side strip:** a Title field, a Description box, and an Image field for a picture of the project, with
+    "Same as…" to take the image of another technology (which can be one of the game's own). All three are staged
+    like a position; the card shows the staged title and image at once. Save writes them into the mapper, the image
+    into both of its entries.
+  - **A title or description that is a localization key** (the game's own mappers, copied from the reference
+    folder) is shown translated; a text typed here replaces the key, and the game then shows that text in every
+    language. The side strip says so.
+  - **Checked on a copy of the live ENC data** with the game's real types: a new title, description and game image
+    on Diplomacy and a project picture on Archery, saved through the window. The 1.5 MB mappers file changed in
+    exactly those lines: two texts, and the four ints of each image in the card's and the popup's entries; Picto
+    and every other technology unchanged. Archery's entries now hold the same four ints as Diplomacy's had for
+    `diplomat512.png`. A screenshot of the window shows the card and the side strip.
+  - **In the repo's drill:** 229 checks (216 before). The image's GUID conversion is held to a real pair of the
+    ENC data (`diplomat512.png` and Diplomacy's mapper). The card draws a staged image (checked by pixels). Save
+    writes texts and images into a mapper asset's file, and Undo after it takes nothing back. A mapper without one
+    of the two image entries gets it. Eight defects planted, eight caught (one only after a check for the card's
+    title was added).
+  - **Not done:** one text for every language (no per-language editing, no localization keys written); the
+    image's import settings are not checked (ENC's pictures are plain textures); a picture of the game's own can
+    be chosen only through another technology that has it.
 - **Tech Tree viewer: a technology's era, the era separators, and the artwork on top (2026-11-22, PR #308).**
   Asked for by the user after the unlock row, with a screenshot of the game's tech screen beside the viewer's:
   "what is still missing: the ability to configure a tech node's era and the era separator display in the
