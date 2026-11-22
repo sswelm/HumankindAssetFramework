@@ -43,8 +43,10 @@ using UnityEngine;
 ///  - The era (asked for by the user, 2026-11-22): a technology's era is a choice in the side strip, staged and
 ///    saved like the rest (TechnologyDefinition.EraReference), and the canvas draws the game's era separators: the
 ///    slanted line with a Roman numeral on each side, where the game's TechnologyScreen.BindAllSeparators puts it
-///    (EraSeparators). A card's artwork is drawn after EVERY card, so nothing of a card crosses it: in the game
-///    the artwork is the last child of its card. A title is made to fit in front of its card's artwork.
+///    (EraSeparators). The side strip warns where an era change would make a technology free, and says when an
+///    era-exclusive technology can be researched. A card's artwork is drawn after EVERY card, so nothing of a card
+///    crosses it: the user's choice. In the game the artwork is the last child of its own card (over its title, the
+///    title's line and its unlock row), but a later card can cover an earlier card's artwork.
 ///  - Shift: every card right of the selected one moved by a number of columns, as one staged edit per card
 ///    (ShiftRightOf; asked for by the user, 2026-11-21, to make room in the tree without moving cards one by one).
 /// </summary>
@@ -223,19 +225,25 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     const float NAME_MIN_ZOOM = 0.6f;     // the internal name is small print: not drawn below this zoom
     const float HIDDEN_ALPHA = 0.4f;                                    // how faint the card and links of a technology without a card in the game are
     // The game's era separator (the prefab "_SeparatorSample" of its tech screen, read with UnityPy 2026-11-22): a
-    // group 428 wide centred on the separator's X, a label 150 x 130 at each end at half the content's height, font
-    // size 100, colour (0.47, 0.42, 0.53, 0.15). The slanted line's colour is that prefab's too. Its SLANT is not
-    // derived from the prefab (a gradient in a stretched image): it is measured on the user's screenshot of the
-    // ENC tree in the game, 21 degrees off the vertical, leaning right towards the top.
+    // group 428 wide centred on the separator's X, a label 150 x 130 at each end, font size 100, colour (0.47, 0.42,
+    // 0.53, 0.15). The group is stretched over the screen's content, 920 high at the game's reference resolution
+    // (1080 lines); the labels sit at half of that, and the cards start 24 below the content's top (verticalPadding).
+    // In this window's units (a card's top at TechTreeY * 22) the labels are therefore at a fixed 460 - 24 = 436, not
+    // at half the tree's height (the review of 2026-11-22; on the user's screenshot the "VI" sits at 437). The line
+    // is an image 984 high from 32 above the content to 32 below it: -56 to 928 here.
+    // The SLANT is the line's own texture (a 64 x 128 distance field whose edge runs 47 px across over 120 px down,
+    // drawn at its own aspect; derived by the review, 0.394 measured on the screenshot). That the line crosses the
+    // labels' height 13 units right of the separator's place is measured on the screenshot only.
     const float ERA_LABEL_OFFSET = 139f;   // from the separator's X to the middle of each numeral: 428 / 2 - 150 / 2
     const float ERA_LABEL_SIZE = 100f;
-    const float ERA_SLANT = 0.39f;         // units to the right per unit up
-    const float ERA_OVERHANG = 56f;        // the line runs this far past the first row's top and the last card's bottom
+    const float ERA_LABEL_Y = 436f;        // the numerals' height, and where the line crosses it
+    const float ERA_LINE_TOP = -56f, ERA_LINE_BOTTOM = 928f;
+    const float ERA_SLANT = 47f / 120f;    // units to the right per unit up
+    const float ERA_LINE_SHIFT = 13f;      // the line at the numerals' height, right of the separator's place
     static readonly Color ERA_NUMBER = new Color(0.4706f, 0.4196f, 0.5294f, 0.149f);
     // The prefab's line colour is (0.30, 0.30, 0.54, 0.56) under a stroke material this window does not have; drawn
     // as a plain line that is all but invisible on the canvas, so it is the colour the line HAS on the screenshot.
     static readonly Color ERA_LINE = new Color(0.40f, 0.38f, 0.72f, 0.85f);
-    const float TITLE_ART_GAP = 4f;        // between the end of a title and its card's artwork
 
     [MenuItem("Tools/HAF/Tech Tree/Open Viewer")]
     static void Open()
@@ -685,9 +693,10 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         var hiddenStyle = new GUIStyle(infoStyle) { fontStyle = FontStyle.Bold, normal = { textColor = HIDDEN_MARK } };
         var unknownStyle = new GUIStyle(infoStyle) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
 
-        // The artwork of a card is drawn after ALL the cards (the second loop below): in the game it is the last child
-        // of its card, on top of the title, its line and the unlock row, and here nothing of any card may cross it
-        // (the user, 2026-11-22: the title's line ran through the images).
+        // The artwork of a card is drawn after ALL the cards (the second loop below): nothing of any card may cross it
+        // (the user, 2026-11-22: the title's line ran through the images). In the game the artwork is the last child
+        // of its own card, over its title, the title's line and its unlock row; a card that comes later in the game's
+        // list of technologies is drawn over an earlier card's artwork, which this window does not copy.
         _artDraws.Clear();
         foreach (var n in _nodes)
         {
@@ -707,13 +716,8 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             GUI.color = new Color(1f, 1f, 1f, fade);   // the texts; reset at the end of this card
 
             // the artwork, over the card's right end and standing out of it: remembered, drawn after the cards
-            float artLeft = float.MaxValue;
             if (TryArt(n, out var art, out var artUv, out float artAspect))
-            {
-                Rect fitted = FitInside(artRect, artAspect);
-                artLeft = fitted.x;
-                _artDraws.Add(new ArtDraw { Rect = fitted, Texture = art, Uv = artUv, Fade = fade });
-            }
+                _artDraws.Add(new ArtDraw { Rect = FitInside(artRect, artAspect), Texture = art, Uv = artUv, Fade = fade });
 
             float pad = 10f * _zoom;
             float titleH = 0.29f * r.height;   // the game's title band: the divider sits at 29% of the card's height
@@ -729,15 +733,10 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 
             if (!showLabels) { GUI.color = Color.white; continue; }
 
-            // title, upper case as in the game, over the divider. The game's title has a box that ends before the
-            // artwork (160 of the card's 310); here the title is made smaller until it ends before the artwork.
-            string title = (n.Label ?? n.Name ?? "").ToUpperInvariant();
-            float titleWidth = r.width - 2 * pad - (IsEdited(n) ? 10f * _zoom : 0);
-            if (artLeft < float.MaxValue) titleWidth = Mathf.Min(titleWidth, artLeft - TITLE_ART_GAP * _zoom - (r.x + pad));
-            int titleSize = titleStyle.fontSize;
-            titleStyle.fontSize = FitFontSize(titleSize, titleStyle.CalcSize(new GUIContent(title)).x, titleWidth, 6);
-            GUI.Label(new Rect(r.x + pad, r.y, Mathf.Max(0f, titleWidth), titleH), title, titleStyle);
-            titleStyle.fontSize = titleSize;
+            // title, upper case as in the game, over the divider. The game does not shrink or cut a long title: its
+            // label grows to the text's width and runs on under the artwork, which covers it (the review of
+            // 2026-11-22, the game's Title label: autoAdjustWidth without a maximum). The same here.
+            GUI.Label(new Rect(r.x + pad, r.y, r.width - 2 * pad - (IsEdited(n) ? 10f * _zoom : 0), titleH), (n.Label ?? n.Name ?? "").ToUpperInvariant(), titleStyle);
             EditorGUI.DrawRect(new Rect(r.x + pad, r.y + titleH, r.width - 2 * pad, 1f), new Color(1f, 1f, 1f, 0.22f));
 
             // under it, where the game shows the turns: era and tier, and the AND rule where it has an effect
@@ -812,13 +811,6 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         return ShortEra(era) + (string.IsNullOrEmpty(era) || string.IsNullOrEmpty(n.Tier) ? "" : " · ") + ShortTier(n.Tier);
     }
 
-    /// <summary>The font size at which a text `width` wide at `size` fits into `available`, not below `min`.</summary>
-    internal static int FitFontSize(int size, float width, float available, int min)
-    {
-        if (width <= available || width <= 0f) return size;
-        return Mathf.Max(min, Mathf.FloorToInt(size * available / width));
-    }
-
     // ── Era separators ────────────────────────────────────────────────────────
     /// <summary>One separator of the tech screen: between the era of that index and the next, at X in the game's units.</summary>
     internal struct EraSeparator { public int LeftEra; public float X; }
@@ -862,26 +854,22 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         return sb.ToString();
     }
 
-    /// <summary>A point of a separator's line at height `y`: through (x, middle), leaning right towards the top.</summary>
-    internal static Vector2 EraLinePoint(float x, float middle, float y) => new Vector2(x + (middle - y) * ERA_SLANT, y);
+    /// <summary>A point of a separator's line at height `y`: through (x + ERA_LINE_SHIFT, ERA_LABEL_Y), leaning right towards the top.</summary>
+    internal static Vector2 EraLinePoint(float x, float y) => new Vector2(x + ERA_LINE_SHIFT + (ERA_LABEL_Y - y) * ERA_SLANT, y);
 
     /// <summary>
     /// The separators as the window would draw them now: from the cards the game's tech screen shows (a technology
     /// that is on the screen and has a UI mapper), at their staged eras and columns.
     /// </summary>
-    internal List<EraSeparator> EraSeparatorsNow(out float top, out float bottom)
+    internal List<EraSeparator> EraSeparatorsNow()
     {
-        top = 0f; bottom = 0f;
         var cards = new List<KeyValuePair<int, float>>();
         int eraCount = 0;
         foreach (var era in _eras) eraCount = Mathf.Max(eraCount, era.Index + 1);
-        bool any = false;
         foreach (var n in _nodes)
         {
             if (Hidden(n) || n.ActiveMapper == null) continue;   // the game binds no item for these
             cards.Add(new KeyValuePair<int, float>(EraIndexOf(_eras, EffEra(n)), EffX(n) * COL));
-            float cardBottom = EffY(n) * ROW + NODE_H;
-            bottom = any ? Mathf.Max(bottom, cardBottom) : cardBottom; any = true;
         }
         return EraSeparators(cards, eraCount);
     }
@@ -889,10 +877,8 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     void DrawEraSeparators(Rect local)
     {
         if (_eras.Count < 2) return;
-        var separators = EraSeparatorsNow(out float top, out float bottom);
+        var separators = EraSeparatorsNow();
         if (separators.Count == 0) return;
-        float middle = (top + bottom) * 0.5f;   // the labels sit at half the content's height
-        float lineTop = top - ERA_OVERHANG, lineBottom = bottom + ERA_OVERHANG;
         float width = Mathf.Clamp(1.5f * _zoom, 1f, 2.5f);
         int fontSize = Mathf.RoundToInt(ERA_LABEL_SIZE * _zoom);
         var numberStyle = fontSize >= 6
@@ -906,7 +892,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             {
                 float t0 = i / (float)pieces, t1 = (i + 1) / (float)pieces, t = (t0 + t1) * 0.5f;
                 float alpha = t < 0.3f ? t / 0.3f : t > 0.7f ? (1f - t) / 0.3f : 1f;
-                Vector2 a = EraLinePoint(separator.X, middle, Mathf.Lerp(lineTop, lineBottom, t0)), b = EraLinePoint(separator.X, middle, Mathf.Lerp(lineTop, lineBottom, t1));
+                Vector2 a = EraLinePoint(separator.X, Mathf.Lerp(ERA_LINE_TOP, ERA_LINE_BOTTOM, t0)), b = EraLinePoint(separator.X, Mathf.Lerp(ERA_LINE_TOP, ERA_LINE_BOTTOM, t1));
                 Vector2 sa = U2S(a.x, a.y), sb = U2S(b.x, b.y);
                 if (Mathf.Max(sa.x, sb.x) < local.xMin || Mathf.Min(sa.x, sb.x) > local.xMax || sb.y < local.yMin || sa.y > local.yMax) continue;
                 Handles.color = new Color(ERA_LINE.r, ERA_LINE.g, ERA_LINE.b, ERA_LINE.a * alpha);
@@ -914,7 +900,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             }
             if (numberStyle == null) continue;
             Vector2 half = new Vector2(75f, 65f) * _zoom;   // the game's label box is 150 x 130
-            Vector2 left = U2S(separator.X - ERA_LABEL_OFFSET, middle), right = U2S(separator.X + ERA_LABEL_OFFSET, middle);
+            Vector2 left = U2S(separator.X - ERA_LABEL_OFFSET, ERA_LABEL_Y), right = U2S(separator.X + ERA_LABEL_OFFSET, ERA_LABEL_Y);
             GUI.Label(new Rect(left.x - half.x, left.y - half.y, 2 * half.x, 2 * half.y), ToRoman(separator.LeftEra), numberStyle);
             GUI.Label(new Rect(right.x - half.x, right.y - half.y, 2 * half.x, 2 * half.y), ToRoman(separator.LeftEra + 1), numberStyle);
         }
@@ -1202,7 +1188,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 
                 // the era (TechnologyDefinition.EraReference), staged like the rest
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Label(new GUIContent("Era", "The technology's era (EraReference in its definition). The game puts the era separators of its tech screen by it, and takes the technology's research cost from that era's cost for its tier unless the technology has a cost of its own. Save writes it to the definition."), GUILayout.Width(54));
+                GUILayout.Label(new GUIContent("Era", "The technology's era (EraReference in its definition). In the game it decides WHEN an empire can research it (not before the empire's technological era reaches it; an era-exclusive technology also not after), what it COSTS (the era's cost for its tier, unless the technology has a cost of its own), and which side of the era separators its card is on. The technologies of the eras before the one a game starts in are completed at the start. Save writes it to the definition."), GUILayout.Width(54));
                 string[] eraNames = EraChoices(_eras, EffEra(n), out string[] eraLabels, out int eraAt);
                 using (new EditorGUI.DisabledScope(_eras.Count == 0))
                 {
@@ -1221,6 +1207,10 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             }
             string eraNote = EraNote(_eras, EffEra(n));
             if (eraNote != "") EditorGUILayout.HelpBox(eraNote, MessageType.Warning);
+            string costNote = EraCostNote(_eras, EffEra(n), n.TierIndex, n.Tier, n.CostOverride);
+            if (costNote != "") EditorGUILayout.HelpBox(costNote, MessageType.Warning);
+            if (n.ExclusiveToEra)
+                EditorGUILayout.HelpBox(ExclusiveNote(EffEra(n)), MessageType.Info);
             string visibilityNote = SideVisibilityNote(out bool othersDepend);
             if (visibilityNote != "") EditorGUILayout.HelpBox(visibilityNote, othersDepend ? MessageType.Warning : MessageType.Info);
 
@@ -1392,6 +1382,31 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         if (string.IsNullOrEmpty(era)) return "This technology names no era. The game needs one: it reads the technology's cost and its place among the era separators from it.";
         return EraIndexOf(eras, era) >= 0 ? "" : "The era '" + era + "' is not one of this project's eras (" + string.Join(", ", eras.Select(e => e.Name)) + "). The game would not find it.";
     }
+
+    /// <summary>
+    /// The warning for a technology that would cost nothing in the game: its era names no cost for its tier and it
+    /// has no cost of its own. The game then leaves the cost at zero (DepartmentOfScience.UpdateInitialCosts; the
+    /// review of 2026-11-22). "" otherwise, also when the eras or the tier could not be read.
+    /// </summary>
+    internal static string EraCostNote(IList<TechTreeData.Era> eras, string era, int tierIndex, string tierName, string costOverride)
+    {
+        if (eras == null || tierIndex < 0 || !string.IsNullOrEmpty(costOverride)) return "";
+        TechTreeData.Era found = null;
+        foreach (var e in eras) if (e.Name == era) found = e;
+        if (found == null || found.TierCosts == null) return "";
+        if (tierIndex < found.TierCosts.Length && found.TierCosts[tierIndex] != "") return "";
+        string tier = string.IsNullOrEmpty(tierName) ? "its tier" : tierName;
+        var with = new List<string>();
+        foreach (var e in eras)
+            if (e.TierCosts != null && tierIndex < e.TierCosts.Length && e.TierCosts[tierIndex] != "") with.Add(e.Name);
+        return era + " has no research cost for " + tier + ", and this technology has no cost of its own: in the game it would cost NOTHING."
+             + (with.Count > 0 ? " Eras with a cost for " + tier + ": " + string.Join(", ", with) + "." : "");
+    }
+
+    /// <summary>What the side strip says about an era-exclusive technology (TechnologyDefinition.IsExclusiveToEra).</summary>
+    internal static string ExclusiveNote(string era) =>
+        "Exclusive to its era: an empire can research it only while the empire's technological era is no later than "
+        + (string.IsNullOrEmpty(era) ? "the technology's era" : era) + ". Moving it to an earlier era shortens that time.";
 
     void SetEra(TechTreeData.Node n, string era)
     {

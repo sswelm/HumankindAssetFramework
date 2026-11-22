@@ -681,16 +681,16 @@ public static class TechRequireAllWindowDrill
                     // Only M and R have a UI mapper. M is in Era1 at column 24, R has no era yet. T (Era2) has no mapper.
                     const string R0 = "Technology_R";
                     Check("assets: the era is read from the definition", N(M).Era == "Era1" && N(R0).Era == "" && (string)VCall("EffEra", N(M)) == "Era1");
-                    var none = viewer.EraSeparatorsNow(out float sepTop, out float sepBottom);
+                    var none = viewer.EraSeparatorsNow();
                     Check("era separators: a technology without a UI mapper has no card in the game, so none comes from it (T is in Era2, M in Era1)", none.Count == 0, none.Count.ToString());
                     VCall("SetEra", N(R0), "Era2"); VCall("SetPosition", N(R0), 40, 8);
-                    var one = viewer.EraSeparatorsNow(out sepTop, out sepBottom);
-                    // M's right edge 24 * 74 + 310 = 2086, R's left edge 40 * 74 = 2960: halfway 2523; the last card's bottom 8 * 22 + 116
+                    var one = viewer.EraSeparatorsNow();
+                    // M's right edge 24 * 74 + 310 = 2086, R's left edge 40 * 74 = 2960: halfway 2523
                     Check("era separators: one between two eras that both have a card, halfway between the earlier era's right end and the later one's left end, from the STAGED era and column",
-                          one.Count == 1 && one[0].LeftEra == 1 && Mathf.Abs(one[0].X - 2523f) < 0.01f && sepTop == 0f && Mathf.Abs(sepBottom - 292f) < 0.01f,
-                          one.Count == 1 ? one[0].LeftEra + " at " + one[0].X + " bottom " + sepBottom : one.Count.ToString());
+                          one.Count == 1 && one[0].LeftEra == 1 && Mathf.Abs(one[0].X - 2523f) < 0.01f,
+                          one.Count == 1 ? one[0].LeftEra + " at " + one[0].X : one.Count.ToString());
                     VCall("SetVisibility", N(R0), 0);
-                    Check("    a technology switched off has no card: no separator", viewer.EraSeparatorsNow(out sepTop, out sepBottom).Count == 0);
+                    Check("    a technology switched off has no card: no separator", viewer.EraSeparatorsNow().Count == 0);
                     VCall("SetVisibility", N(R0), -1); VCall("SetEra", N(R0), ""); VCall("SetPosition", N(R0), 24, 8);
                     Check("    typed back: nothing staged", Staged == 0, "staged " + Staged);
 
@@ -713,6 +713,8 @@ public static class TechRequireAllWindowDrill
                           TechTreeData.ReadEra(mDef) == "Era2" && N(M).Era == "Era2" && Staged == 0 && NamesOf(mDef).SequenceEqual(new[] { "Technology_A" }) && mDef.Visibility == TechTreeDrillDefinition.Flags.Never
                           && File.ReadAllText(Path.Combine(Path.GetDirectoryName(Application.dataPath), DbDefs + "/" + M + ".asset")).Contains("serializableElementName: Era2"),
                           TechTreeData.ReadEra(mDef) + " staged " + Staged);
+                    Check("save into assets: the reference's in-memory name follows the written era (the game's ElementName, rebuilt by InitializeStaticStrings)",
+                          mDef.EraReference.ElementName == "Era2", mDef.EraReference.ElementName);
                     Check("the era's writer refuses what it cannot write: an asset without an era reference, and no era at all",
                           !TechTreeData.WriteEra(mMap, "Era1") && !TechTreeData.WriteEra(mDef, "") && !TechTreeData.WriteEra(null, "Era1") && TechTreeData.ReadEra(mDef) == "Era2" && TechTreeData.ReadEra(null) == "");
                     Check("save: the view is the one from before it", VGet<Vector2>("_pan") == new Vector2(-123, 45) && VGet<float>("_zoom") == 0.7f, VGet<Vector2>("_pan") + " zoom " + VGet<float>("_zoom"));
@@ -1134,9 +1136,12 @@ public static class TechRequireAllWindowDrill
                     Check("era numerals: the game's Roman numerals, nothing for the era before the first",
                           TechTreeWindow.ToRoman(0) == "" && TechTreeWindow.ToRoman(1) == "I" && TechTreeWindow.ToRoman(4) == "IV" && TechTreeWindow.ToRoman(5) == "V" && TechTreeWindow.ToRoman(6) == "VI"
                           && TechTreeWindow.ToRoman(9) == "IX" && TechTreeWindow.ToRoman(14) == "XIV" && TechTreeWindow.ToRoman(40) == "XL" && TechTreeWindow.ToRoman(1994) == "MCMXCIV" && TechTreeWindow.ToRoman(-2) == "");
-                    Vector2 onLine = TechTreeWindow.EraLinePoint(1000f, 400f, 400f), above = TechTreeWindow.EraLinePoint(1000f, 400f, 300f), below = TechTreeWindow.EraLinePoint(1000f, 400f, 500f);
-                    Check("era line: through the separator's place at half height, leaning right towards the top",
-                          Near(onLine, 1000f, 400f) && above.x > 1000f && above.y == 300f && below.x < 1000f && Mathf.Abs((above.x - 1000f) - (1000f - below.x)) < 0.01f && above.x - 1000f > 20f && above.x - 1000f < 60f,
+                    // The game's numerals: at half its content's height (920 / 2) less the 24 above the first row = 436, whatever
+                    // the cards. The line crosses that height 13 right of the separator's place (measured on the user's
+                    // screenshot) and leans 47 across per 120 up (its texture).
+                    Vector2 onLine = TechTreeWindow.EraLinePoint(1000f, 436f), above = TechTreeWindow.EraLinePoint(1000f, 316f), below = TechTreeWindow.EraLinePoint(1000f, 556f);
+                    Check("era line: crosses the numerals' height (436, fixed) 13 right of the separator's place, leaning 47 across per 120 up",
+                          Near(onLine, 1013f, 436f) && Near(above, 1060f, 316f) && Near(below, 966f, 556f),
                           onLine + " " + above + " " + below);
                     var projectEras = new List<TechTreeData.Era> { new TechTreeData.Era { Name = "Era0", Index = 0 }, new TechTreeData.Era { Name = "Era1", Index = 1 }, new TechTreeData.Era { Name = "Era5", Index = 5 } };
                     var choice = TechTreeWindow.EraChoices(projectEras, "Era5", out var choiceLabels, out int choiceAt);
@@ -1152,9 +1157,26 @@ public static class TechRequireAllWindowDrill
                           && TechTreeWindow.EraNote(projectEras, "Era9") == "The era 'Era9' is not one of this project's eras (Era0, Era1, Era5). The game would not find it."
                           && TechTreeWindow.EraNote(new List<TechTreeData.Era>(), "Era9") == "" && TechTreeWindow.EraIndexOf(projectEras, "Era5") == 5 && TechTreeWindow.EraIndexOf(projectEras, "Era9") == -1 && TechTreeWindow.EraIndexOf(projectEras, null) == -1,
                           TechTreeWindow.EraNote(projectEras, "Era9"));
-                    Check("title: made smaller only when it does not fit in front of the artwork, never below the smallest size",
-                          TechTreeWindow.FitFontSize(15, 100f, 200f, 6) == 15 && TechTreeWindow.FitFontSize(15, 200f, 200f, 6) == 15 && TechTreeWindow.FitFontSize(15, 300f, 200f, 6) == 10
-                          && TechTreeWindow.FitFontSize(15, 3000f, 200f, 6) == 6 && TechTreeWindow.FitFontSize(15, 0f, 200f, 6) == 15);
+                    // what an era decides in the game besides the separators: the cost per tier (DepartmentOfScience.UpdateInitialCosts)
+                    var costEras = new List<TechTreeData.Era>
+                    {
+                        new TechTreeData.Era { Name = "Era0", Index = 0, TierCosts = new[] { "E0_T1", "", "", "" } },
+                        new TechTreeData.Era { Name = "Era5", Index = 5, TierCosts = new[] { "E5_T1", "E5_T2", "E5_T3", "" } },
+                        new TechTreeData.Era { Name = "Era6", Index = 6, TierCosts = new[] { "E6_T1", "E6_T2", "E6_T3", "E6_T4" } },
+                        new TechTreeData.Era { Name = "EraShort", Index = 7, TierCosts = new[] { "S_T1" } },
+                        new TechTreeData.Era { Name = "EraUnread", Index = 8 },
+                    };
+                    Check("era cost: a technology on a tier its era names no cost for, and without a cost of its own, is said to cost nothing, with the eras that do have a cost",
+                          TechTreeWindow.EraCostNote(costEras, "Era5", 3, "Tier4", "") == "Era5 has no research cost for Tier4, and this technology has no cost of its own: in the game it would cost NOTHING. Eras with a cost for Tier4: Era6."
+                          && TechTreeWindow.EraCostNote(costEras, "EraShort", 1, "Tier2", "").StartsWith("EraShort has no research cost for Tier2,"),
+                          TechTreeWindow.EraCostNote(costEras, "Era5", 3, "Tier4", ""));
+                    Check("era cost: nothing to say with a cost of the era, a cost of the technology's own, or what could not be read",
+                          TechTreeWindow.EraCostNote(costEras, "Era6", 3, "Tier4", "") == "" && TechTreeWindow.EraCostNote(costEras, "Era5", 2, "Tier3", "") == ""
+                          && TechTreeWindow.EraCostNote(costEras, "Era5", 3, "Tier4", "Own_Cost") == "" && TechTreeWindow.EraCostNote(costEras, "EraUnread", 3, "Tier4", "") == ""
+                          && TechTreeWindow.EraCostNote(costEras, "Era9", 3, "Tier4", "") == "" && TechTreeWindow.EraCostNote(costEras, "Era5", -1, "", "") == "" && TechTreeWindow.EraCostNote(null, "Era5", 3, "Tier4", "") == "");
+                    Check("era-exclusive: the side strip says until when it can be researched",
+                          TechTreeWindow.ExclusiveNote("Era6") == "Exclusive to its era: an empire can research it only while the empire's technological era is no later than Era6. Moving it to an earlier era shortens that time."
+                          && TechTreeWindow.ExclusiveNote("").Contains("no later than the technology's era."));
 
                     // ---- the artwork is on top of its card (the user, 2026-11-22: the title's line ran through the images).
                     // T's artwork is opaque red. The line under the title runs from the card's left to its right, so it
@@ -1248,7 +1270,17 @@ namespace TechTreeDrillTypes
 {
     using Amplitude.Mercury.Data.Simulation;
 
-    [Serializable] public struct Reference { [SerializeField] string serializableElementName; public Reference(string name) { serializableElementName = name; } }
+    // The game's DatatableElementReference is a struct: the serialized string, and an in-memory name (a StaticString in
+    // the game) built from it by InitializeStaticStrings, not serialized.
+    [Serializable]
+    public struct Reference
+    {
+        [SerializeField] string serializableElementName;
+        [NonSerialized] string elementName;
+        public Reference(string name) { serializableElementName = name; elementName = name; }
+        public string ElementName => elementName;
+        public void InitializeStaticStrings() { elementName = serializableElementName; }
+    }
     public enum DrillDlc { None = 0, Dlc6 = 6 }
     [Serializable] public struct DlcPrerequisite { public DrillDlc DownloadableContent; }
     public abstract class SimulationEventEffect { public string UIMapperOverride; public bool Hidden; public DlcPrerequisite DlcPrerequisite; }
