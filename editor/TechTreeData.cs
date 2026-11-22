@@ -21,7 +21,8 @@ using UnityEngine;
 ///
 /// LOCAL CHANGES to this file (it came with the viewer from another modder's tool), 2026-11-21: Node.ArtPath /
 /// ArtNamed / ArtGuid / BaseVisibility, AmplitudeGuidToUnity, ArtPathOf, the Visibility helpers (OnTechScreen,
-/// VisibilityName, ReadVisibility, WriteVisibility), and EnsureWritable remembering its copy and refusing to copy
+/// VisibilityName, ReadVisibility, WriteVisibility), the eras (Era, Eras, ReadEra, WriteEra; 2026-11-22), and
+/// EnsureWritable remembering its copy and refusing to copy
 /// over an existing asset. 2026-11-22: Node.Unlocks (what the technology unlocks; read by TechTreeUnlocks.cs) and
 /// ImageOf, the image reader ArtPathOf was, for any image key.
 /// </summary>
@@ -37,6 +38,10 @@ public static class TechTreeData
         public string Label;       // resolved display text (falls back to key/name)
         public string Era;         // EraReference name, for grouping/tinting
         public string Tier;        // TechnologyTier enum
+        // What the era decides in the game besides the separators (review of 2026-11-22, DepartmentOfScience):
+        public int    TierIndex = -1;      // TechnologyTier as its number (Tier1 = 0); -1 when the definition has none
+        public string CostOverride = "";   // OverrideTierCostRpnReference: a cost of the technology's own ("" = the era's for its tier)
+        public bool   ExclusiveToEra;      // IsExclusiveToEra: researchable only while the empire is not past its era
 
         // Per-asset references. "Vanilla*" = read-only reference-folder copy (fallback);
         // "Mod*" = the editable copy under Databases/ (null if not yet imported there).
@@ -175,6 +180,10 @@ public static class TechTreeData
                     node.BasePrereqs = arr.Where(s => !string.IsNullOrEmpty(s)).ToArray();
                 node.Era  = ResolveReferenceName(f_era?.GetValue(def));
                 node.Tier = f_tier?.GetValue(def)?.ToString() ?? "";
+                try { object tier = f_tier?.GetValue(def); node.TierIndex = tier == null ? -1 : Convert.ToInt32(tier); }
+                catch (Exception) { node.TierIndex = -1; }
+                node.CostOverride = ResolveReferenceName(def.GetType().GetField("OverrideTierCostRpnReference", ALL)?.GetValue(def));
+                node.ExclusiveToEra = def.GetType().GetField("IsExclusiveToEra", ALL)?.GetValue(def) is bool exclusive && exclusive;
                 node.BaseVisibility = ReadVisibility(def);
                 try { node.Unlocks = TechTreeUnlocks.Read(def, unlockIndex, localize); }
                 catch (Exception e)
@@ -475,6 +484,103 @@ public static class TechTreeData
         f.SetValue(def, f.FieldType.IsEnum ? Enum.ToObject(f.FieldType, visibility) : Convert.ChangeType(visibility, f.FieldType));
         return true;
     }
+
+    // ── Eras ──────────────────────────────────────────────────────────────────
+    /// <summary>One era of the project (an EraDefinition): its name, as a technology's EraReference holds it, and the game's index.</summary>
+    public sealed class Era
+    {
+        public string Name = "";
+        public int Index;
+        /// <summary>
+        /// The era's research cost per technology tier, as the name of its cost formula (EraDefinition.
+        /// TechnologyCostRpnPerTier, by TechnologyTier). "" where the era names none: the game then leaves that tier's
+        /// cost at zero (DepartmentOfScience, UpdateCurrentTechnologyEraIfNeeded / UpdateInitialCosts). Null when not read.
+        /// </summary>
+        public string[] TierCosts;
+    }
+
+    /// <summary>
+    /// The project's eras, by index. A copy under Databases wins over the reference folder's, which wins over any
+    /// other, as for the UI mappers of the unlocks. Empty when the project holds no era definitions (or not the
+    /// game's types).
+    /// </summary>
+    internal static List<Era> Eras() => Eras(ReferenceFolder);
+
+    /// <summary>The same, with the reference folder given (the drill: the machine's EditorPrefs are not its to read or write).</summary>
+    internal static List<Era> Eras(string refRoot)
+    {
+        var type = FindType("Amplitude.Mercury.Data.Simulation.EraDefinition");
+        if (type == null) return new List<Era>();
+        var f_index = type.GetField("EraIndex", ALL);
+        if (f_index == null) return new List<Era>();   // not the game's shape: no eras rather than every era at index 0
+        var eras = new Dictionary<string, Era>(StringComparer.Ordinal);
+        var ranks = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var o in LoadAllOfType(type))
+        {
+            if (string.IsNullOrEmpty(o.name)) continue;
+            int rank = Under(o, DatabasesRoot) ? 2 : Under(o, refRoot) ? 1 : 0;
+            if (ranks.TryGetValue(o.name, out int had) && had >= rank) continue;
+            int index;
+            object value = f_index.GetValue(o);
+            if (value == null) continue;
+            try { index = Convert.ToInt32(value); }
+            catch (Exception) { continue; }
+            eras[o.name] = new Era { Name = o.name, Index = index, TierCosts = TierCostsOf(o) }; ranks[o.name] = rank;
+        }
+        return eras.Values.OrderBy(e => e.Index).ThenBy(e => e.Name, StringComparer.Ordinal).ToList();
+    }
+
+    // EraDefinition.TechnologyCostRpnPerTier: { Tier, TechnologyCostRpnReference } per entry, placed by its Tier
+    static string[] TierCostsOf(UnityEngine.Object era)
+    {
+        if (!(era.GetType().GetField("TechnologyCostRpnPerTier", ALL)?.GetValue(era) is System.Collections.IEnumerable entries)) return null;
+        var costs = new List<string>();
+        foreach (object entry in entries)
+        {
+            if (entry == null) continue;
+            int tier;
+            try { tier = Convert.ToInt32(entry.GetType().GetField("Tier", ALL)?.GetValue(entry)); }
+            catch (Exception) { continue; }
+            if (tier < 0 || tier > 16) continue;
+            while (costs.Count <= tier) costs.Add("");
+            costs[tier] = ResolveReferenceName(entry.GetType().GetField("TechnologyCostRpnReference", ALL)?.GetValue(entry));
+        }
+        return costs.ToArray();
+    }
+
+    /// <summary>
+    /// Writes the technology's era (TechnologyDefinition.EraReference) through the asset's SERIALIZED form, the one
+    /// string the file holds for it (EraReference.serializableElementName). The reference's other fields are the
+    /// game's own, rebuilt from that string when the object is read; a write by reflection would have to know them.
+    /// </summary>
+    public static bool WriteEra(UnityEngine.Object def, string era)
+    {
+        if (def == null || string.IsNullOrEmpty(era)) return false;
+        using (var so = new SerializedObject(def))
+        {
+            var name = so.FindProperty("EraReference")?.FindPropertyRelative("serializableElementName");
+            if (name == null || name.propertyType != SerializedPropertyType.String) return false;
+            name.stringValue = era;
+            so.ApplyModifiedPropertiesWithoutUndo();   // a Save is not part of Undo (see TechTreeWindow.CommitChanges)
+        }
+        // The game's reference (a struct) also keeps the name as a StaticString, ElementName, built from that string by
+        // InitializeStaticStrings and not serialized. In memory it still named the old era after the write (review of
+        // 2026-11-22, executed on the game's own type); the game builds it again when it loads its databases, but
+        // editor code that reads it would see the old era until then.
+        var field = def.GetType().GetField("EraReference", ALL);
+        object reference = field?.GetValue(def);
+        var initialize = reference?.GetType().GetMethod("InitializeStaticStrings", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+        if (initialize != null)
+        {
+            try { initialize.Invoke(reference, null); field.SetValue(def, reference); }   // boxed: set back for a struct
+            catch (Exception) { }   // the asset is written; only the in-memory name is not refreshed
+        }
+        return true;
+    }
+
+    /// <summary>The technology's era as its definition holds it; "" when it has none.</summary>
+    internal static string ReadEra(UnityEngine.Object def) =>
+        def == null ? "" : ResolveReferenceName(def.GetType().GetField("EraReference", ALL)?.GetValue(def));
 
     public static bool WritePrereqs(UnityEngine.Object def, string[] names)
     {

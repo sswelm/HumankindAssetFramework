@@ -10,6 +10,61 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Tech Tree viewer: a technology's era, the era separators, and the artwork on top (2026-11-22, PR #308).**
+  Asked for by the user after the unlock row, with a screenshot of the game's tech screen beside the viewer's:
+  "what is still missing: the ability to configure a tech node's era and the era separator display in the
+  viewer. Also the tech image should be drawn always on top, not be crossed by the title line."
+  - **Era.** The side strip has an era choice (the project's `EraDefinition`s by index, each with its Roman
+    numeral). It is staged like every other edit and Save writes it to the technology's definition
+    (`EraReference`). In the game a technology's era decides three things (decompiled `DepartmentOfScience`):
+    WHEN an empire can research it (not before the empire's technological era reaches it; an era-exclusive one
+    also not after), what it COSTS (the era's cost for its tier, unless the technology has a cost of its own),
+    and which side of the era separators its card is on. The tooltip says so. The side strip warns when the
+    chosen era names no cost for the technology's tier and the technology has none of its own (the game leaves
+    the cost at zero), and says until when an era-exclusive technology can be researched. On the ENC data 216 of
+    217 technologies have a cost of their own; the warning can show only for `Technology_Era3_10`, moved to
+    Era0. It shows for none today.
+  - **Era separators.** The canvas draws the game's separator between two eras: a slanted line with a Roman
+    numeral on each side. Its place is the game's own rule (`TechnologyScreen.BindAllSeparators`): halfway
+    between the right end of the earlier era's rightmost card and the left end of the later era's leftmost card,
+    counting the cards the game's screen shows (with the TechnologyScreen visibility bit and a UI mapper). It
+    follows staged eras and positions; the line's slant is its texture's (47 across per 120 up). The Roman
+    numerals are pinned to the TOP of the view, beside the line, so they stay in sight while scrolling (the user,
+    after seeing the first version; the game has them at half its content's height). Zoomed out they keep a
+    readable size (14 px) and are less faint.
+  - **Artwork on top.** Every card's artwork is drawn after every card, so no title line, card edge or icon of
+    any card crosses it: the user's choice. In the game the artwork is the last child of its own card (over its
+    title, the title's line and its unlock row), but a card later in the game's list covers an earlier card's
+    artwork; 19 artwork boxes overlap another card in ENC. As in the game a long title is not shrunk: it runs on
+    under the artwork. A click where an artwork stands over another card selects the artwork's card, and the
+    selected card's gold edge is drawn once more over the artworks.
+  - **Critical review (three reviewers, 2026-11-22), on copies of the live ENC data with the game's real types:**
+    - Game fidelity: the separators equal an implementation written separately from the decompiled code, on the
+      ENC data (I|II to V|VI at 2634, 5298, 7592, 11144, 18137) and on the game's own 93 technologies. Found and
+      fixed: the era decides research timing too (above); the numerals' height; the game does not shrink titles;
+      the reference's in-memory name kept the old era after a write.
+    - Behaviour: a Save of era, position, a removed prerequisite and a visibility switch on four technologies of
+      one collection wrote exactly the staged lines; staged eras survived a real script reload; Undo after a Save
+      changed nothing; a reference-only technology was copied once. Found and fixed: titles cut off mid-word at
+      zoom 0.25-0.5 (105 of 217, from the shrinking); a click on an artwork selected the card under it; a
+      neighbour's artwork hid the selected card's edge; the era list lost a saved era that is no era of the
+      project once another was staged.
+    - Tests: of 71 planted defects 57 survived the drill. Not one check ran the real era reader, the drawing of
+      the separators, the Save line or Undo for an era. Now: the era reader on real assets in the three kinds of
+      folder, the separators as drawn (place, numerals, height, the pan, culling), the visibility bit, numerals
+      that repeat (II, III, VIII), a card list whose leftmost card is not last, the artwork list per repaint, a
+      faint artwork, the Save line, Undo after an era Save. Rerun against the fixed drill: of the 58 that had survived, 28 are caught now; 18 changed code that no longer exists (the two that still apply were planted again on the new code, and are caught); 12 survive: an equivalent guard, the production tree build's era read (it needs the game's types), the era popup's disabled state and its warning box (not driven), the skipped count when only the era write fails, the era written last (not load-bearing), an empty staged era (unreachable), the case of era names, gaps in era indices, a log text, a note text and a colour reset.
+  - **In the repo's drill:** 216 checks (170 before this PR). The draw order is checked by pixels: an opaque red
+    artwork read back where the title's line crosses it, over the neighbouring card, and the selected card's edge
+    over it.
+  - **Not done, and not checked:**
+    - The era popup itself is not driven by the drill (the checks stage an era as the popup does, by `SetEra`).
+    - The line's colour, and where it crosses the numerals' height (13 right of the separator's place), are read
+      off one screenshot of the game; the shade beside the line and the large numeral in the middle of each era
+      are not drawn.
+    - Every artwork over every card is not the game's order (see above).
+    - The tier and `IsExclusiveToEra` cannot be edited. An era earlier than a prerequisite's is not warned about.
+    - Nobody has seen this in the user's own Unity yet.
 - **Tech Tree viewer: the cards show what a technology unlocks (2026-11-22, PR #307).** Asked for by the user:
   "so we actually know what gets unlocked by a tech". Each card has a row of icons along its bottom, where the
   game's card has it, and the side strip lists the entries by name. Shown only; unlocks are not edited here.

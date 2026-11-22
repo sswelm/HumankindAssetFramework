@@ -40,6 +40,13 @@ using UnityEngine;
 ///    where the game's card has it, in the game's order, and the list with titles in the side strip. Read by
 ///    TechTreeUnlocks.cs from the definition's own effects; shown only, not edited here. For it the internal name
 ///    moved from the card's bottom row to the row of era and tier.
+///  - The era (asked for by the user, 2026-11-22): a technology's era is a choice in the side strip, staged and
+///    saved like the rest (TechnologyDefinition.EraReference), and the canvas draws the game's era separators: the
+///    slanted line with a Roman numeral on each side, where the game's TechnologyScreen.BindAllSeparators puts it
+///    (EraSeparators); its numerals are pinned to the top of the view, the user's choice. The side strip warns where an era change would make a technology free, and says when an
+///    era-exclusive technology can be researched. A card's artwork is drawn after EVERY card, so nothing of a card
+///    crosses it: the user's choice. In the game the artwork is the last child of its own card (over its title, the
+///    title's line and its unlock row), but a later card can cover an earlier card's artwork.
 ///  - Shift: every card right of the selected one moved by a number of columns, as one staged edit per card
 ///    (ShiftRightOf; asked for by the user, 2026-11-21, to make room in the tree without moving cards one by one).
 /// </summary>
@@ -52,7 +59,8 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         public List<string> Prereqs;     // staged prereq list (null = unchanged)
         public bool? RequireAll;         // staged rule: true = ALL prerequisites (AND), false = any one (OR); null = unchanged
         public int? Visibility;          // staged TechnologyDefinition.Visibility (null = unchanged)
-        public bool IsEmpty => X == null && Y == null && Prereqs == null && RequireAll == null && Visibility == null;
+        public string Era;               // staged era name, TechnologyDefinition.EraReference (null = unchanged)
+        public bool IsEmpty => X == null && Y == null && Prereqs == null && RequireAll == null && Visibility == null && Era == null;
     }
     readonly Dictionary<string, Pending> _pending = new();
 
@@ -62,8 +70,9 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     struct PendingRecord
     {
         public string name;
-        public bool hasX, hasY, hasPrereqs, hasRule, hasVisibility;
+        public bool hasX, hasY, hasPrereqs, hasRule, hasVisibility, hasEra;
         public int x, y, visibility;
+        public string era;
         public bool requireAll;
         public List<string> prereqs;
     }
@@ -90,6 +99,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 hasPrereqs = p.Prereqs != null, prereqs = p.Prereqs != null ? new List<string>(p.Prereqs) : new List<string>(),
                 hasRule = p.RequireAll.HasValue, requireAll = p.RequireAll ?? false,
                 hasVisibility = p.Visibility.HasValue, visibility = p.Visibility ?? 0,
+                hasEra = p.Era != null, era = p.Era ?? "",
             });
         }
         if (_selected != null) _selectedName = _selected.Name;
@@ -107,6 +117,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 Prereqs = r.hasPrereqs ? new List<string>(r.prereqs ?? new List<string>()) : null,
                 RequireAll = r.hasRule ? r.requireAll : (bool?)null,
                 Visibility = r.hasVisibility ? r.visibility : (int?)null,
+                Era = r.hasEra ? (r.era ?? "") : null,
             };
             if (!p.IsEmpty) _pending[r.name] = p;
         }
@@ -114,6 +125,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 
     List<TechTreeData.Node> _nodes;
     Dictionary<string, TechTreeData.Node> _byName;
+    List<TechTreeData.Era> _eras = new List<TechTreeData.Era>();   // the project's eras, by index
     TechTreeData.Node _selected;
 
     // The Tech Requires All list as this window last read it: the technologies under the AND rule.
@@ -212,6 +224,32 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     const float UNLOCK_SIDE = 46f, UNLOCK_GAP = 3f, UNLOCK_LEFT = 6f, UNLOCK_BOTTOM = 4f;
     const float NAME_MIN_ZOOM = 0.6f;     // the internal name is small print: not drawn below this zoom
     const float HIDDEN_ALPHA = 0.4f;                                    // how faint the card and links of a technology without a card in the game are
+    // The game's era separator (the prefab "_SeparatorSample" of its tech screen, read with UnityPy 2026-11-22): a
+    // group 428 wide centred on the separator's X, a label 150 x 130 at each end, font size 100, colour (0.47, 0.42,
+    // 0.53, 0.15). The group is stretched over the screen's content, 920 high at the game's reference resolution
+    // (1080 lines); the labels sit at half of that, and the cards start 24 below the content's top (verticalPadding).
+    // In this window's units (a card's top at TechTreeY * 22) the labels are therefore at a fixed 460 - 24 = 436, not
+    // at half the tree's height (the review of 2026-11-22; on the user's screenshot the "VI" sits at 437). The line
+    // is an image 984 high from 32 above the content to 32 below it: -56 to 928 here.
+    // The SLANT is the line's own texture (a 64 x 128 distance field whose edge runs 47 px across over 120 px down,
+    // drawn at its own aspect; derived by the review, 0.394 measured on the screenshot). That the line crosses the
+    // labels' height 13 units right of the separator's place is measured on the screenshot only.
+    const float ERA_LABEL_OFFSET = 139f;   // from the separator's X to the middle of each numeral: 428 / 2 - 150 / 2
+    const float ERA_LABEL_SIZE = 100f;
+    const float ERA_LABEL_Y = 436f;        // the numerals' height, and where the line crosses it
+    const float ERA_LINE_TOP = -56f, ERA_LINE_BOTTOM = 928f;
+    const float ERA_SLANT = 47f / 120f;    // units to the right per unit up
+    const float ERA_LINE_SHIFT = 13f;      // the line at the numerals' height, right of the separator's place
+    // The numerals are PINNED to the top of the view (asked for by the user, 2026-11-22: "so I can always see it"),
+    // where the game has them at ERA_LABEL_Y: they stand beside the line where it crosses the view's top, at the
+    // game's size and faintness when zoomed in, never smaller than ERA_LABEL_MIN pixels and less faint when small.
+    const int   ERA_LABEL_MIN = 14;
+    const float ERA_LABEL_TOP_GAP = 4f;    // pixels between the view's top and the numerals' box
+    const float ERA_NUMBER_SMALL_ALPHA = 0.55f;
+    static readonly Color ERA_NUMBER = new Color(0.4706f, 0.4196f, 0.5294f, 0.149f);
+    // The prefab's line colour is (0.30, 0.30, 0.54, 0.56) under a stroke material this window does not have; drawn
+    // as a plain line that is all but invisible on the canvas, so it is the colour the line HAS on the screenshot.
+    static readonly Color ERA_LINE = new Color(0.40f, 0.38f, 0.72f, 0.85f);
 
     [MenuItem("Tools/HAF/Tech Tree/Open Viewer")]
     static void Open()
@@ -275,7 +313,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         if (before != null)
             foreach (var n in _nodes)
                 if (before.TryGetValue(n.Name, out var was)
-                    && (was.BaseX != n.BaseX || was.BaseY != n.BaseY || was.BaseVisibility != n.BaseVisibility
+                    && (was.BaseX != n.BaseX || was.BaseY != n.BaseY || was.BaseVisibility != n.BaseVisibility || (was.Era ?? "") != (n.Era ?? "")
                         || !(was.BasePrereqs ?? new string[0]).SequenceEqual(n.BasePrereqs ?? new string[0])))
                 { changed++; if (example == null) example = n.Label ?? n.Name; }
         if (changed > 0)
@@ -288,11 +326,12 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     }
 
     internal static string UndoNote(int changed, string example) =>
-        $"Undo / Redo changed {changed} technolog{(changed == 1 ? "y" : "ies")} in memory ({example}{(changed > 1 ? ", ..." : "")}): position, prerequisites or visibility " +
+        $"Undo / Redo changed {changed} technolog{(changed == 1 ? "y" : "ies")} in memory ({example}{(changed > 1 ? ", ..." : "")}): position, era, prerequisites or visibility " +
         "are now different from the file on disk, and the next save of the project writes them as they are shown here. Redo (or Undo) once more takes this back.";
 
     // Seam for the drill (tools/tech_requires_all_unity_drill.sh): its temporary project holds no technology assets.
     internal static Func<string, List<TechTreeData.Node>> BuildTreeImpl = modPath => TechTreeData.Build(modPath);
+    internal static Func<List<TechTreeData.Era>> ErasImpl = () => TechTreeData.Eras();
 
     // `rules` = also read the Tech Requires All list again. Not needed where the list cannot have changed (undo,
     // Revert, a save without a rule switch): in a project without the list each read waits a quarter of a second.
@@ -300,6 +339,8 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     {
         _nodes = BuildTreeImpl(_modPath);
         _byName = _nodes.GroupBy(n => n.Name).ToDictionary(g => g.Key, g => g.First());
+        try { _eras = ErasImpl() ?? new List<TechTreeData.Era>(); }
+        catch (Exception e) { _eras = new List<TechTreeData.Era>(); Debug.LogWarning("[TechTree] the project's eras could not be read (no era separators, no era choice): " + e.Message); }
         // Staged edits of a technology this reload did not find are KEPT (they were dropped: one reload with the
         // reference path half typed lost them for good). They are not drawn and not written while it is missing;
         // Save says so, Revert discards them.
@@ -355,6 +396,14 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         _pending.TryGetValue(n.Name, out var p) && p.Prereqs != null ? p.Prereqs : (IReadOnlyList<string>)n.BasePrereqs;
     int EffVisibility(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Visibility.HasValue ? p.Visibility.Value : n.BaseVisibility;
     bool Hidden(TechTreeData.Node n) => !TechTreeData.OnTechScreen(EffVisibility(n));
+    string EffEra(TechTreeData.Node n) => _pending.TryGetValue(n.Name, out var p) && p.Era != null ? p.Era : (n.Era ?? "");
+    /// <summary>The game's index of that era (EraDefinition.EraIndex); -1 for a name the project has no era for.</summary>
+    internal static int EraIndexOf(IList<TechTreeData.Era> eras, string name)
+    {
+        if (eras != null && !string.IsNullOrEmpty(name))
+            foreach (var era in eras) if (era.Name == name) return era.Index;
+        return -1;
+    }
     // true = the technology waits for ALL its prerequisites (AND); false = the game's rule, any one (OR)
     bool EffRequireAll(TechTreeData.Node n) =>
         _pending.TryGetValue(n.Name, out var p) && p.RequireAll.HasValue ? p.RequireAll.Value : _requireAll.Contains(n.Name);
@@ -373,6 +422,8 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     }
 
     Vector2 W2S(float cx, float cy) => new Vector2(cx * COL * _zoom + _pan.x, cy * ROW * _zoom + _pan.y);
+    // the same for a point in the game's units (a card is 310 x 116 of them, its left edge at TechTreeX * 74)
+    Vector2 U2S(float ux, float uy) => new Vector2(ux * _zoom + _pan.x, uy * _zoom + _pan.y);
     // a card's rectangle on screen
     Rect NodeRect(TechTreeData.Node n)
     {
@@ -584,9 +635,15 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
     TechTreeData.Node NodeAt(Vector2 screen)
     {
         // cards can overlap (two rows apart is closer than a card is high): the one drawn last is on top
-        for (int i = _nodes.Count - 1; i >= 0; i--)
-            if (NodeRect(_nodes[i]).Contains(screen)) return _nodes[i];
-        return null;
+        TechTreeData.Node card = null;
+        for (int i = _nodes.Count - 1; i >= 0 && card == null; i--)
+            if (NodeRect(_nodes[i]).Contains(screen)) card = _nodes[i];
+        if (card == null) return null;   // a click on the canvas beside the cards selects nothing, artwork or not
+        // Over a card, an artwork is on top of it (they are drawn after every card): the last one drawn there wins.
+        // The rectangles are the last repaint's, in the canvas's own coordinates (review of 2026-11-22).
+        for (int i = _artDraws.Count - 1; i >= 0; i--)
+            if (_artDraws[i].Node != null && _artDraws[i].Rect.Contains(screen - _artOrigin)) return _artDraws[i].Node;
+        return card;
     }
 
     // ── Canvas ────────────────────────────────────────────────────────────────
@@ -602,6 +659,10 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         if (Event.current.type != EventType.Repaint) { _pan = panSave; GUI.EndClip(); return; }
 
         bool showLabels = _zoom >= LABEL_MIN_ZOOM;
+
+        _artOrigin = new Vector2(canvas.x, canvas.y);
+        _cardsDrawn = 0;
+        DrawEraSeparators(local);   // under the links and the cards, as in the game
 
         // links, routed as the game routes them (from the effective prerequisites)
         if (Event.current.type == EventType.Repaint)
@@ -646,6 +707,11 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         var hiddenStyle = new GUIStyle(infoStyle) { fontStyle = FontStyle.Bold, normal = { textColor = HIDDEN_MARK } };
         var unknownStyle = new GUIStyle(infoStyle) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
 
+        // The artwork of a card is drawn after ALL the cards (the second loop below): nothing of any card may cross it
+        // (the user, 2026-11-22: the title's line ran through the images). In the game the artwork is the last child
+        // of its own card, over its title, the title's line and its unlock row; a card that comes later in the game's
+        // list of technologies is drawn over an earlier card's artwork, which this window does not copy.
+        _artDraws.Clear();
         foreach (var n in _nodes)
         {
             Rect r = NodeRect(n);
@@ -661,11 +727,12 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             fill.a *= fade; if (!selected) edge.a *= fade;
             GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, fill, 0, radius);
             GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, edge, selected ? 2f : 1f, radius);
-            GUI.color = new Color(1f, 1f, 1f, fade);   // the artwork and the texts; reset at the end of this card
+            _cardsDrawn++;
+            GUI.color = new Color(1f, 1f, 1f, fade);   // the texts; reset at the end of this card
 
-            // the artwork, over the card's right end and standing out of it
-            if (Event.current.type == EventType.Repaint && TryArt(n, out var art, out var artUv, out float artAspect))
-                GUI.DrawTextureWithTexCoords(FitInside(artRect, artAspect), art, artUv, true);
+            // the artwork, over the card's right end and standing out of it: remembered, drawn after the cards
+            if (TryArt(n, out var art, out var artUv, out float artAspect))
+                _artDraws.Add(new ArtDraw { Rect = FitInside(artRect, artAspect), Texture = art, Uv = artUv, Fade = fade, Node = n });
 
             float pad = 10f * _zoom;
             float titleH = 0.29f * r.height;   // the game's title band: the divider sits at 29% of the card's height
@@ -681,14 +748,16 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
 
             if (!showLabels) { GUI.color = Color.white; continue; }
 
-            // title, upper case as in the game, over the divider
+            // title, upper case as in the game, over the divider. The game does not shrink or cut a long title: its
+            // label grows to the text's width and runs on under the artwork, which covers it (the review of
+            // 2026-11-22, the game's Title label: autoAdjustWidth without a maximum). The same here.
             GUI.Label(new Rect(r.x + pad, r.y, r.width - 2 * pad - (IsEdited(n) ? 10f * _zoom : 0), titleH), (n.Label ?? n.Name ?? "").ToUpperInvariant(), titleStyle);
             EditorGUI.DrawRect(new Rect(r.x + pad, r.y + titleH, r.width - 2 * pad, 1f), new Color(1f, 1f, 1f, 0.22f));
 
             // under it, where the game shows the turns: era and tier, and the AND rule where it has an effect
             float rowH = 0.24f * r.height;
             var info = new Rect(r.x + pad, r.y + titleH + 2f * _zoom, r.width - 2 * pad, rowH);
-            string eraTier = ShortEra(n.Era) + (string.IsNullOrEmpty(n.Era) || string.IsNullOrEmpty(n.Tier) ? "" : " · ") + ShortTier(n.Tier);
+            string eraTier = CardEraTier(n);
             GUI.Label(info, eraTier, infoStyle);
             // the marks, right behind era and tier: the card's right end belongs to the artwork
             float used = infoStyle.CalcSize(new GUIContent(eraTier)).x + 8f * _zoom;
@@ -732,8 +801,161 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             GUI.color = Color.white;
         }
 
+        // the artworks, on top of every card
+        foreach (var draw in _artDraws)
+        {
+            GUI.color = new Color(1f, 1f, 1f, draw.Fade);
+            GUI.DrawTextureWithTexCoords(draw.Rect, draw.Texture, draw.Uv, true);
+        }
+        GUI.color = Color.white;
+        // the selected card's gold edge once more, over them: an artwork of a neighbouring card covered it (review B)
+        if (_selected != null && _byName != null && _byName.ContainsKey(_selected.Name))
+        {
+            Rect sel = NodeRect(_selected);
+            if (sel.Overlaps(local))
+                GUI.DrawTexture(sel, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, GOLD, 2f, 5f * _zoom);
+        }
+
         _pan = panSave;
         GUI.EndClip();
+        AfterCanvasDrawn?.Invoke(this);
+    }
+
+    /// <summary>Called when a repaint has drawn the canvas (for the drill, which reads the window's pixels there).</summary>
+    internal static Action<TechTreeWindow> AfterCanvasDrawn;
+
+    struct ArtDraw { public Rect Rect; public Texture Texture; public Rect Uv; public float Fade; public TechTreeData.Node Node; }
+    readonly List<ArtDraw> _artDraws = new List<ArtDraw>();
+    Vector2 _artOrigin;   // where the canvas's clip started in the window when the artworks were drawn (NodeAt)
+    /// <summary>The era and tier as a card shows them ("E5 · T3"), from the STAGED era.</summary>
+    internal string CardEraTier(TechTreeData.Node n)
+    {
+        string era = EffEra(n);
+        return ShortEra(era) + (string.IsNullOrEmpty(era) || string.IsNullOrEmpty(n.Tier) ? "" : " · ") + ShortTier(n.Tier);
+    }
+
+    // ── Era separators ────────────────────────────────────────────────────────
+    /// <summary>One separator of the tech screen: between the era of that index and the next, at X in the game's units.</summary>
+    internal struct EraSeparator { public int LeftEra; public float X; }
+
+    /// <summary>
+    /// Where the game puts its era separators (TechnologyScreen.DoBindAll and BindAllSeparators). Per era index: the
+    /// left edge of its leftmost card and the right edge of its rightmost, over the cards the screen SHOWS. Between
+    /// two consecutive indices that both have a card: one separator, halfway between the right end of the earlier
+    /// era and the left end of the later one. Where the eras overlap that is inside the overlap, as in the game.
+    /// `cards` = era index and left edge (TechTreeX * 74) of each shown card; an index outside 0..eraCount-1 is no era.
+    /// </summary>
+    internal static List<EraSeparator> EraSeparators(IEnumerable<KeyValuePair<int, float>> cards, int eraCount)
+    {
+        var separators = new List<EraSeparator>();
+        if (eraCount < 2) return separators;
+        var min = new float[eraCount]; var max = new float[eraCount]; var count = new int[eraCount];
+        for (int i = 0; i < eraCount; i++) { min[i] = float.MaxValue; max[i] = float.MinValue; }
+        foreach (var card in cards)
+        {
+            int era = card.Key;
+            if (era < 0 || era >= eraCount) continue;
+            min[era] = Mathf.Min(min[era], card.Value);
+            max[era] = Mathf.Max(max[era], card.Value + NODE_W);
+            count[era]++;
+        }
+        for (int k = 0; k < eraCount - 1; k++)
+            if (count[k] > 0 && count[k + 1] > 0)
+                separators.Add(new EraSeparator { LeftEra = k, X = (max[k] + min[k + 1]) * 0.5f });
+        return separators;
+    }
+
+    /// <summary>The game's FormatUtils.ToRoman: "" for 0 (the era before the first has no numeral).</summary>
+    internal static string ToRoman(int number)
+    {
+        if (number <= 0 || number > 3999) return "";
+        int[] values = { 1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1 };
+        string[] signs = { "M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I" };
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < values.Length; i++)
+            while (number >= values[i]) { sb.Append(signs[i]); number -= values[i]; }
+        return sb.ToString();
+    }
+
+    /// <summary>A point of a separator's line at height `y`: through (x + ERA_LINE_SHIFT, ERA_LABEL_Y), leaning right towards the top.</summary>
+    internal static Vector2 EraLinePoint(float x, float y) => new Vector2(x + ERA_LINE_SHIFT + (ERA_LABEL_Y - y) * ERA_SLANT, y);
+
+    /// <summary>
+    /// The separators as the window would draw them now: from the cards the game's tech screen shows (a technology
+    /// that is on the screen and has a UI mapper), at their staged eras and columns.
+    /// </summary>
+    internal List<EraSeparator> EraSeparatorsNow()
+    {
+        var cards = new List<KeyValuePair<int, float>>();
+        int eraCount = 0;
+        foreach (var era in _eras) eraCount = Mathf.Max(eraCount, era.Index + 1);
+        foreach (var n in _nodes)
+        {
+            if (Hidden(n) || n.ActiveMapper == null) continue;   // the game binds no item for these
+            cards.Add(new KeyValuePair<int, float>(EraIndexOf(_eras, EffEra(n)), EffX(n) * COL));
+        }
+        return EraSeparators(cards, eraCount);
+    }
+
+    /// <summary>What the last repaint drew of the era separators, in the window's coordinates (for the drill).</summary>
+    internal sealed class SeparatorDraw
+    {
+        public int LeftEra;
+        public Vector2 LineTop, LineBottom;         // the whole line's ends, drawn or not
+        public int PiecesDrawn; public float MaxAlpha, MinAlpha = 1f, Width;
+        public string LeftText, RightText; public Vector2 LeftLabel, RightLabel;
+        public int FontSize; public float LabelAlpha;
+        public int CardsDrawnBefore;                // how many cards were already drawn: 0 = under the cards
+    }
+    internal readonly List<SeparatorDraw> SeparatorDraws = new List<SeparatorDraw>();
+    int _cardsDrawn;
+
+    void DrawEraSeparators(Rect local)
+    {
+        SeparatorDraws.Clear();
+        if (_eras.Count < 2) return;
+        var separators = EraSeparatorsNow();
+        if (separators.Count == 0) return;
+        Vector2 origin = new Vector2(_artOrigin.x, _artOrigin.y);   // the clip's place in the window
+        float width = Mathf.Clamp(1.5f * _zoom, 1f, 2.5f);
+        // the numerals: the game's size where that is ERA_LABEL_MIN or more, and the game's box and gap at that size
+        int fontSize = Mathf.Clamp(Mathf.RoundToInt(ERA_LABEL_SIZE * _zoom), ERA_LABEL_MIN, 255);
+        float scale = fontSize / ERA_LABEL_SIZE;
+        float faint = Mathf.Lerp(ERA_NUMBER_SMALL_ALPHA, ERA_NUMBER.a, Mathf.InverseLerp(ERA_LABEL_MIN, ERA_LABEL_SIZE, fontSize));
+        var numberStyle = new GUIStyle(EditorStyles.label) { alignment = TextAnchor.MiddleCenter, fontSize = fontSize, wordWrap = false, clipping = TextClipping.Overflow,
+                                                             normal = { textColor = new Color(ERA_NUMBER.r, ERA_NUMBER.g, ERA_NUMBER.b, faint) } };
+        Vector2 half = new Vector2(75f, 65f) * scale;   // the game's label box is 150 x 130 at size 100
+        float offset = ERA_LABEL_OFFSET * scale;
+        // the height: at the view's top, but never past the line's ends (in the game's units, then back on screen)
+        float labelUnitY = Mathf.Clamp((local.yMin + ERA_LABEL_TOP_GAP + half.y - _pan.y) / _zoom, ERA_LINE_TOP, ERA_LINE_BOTTOM);
+        const int pieces = 20;
+        foreach (var separator in separators)
+        {
+            var record = new SeparatorDraw { LeftEra = separator.LeftEra, CardsDrawnBefore = _cardsDrawn };
+            Vector2 top = EraLinePoint(separator.X, ERA_LINE_TOP), bottom = EraLinePoint(separator.X, ERA_LINE_BOTTOM);
+            record.LineTop = U2S(top.x, top.y) + origin; record.LineBottom = U2S(bottom.x, bottom.y) + origin;
+            SeparatorDraws.Add(record);
+            // the line fades in over its first third and out over its last (the prefab's alpha keys: 0.3 and 0.7)
+            for (int i = 0; i < pieces; i++)
+            {
+                float t0 = i / (float)pieces, t1 = (i + 1) / (float)pieces, t = (t0 + t1) * 0.5f;
+                float alpha = t < 0.3f ? t / 0.3f : t > 0.7f ? (1f - t) / 0.3f : 1f;
+                Vector2 a = EraLinePoint(separator.X, Mathf.Lerp(ERA_LINE_TOP, ERA_LINE_BOTTOM, t0)), b = EraLinePoint(separator.X, Mathf.Lerp(ERA_LINE_TOP, ERA_LINE_BOTTOM, t1));
+                Vector2 sa = U2S(a.x, a.y), sb = U2S(b.x, b.y);
+                if (Mathf.Max(sa.x, sb.x) < local.xMin || Mathf.Min(sa.x, sb.x) > local.xMax || sb.y < local.yMin || sa.y > local.yMax) continue;
+                Handles.color = new Color(ERA_LINE.r, ERA_LINE.g, ERA_LINE.b, ERA_LINE.a * alpha);
+                Handles.DrawAAPolyLine(width, sa, sb);
+                record.PiecesDrawn++; record.MaxAlpha = Mathf.Max(record.MaxAlpha, Handles.color.a); record.MinAlpha = Mathf.Min(record.MinAlpha, Handles.color.a); record.Width = width;
+            }
+            Vector2 onLine = EraLinePoint(separator.X, labelUnitY), at = U2S(onLine.x, onLine.y);
+            Vector2 left = new Vector2(at.x - offset, at.y), right = new Vector2(at.x + offset, at.y);
+            string leftText = ToRoman(separator.LeftEra), rightText = ToRoman(separator.LeftEra + 1);
+            GUI.Label(new Rect(left.x - half.x, left.y - half.y, 2 * half.x, 2 * half.y), leftText, numberStyle);
+            GUI.Label(new Rect(right.x - half.x, right.y - half.y, 2 * half.x, 2 * half.y), rightText, numberStyle);
+            record.LeftText = leftText; record.RightText = rightText; record.FontSize = fontSize; record.LabelAlpha = faint;
+            record.LeftLabel = left + origin; record.RightLabel = right + origin;
+        }
+        Handles.color = Color.white;
     }
 
     // ── Artwork ───────────────────────────────────────────────────────────────
@@ -973,7 +1195,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
             if (IsEdited(n)) state += " · edited *";
             string detail = $"def:{(n.DefModded ? "mod" : "vanilla")}  map:{(n.MapperModded ? "mod" : "vanilla")}";
             EditorGUILayout.LabelField($"{state}   ({detail})", EditorStyles.miniLabel);
-            EditorGUILayout.LabelField($"{n.Era} · {n.Tier} · ({EffX(n)},{EffY(n)})", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(string.Join(" · ", new[] { EffEra(n), n.Tier }.Where(t => !string.IsNullOrEmpty(t))) + (string.IsNullOrEmpty(EffEra(n)) && string.IsNullOrEmpty(n.Tier) ? "" : " · ") + $"({EffX(n)},{EffY(n)})", EditorStyles.miniLabel);
             TechTreeVanillaArt.Region shown = default(TechTreeVanillaArt.Region);
             bool gameImage = string.IsNullOrEmpty(n.ArtPath) && TechTreeVanillaArt.TryRegion(n.ArtGuid, out shown);
             string artProblem = TechTreeVanillaArt.Problem;
@@ -1015,6 +1237,17 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                     }
                 if (_shiftNote != "" && _shiftNoteFor == n.Name) EditorGUILayout.LabelField(_shiftNote, EditorStyles.wordWrappedMiniLabel);
 
+                // the era (TechnologyDefinition.EraReference), staged like the rest
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Label(new GUIContent("Era", "The technology's era (EraReference in its definition). In the game it decides WHEN an empire can research it (not before the empire's technological era reaches it; an era-exclusive technology also not after), what it COSTS (the era's cost for its tier, unless the technology has a cost of its own), and which side of the era separators its card is on. The technologies of the eras before the one a game starts in are completed at the start. Save writes it to the definition."), GUILayout.Width(54));
+                string[] eraNames = EraChoices(_eras, EffEra(n), n.Era, out string[] eraLabels, out int eraAt);
+                using (new EditorGUI.DisabledScope(_eras.Count == 0))
+                {
+                    string eraNow = PickedEra(eraNames, eraAt, EditorGUILayout.Popup(eraAt, eraLabels));
+                    if (eraNow != null) SetEra(n, eraNow);
+                }
+                EditorGUILayout.EndHorizontal();
+
                 // in the game or switched off (TechnologyDefinition.Visibility), staged like the rest
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.Label(new GUIContent("Game", "Whether the game has this technology at all. Switched off = Visibility Never: no empire gets it."), GUILayout.Width(54));
@@ -1023,6 +1256,12 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 EditorGUILayout.EndHorizontal();
                 if (statePicked != stateNow) SetVisibility(n, SwitchedVisibility(n.BaseVisibility, statePicked == 0));
             }
+            string eraNote = EraNote(_eras, EffEra(n));
+            if (eraNote != "") EditorGUILayout.HelpBox(eraNote, MessageType.Warning);
+            string costNote = EraCostNote(_eras, EffEra(n), n.TierIndex, n.Tier, n.CostOverride);
+            if (costNote != "") EditorGUILayout.HelpBox(costNote, MessageType.Warning);
+            if (n.ExclusiveToEra)
+                EditorGUILayout.HelpBox(ExclusiveNote(EffEra(n)), MessageType.Info);
             string visibilityNote = SideVisibilityNote(out bool othersDepend);
             if (visibilityNote != "") EditorGUILayout.HelpBox(visibilityNote, othersDepend ? MessageType.Warning : MessageType.Info);
 
@@ -1159,6 +1398,84 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         !inGame ? TechTreeData.VisibilityNever
         : baseVisibility != TechTreeData.VisibilityNever ? baseVisibility : TechTreeData.VisibilityAlways;
 
+    // ── The era of a technology ───────────────────────────────────────────────
+    /// <summary>
+    /// The side strip's era choice: the project's eras by index, each as its Roman numeral and its name (the first
+    /// era, index 0, has no numeral in the game). An era the technology has SAVED but the project does not (or none
+    /// at all) is kept as the first entry, so it can be chosen again after another era was staged (review B: it went
+    /// from the list, and only Revert, which drops every staged edit, took it back); the same for a staged one. With
+    /// no eras read at all the one entry says so. Returns the names; `at` = the entry of `current`.
+    /// </summary>
+    internal static string[] EraChoices(IList<TechTreeData.Era> eras, string current, string saved, out string[] labels, out int at)
+    {
+        current = current ?? ""; saved = saved ?? "";
+        var names = new List<string>(); var shown = new List<string>();
+        foreach (var era in eras ?? new List<TechTreeData.Era>())
+        {
+            names.Add(era.Name);
+            string numeral = ToRoman(era.Index);
+            shown.Add(numeral != "" ? numeral + "  ·  " + era.Name : era.Name);
+        }
+        bool none = names.Count == 0;
+        int extra = 0;
+        foreach (string name in new[] { saved, current })
+            if (!names.Contains(name))
+            {
+                names.Insert(extra, name);
+                shown.Insert(extra, none ? (name == "" ? "(no eras found in this project)" : name + "  (no eras found in this project)")
+                                         : name == "" ? "(no era)" : name + "  (not an era of this project)");
+                extra++;
+            }
+        at = names.IndexOf(current);
+        labels = shown.ToArray();
+        return names.ToArray();
+    }
+
+    /// <summary>The era the popup's pick asks for; null when nothing changed or the pick is out of the list.</summary>
+    internal static string PickedEra(string[] names, int at, int picked) =>
+        picked != at && names != null && picked >= 0 && picked < names.Length ? names[picked] : null;
+
+    /// <summary>What the side strip says about a technology's era; "" when it is one of the project's.</summary>
+    internal static string EraNote(IList<TechTreeData.Era> eras, string era)
+    {
+        if (eras == null || eras.Count == 0) return "";   // no eras read at all: nothing to hold the name against
+        if (string.IsNullOrEmpty(era)) return "This technology names no era. The game needs one: it reads the technology's cost and its place among the era separators from it.";
+        return EraIndexOf(eras, era) >= 0 ? "" : "The era '" + era + "' is not one of this project's eras (" + string.Join(", ", eras.Select(e => e.Name)) + "). The game would not find it.";
+    }
+
+    /// <summary>
+    /// The warning for a technology that would cost nothing in the game: its era names no cost for its tier and it
+    /// has no cost of its own. The game then leaves the cost at zero (DepartmentOfScience.UpdateInitialCosts; the
+    /// review of 2026-11-22). "" otherwise, also when the eras or the tier could not be read.
+    /// </summary>
+    internal static string EraCostNote(IList<TechTreeData.Era> eras, string era, int tierIndex, string tierName, string costOverride)
+    {
+        if (eras == null || tierIndex < 0 || !string.IsNullOrEmpty(costOverride)) return "";
+        TechTreeData.Era found = null;
+        foreach (var e in eras) if (e.Name == era) found = e;
+        if (found == null || found.TierCosts == null) return "";
+        if (tierIndex < found.TierCosts.Length && found.TierCosts[tierIndex] != "") return "";
+        string tier = string.IsNullOrEmpty(tierName) ? "its tier" : tierName;
+        var with = new List<string>();
+        foreach (var e in eras)
+            if (e.TierCosts != null && tierIndex < e.TierCosts.Length && e.TierCosts[tierIndex] != "") with.Add(e.Name);
+        return era + " has no research cost for " + tier + ", and this technology has no cost of its own: in the game it would cost NOTHING."
+             + (with.Count > 0 ? " Eras with a cost for " + tier + ": " + string.Join(", ", with) + "." : "");
+    }
+
+    /// <summary>What the side strip says about an era-exclusive technology (TechnologyDefinition.IsExclusiveToEra).</summary>
+    internal static string ExclusiveNote(string era) =>
+        "Exclusive to its era: an empire can research it only while the empire's technological era is no later than "
+        + (string.IsNullOrEmpty(era) ? "the technology's era" : era) + ". Moving it to an earlier era shortens that time.";
+
+    void SetEra(TechTreeData.Node n, string era)
+    {
+        var p = Stage(n);
+        p.Era = era != (n.Era ?? "") ? era : null;   // equal to base = no change
+        DropIfClean(n);
+        Repaint();
+    }
+
     void SetVisibility(TechTreeData.Node n, int visibility)
     {
         var p = Stage(n);
@@ -1293,7 +1610,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         GUIUtility.keyboardControl = 0;
         // Each PART leaves the overlay when it is written, and only then: a skipped part stays staged, a written one
         // does not (it stayed staged with a skipped one, and was written again by the next Save; review 2026-11-21).
-        int pos = 0, pre = 0, vis = 0, skipped = 0, absent = 0;
+        int pos = 0, pre = 0, vis = 0, eras = 0, skipped = 0, absent = 0;
         foreach (var kv in _pending)
         {
             if (!_byName.TryGetValue(kv.Key, out var node)) { absent++; continue; }   // not in the tree right now: kept
@@ -1315,11 +1632,11 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                 else skipped++;
             }
 
-            // ONE writable definition for both of its parts.
-            if (p.Prereqs != null || p.Visibility.HasValue)
+            // ONE writable definition for all of its parts.
+            if (p.Prereqs != null || p.Visibility.HasValue || p.Era != null)
             {
                 var def = TechTreeData.EnsureWritable(node, false, _modPath);
-                if (def == null) skipped += (p.Prereqs != null ? 1 : 0) + (p.Visibility.HasValue ? 1 : 0);
+                if (def == null) skipped += (p.Prereqs != null ? 1 : 0) + (p.Visibility.HasValue ? 1 : 0) + (p.Era != null ? 1 : 0);
                 else
                 {
                     if (p.Prereqs != null)
@@ -1330,6 +1647,13 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
                     if (p.Visibility.HasValue)
                     {
                         if (TechTreeData.WriteVisibility(def, p.Visibility.Value)) { vis++; p.Visibility = null; }
+                        else skipped++;
+                    }
+                    // the era LAST: it is written through the serialized form, which takes the object as the writes
+                    // above left it
+                    if (p.Era != null)
+                    {
+                        if (TechTreeData.WriteEra(def, p.Era)) { eras++; p.Era = null; }
                         else skipped++;
                     }
                     EditorUtility.SetDirty(def);
@@ -1356,7 +1680,7 @@ public class TechTreeWindow : EditorWindow, ISerializationCallbackReceiver
         // after an unsettled write, which may have landed.
         if (pre > 0 || (rules.Count > 0 && outcome != RegistryRules.SaveOutcome.Refused)) TechRequireAllWindow.RefreshOpenWindows();
 
-        Debug.Log($"[TechTree] Saved: {pos} position, {pre} prerequisite, {vis} visibility change(s)" + ruleNote
+        Debug.Log($"[TechTree] Saved: {pos} position, {pre} prerequisite, {vis} visibility change(s)" + (eras > 0 ? $", {eras} era change{(eras == 1 ? "" : "s")}" : "") + ruleNote
                 + (skipped > 0 ? $" · {skipped} skipped (no writable target — see step 5; those edits are KEPT staged)" : "")
                 + (absent > 0 ? $" · {absent} technolog{(absent == 1 ? "y" : "ies")} with staged edits {(absent == 1 ? "is" : "are")} not in the tree right now: those edits are KEPT staged (Revert discards them)" : "") + ".");
         foreach (var k in _pending.Where(kv => kv.Value.IsEmpty).Select(kv => kv.Key).ToList()) _pending.Remove(k);

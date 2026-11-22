@@ -1899,6 +1899,24 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   The second copy is refused and stays staged. ENC keeps both in collections, where this does not arise.
 - **The registry's "unreadable" verdict when its config folder cannot be resolved** leaves a `.corrupt` copy beside
   a healthy source (seen in passing by a round-2 reviewer; older than this PR, not looked into).
+## Tech Tree viewer — eras and separators, left open (2026-11-22)
+
+- **The era popup is not driven by any check**; the drill stages an era by `SetEra`, as the popup does.
+- **Every artwork is drawn over every card**, the user's choice. In the game a card later in the game's list of
+  technologies covers an earlier card's artwork (19 artwork boxes overlap another card in ENC, 7 in vanilla; an
+  upper bound, by rectangles). A card's fifth and sixth unlock icons are under its own artwork, in the game too.
+- **Read off one screenshot of the game:** the line's colour, and that it crosses the numerals' height 13 right of
+  the separator's place. The slant is the line texture's own (derived), the numerals' height the content's.
+- **The numerals' height assumes the game's 16:9 content** (920 at 1080 lines); another aspect ratio was not read.
+- **Not drawn:** the dark shade on one side of the line, and the faint era number the game centres in each era's
+  span (`RefreshEraNumbers`).
+- **An era with an index gap or a duplicate index**: the game indexes an array by EraIndex and fails; the window
+  draws. An era name the project does not have: the game fails to build its technology list; the window skips
+  the card and the side strip warns.
+- **The tier and `IsExclusiveToEra` cannot be edited**, and an era earlier than a prerequisite's era is not
+  warned about.
+- **A Reload reads the project's eras in a full asset scan of its own** (about 40 ms on the ENC copy).
+
 ## Tech Tree viewer — the unlock row, left open by the review of PR #307 (2026-11-22)
 
 - **The row was never laid beside the running game's tech screen.** Its reference is the game's code
