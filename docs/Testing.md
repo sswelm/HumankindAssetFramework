@@ -63,7 +63,7 @@ script compares its exit code with a load-only control (139). On 2026-11-21, wit
 beside it, one run of three exited 127 after `DRILL PASS` and was reported as a failure; two reruns exited 139. A
 failure of that shape (every check passed, only the exit code differs) is the runtime's exit, not the hooks: rerun.
 `bash tools/tech_requires_all_unity_drill.sh` drives the real Tech Requires All window and the Tech Tree viewer in one
-temporary Unity project and reads every deployed list back with the plugin's parser: 124 checks (14 before PR #301,
+temporary Unity project and reads every deployed list back with the plugin's parser: 132 checks (14 before PR #301,
 which were the list window's own: add, save, reopen, remove). The viewer's part:
 - **The two windows on one list.** The OR / AND switch is staged and written on Save; an open list window without
   unsaved changes follows, one with unsaved changes keeps them and has its save refused; the viewer picks up the list
@@ -75,6 +75,9 @@ which were the list window's own: add, save, reopen, remove). The viewer's part:
   its definition's file, and an Undo after a Save takes nothing of it back.
 - **Staged edits:** kept across a reload that does not find the technology, and across a round trip of the window
   through Unity's own serializer with everything in memory wiped (all five kinds of edit, the selection, the view).
+- **Shift** (2026-11-21, 8 checks): the cards right of a card move together and the others stay, the opposite number
+  takes it back, a shift to the left stops in the column after the anchor's, a card in the anchor's own column is not
+  moved, and the texts. Planted: including the anchor's column, no limit, and moving the rows too each fail them.
 - **Input through the real `OnGUI`:** a click that slips is no drag, a column of movement is a column, nothing moves
   while a row is under two pixels.
 - **Geometry and links:** the card's size and the column and row steps against the game's prefab numbers, six

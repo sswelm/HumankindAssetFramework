@@ -497,6 +497,38 @@ public static class TechRequireAllWindowDrill
                     Check("list window: it holds the tree of the viewer's seam after the viewer's saves", Get<List<TechTreeData.Node>>("nodes").Count == 4 && Get<List<TechTreeData.Node>>("nodes").Any(n => n.Name == T && n.BaseX == 16),
                           "nodes " + Get<List<TechTreeData.Node>>("nodes").Count);
 
+                    // ---- Shift: every card right of one card, moved together (A 0,0 · B 8,-2 · T 16,4 · S 16,9) ----
+                    {
+                        int applied; var shiftArgs = new object[] { N(B), 5, 0 };
+                        int moved = (int)typeof(TechTreeWindow).GetMethod("ShiftRightOf", Private).Invoke(viewer, shiftArgs);
+                        Check("shift: the cards right of B move 5 columns, B and the card left of it stay",
+                              moved == 2 && (int)shiftArgs[2] == 5 && (int)VCall("EffX", N(T)) == 21 && (int)VCall("EffX", N("Technology_S")) == 21 && (int)VCall("EffY", N(T)) == 4
+                              && (int)VCall("EffX", N(B)) == 8 && (int)VCall("EffX", N("Technology_A")) == 0 && Staged == 2, "moved " + moved + " staged " + Staged);
+                        shiftArgs = new object[] { N(B), -5, 0 };
+                        typeof(TechTreeWindow).GetMethod("ShiftRightOf", Private).Invoke(viewer, shiftArgs);
+                        Check("shift: the opposite number takes it back, nothing staged", (int)VCall("EffX", N(T)) == 16 && (int)VCall("EffX", N("Technology_S")) == 16 && Staged == 0, "staged " + Staged);
+                        shiftArgs = new object[] { N(B), -20, 0 };
+                        typeof(TechTreeWindow).GetMethod("ShiftRightOf", Private).Invoke(viewer, shiftArgs);
+                        applied = (int)shiftArgs[2];
+                        Check("shift to the left stops in the column after the anchor's (7 of the 20 asked)", applied == -7 && (int)VCall("EffX", N(T)) == 9 && (int)VCall("EffX", N("Technology_S")) == 9, "applied " + applied);
+                        shiftArgs = new object[] { N(B), 7, 0 };
+                        typeof(TechTreeWindow).GetMethod("ShiftRightOf", Private).Invoke(viewer, shiftArgs);
+                        Check("    and what was applied, reversed, takes it back", Staged == 0 && (int)VCall("EffX", N(T)) == 16, "staged " + Staged);
+                        shiftArgs = new object[] { N(T), 5, 0 };
+                        moved = (int)typeof(TechTreeWindow).GetMethod("ShiftRightOf", Private).Invoke(viewer, shiftArgs);
+                        Check("shift: a card in the anchor's own column is not right of it", moved == 0 && Staged == 0 && (int)VCall("EffX", N("Technology_S")) == 16);
+                        Check("shift: the field starts at 6 columns, one card's step in the tree", TechTreeWindow.DefaultShift == 6 && VGet<int>("_shiftBy") == 6);
+                        Check("shift: the limit as a function",
+                              TechTreeWindow.ShiftLimit(8, new[] { 16, 16 }, -20) == -7 && TechTreeWindow.ShiftLimit(8, new[] { 9, 30 }, -3) == 0 && TechTreeWindow.ShiftLimit(8, new int[0], -3) == 0
+                              && TechTreeWindow.ShiftLimit(8, new[] { 16 }, 5) == 5 && TechTreeWindow.ShiftLimit(8, new[] { 16 }, -4) == -4);
+                        Check("shift: what the side strip says about it",
+                              TechTreeWindow.ShiftLabel(87, 5) == "Move the 87 cards right of this by 5" && TechTreeWindow.ShiftLabel(0, 5) == "No card is right of this one"
+                              && TechTreeWindow.ShiftNote(87, 5, 5) == "Moved 87 cards 5 columns to the right. Staged: Save writes it, -5 takes it back."
+                              && TechTreeWindow.ShiftNote(2, -20, -7) == "Moved 2 cards 7 columns to the left. Staged: Save writes it, +7 takes it back. (-20 was asked: the nearest card stops in the column after this one.)"
+                              && TechTreeWindow.ShiftNote(1, -3, 0).StartsWith("Nothing moved"),
+                              TechTreeWindow.ShiftNote(2, -20, -7));
+                    }
+
                     // the Save line says what the outcome guarantees
                     Check("save line: a switch the list already held is not called deployed",
                           TechTreeWindow.RuleNote(1, RegistryRules.SaveOutcome.Saved, false, false) == ", 1 rule switch (OR / AND): the list already held it, so nothing was written or deployed",
