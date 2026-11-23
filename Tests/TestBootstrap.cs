@@ -1,3 +1,5 @@
+using System;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using BepInEx.Logging;
 
@@ -30,12 +32,35 @@ namespace HumankindAssetFramework.Tests
     // NOTE this is a HARNESS fix, not the whole answer. The product fix landed with it: MergeModels' conflict log
     // now uses `Plugin.Log?.`, because a pure function the unit suite covers must not require a host at all. If a
     // future pure path NREs on a null Log, guard THAT call — do not lean on this seed to hide it.
+    //
+    // ONE CULTURE FOR THE WHOLE ASSEMBLY TOO (2026-11-23), for the same reason: a per-test habit covers the tests that
+    // remembered it. Until this date the suite ran under whatever culture the machine had. The author's machine is
+    // nl-NL (decimal comma, '.' groups thousands), so a dropped InvariantCulture failed there; the CI runner is en-US,
+    // where a culture-default parse of "1.5" is right by accident. Measured by the review of that day: of 15 production
+    // files whose InvariantCulture -> CurrentCulture plant failed the suite on nl-NL, 12 passed it under en-US.
+    // Now every test thread runs under DefaultCultureName on every machine, so CI fails where the author's push does.
+    // Five tests switch the culture themselves and restore what they found; they are unaffected.
+    //
+    // HAF_TEST_CULTURE=<name> runs the suite under another culture (tr-TR for the dotless i, en-US to see what a
+    // dot-decimal machine hides). A name the runtime does not know fails every test at once, by design.
     internal static class TestBootstrap
     {
+        /// <summary>The culture every test runs under unless HAF_TEST_CULTURE names another: comma-decimal, the
+        /// author's own. TestCultureTests holds both properties.</summary>
+        internal const string DefaultCultureName = "nl-NL";
+
+        /// <summary>The culture this run forced (the module initializer sets it before any test).</summary>
+        internal static CultureInfo Culture { get; private set; }
+
         [ModuleInitializer]
         internal static void Init()
         {
             if (Plugin.Log == null) Plugin.Log = new ManualLogSource("test");
+
+            string asked = Environment.GetEnvironmentVariable("HAF_TEST_CULTURE");
+            Culture = CultureInfo.GetCultureInfo(string.IsNullOrWhiteSpace(asked) ? DefaultCultureName : asked.Trim());
+            CultureInfo.DefaultThreadCurrentCulture = Culture;   // every thread of this domain that sets none of its own
+            CultureInfo.CurrentCulture = Culture;                // and the thread that loaded the assembly
         }
     }
 }

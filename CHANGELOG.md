@@ -10,6 +10,25 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **The unit suite runs under a comma-decimal culture on every machine (2026-11-23).** From the critical review of
+  that day: the suite took the machine's culture, so a dropped `InvariantCulture` failed on the author's Dutch machine
+  and passed on CI's en-US runner.
+  - **Measured by the review:** of 15 production files whose `InvariantCulture` → `CurrentCulture` plant failed the
+    suite under nl-NL, 12 passed it under en-US.
+  - **The change:** `Tests/TestBootstrap.cs` (the module initializer that already seeds `Plugin.Log`) sets `nl-NL` as
+    the default culture of every thread in the test domain. `HAF_TEST_CULTURE=<name>` runs the suite under another
+    culture; an unknown name fails every test.
+  - **New tests (`Tests/TestCultureTests.cs`, 5; the suite is 2,913):** the culture is in force on the test thread, a
+    new thread, a thread-pool worker and a parallel loop; the default is comma-decimal; and every float dial of the
+    shared schema, and `position`, reads a fraction the same through the regex fallback of `ParseModels` as through
+    the JSON parser. Until now no test gave the fallback a fraction.
+  - **Planted:** `CurrentCulture` in the fallback's `scale`, `turnRate` and `position` reads: each fails the suite
+    under the default culture and passes under `HAF_TEST_CULTURE=en-US` (what CI saw before). With the bootstrap's
+    culture lines removed, the two thread tests fail under `HAF_TEST_CULTURE=tr-TR`.
+  - **The whole suite passes** under nl-NL (the default), en-US and tr-TR.
+  - **Not covered:** the `muzzleOffset` and `handPropAngles` strings (parsed inside the injection code, not in a
+    function a test can call), and culture-sensitive casing: the default culture is not Turkish.
+
 - **The push gate runs the TechRequireAll game drill (2026-11-23).** From the critical review of that day: the unit
   suite holds the pure rules (`TechRequireAllRules`), and the hook bodies in `Patches/TechRequireAllPatch.cs` (the ALL
   rule in the state update, the locked enqueue, the cascading removal's guard) were run by
