@@ -29,8 +29,9 @@ the test thread and on worker threads, and gives every float a pack can set (the
 `rotorSpinSpeed`, and `position`) a fraction that must read the same through the regex fallback of `ParseModels` as
 through the JSON parser. Not held by any test: the `muzzleOffset` and `handPropAngles` strings, which are parsed
 inside the injection code; a number in exponent form in the fallback (a defect, in the
-[Review-Backlog](Review-Backlog.md)); formatting in log lines, warnings and windows; and culture-sensitive
-casing (the default culture is not Turkish).
+[Review-Backlog](Review-Backlog.md)); what the code formats (a config value the F8 window writes back, a cache key,
+warnings, reports and log lines); and culture-sensitive casing (the default culture is not Turkish).
+`Tests/test_culture_override.py` holds the override from outside the suite: a made-up name fails the run.
 
 The unit suite is a deliberate, bounded suite, not a coverage target: it guards the functions where bugs have actually
 hidden, and stops there on purpose. What it cannot reach — the ~18k lines that reflect into a running game — is not

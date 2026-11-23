@@ -274,6 +274,10 @@ push_step run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/Humanki
 # wrapper) and timed out under the thirteen parity drills - which the push no longer runs (2026-10-30). The oracle tests
 # belong to the parity mode, where the record machinery is used.
 push_step run_lane "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
+# The suite's culture override seen from outside (it runs the assembly the unit-test step just built): a listed name runs
+# the suite under it, a made-up one fails the run and says why. No test inside the assembly can hold what its own
+# module initializer does with a refusal.
+push_step run_lane "test culture override tests (a listed name is honoured, a made-up one fails the run and says why)" python "$ROOT/Tests/test_culture_override.py"
 push_step run_lane "deploy timing wrapper tests (runtime failures, oracles and isolated artifacts)" python "$ROOT/Tests/test_deploy_time.py"
 # push-only like the gate regression tests above it (2026-11-10): it times bash-heavy sweeps with a 120 s limit and took
 # 113-206 s under the thirteen parity drills - two parity runs withheld a valid stamp over it; the push runs it alone in 27-46 s

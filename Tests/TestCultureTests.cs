@@ -105,8 +105,8 @@ namespace HumankindAssetFramework.Tests
         // reflecting over the schema class alone (the review of PR #313).
         //
         // NOT HELD HERE: a number in exponent form. The fallback's patterns do not take one whole (1.5e-2 comes back as
-        // the default, 1.5e+2 as 1.5 on eleven dials; Review-Backlog, 2026-11-23), so the fractions below are written
-        // without an exponent.
+        // the default on 23 dials and as 1.5 on the other eleven; Review-Backlog, 2026-11-23), so the fractions below
+        // are written without an exponent.
         [Fact]
         public void EveryFloatDialAPackCanSet_ReadsAFractionTheSameThroughTheRegexFallback()
         {

@@ -172,6 +172,10 @@ run_bg() { run "$@"; }; run_lane() { echo "LANE $1"; run "$@"; }
             # spells the name: by the time the step is registered the variable is gone.
             if mode != "parity":
                 self.assertIn("CULTURE_VARS=[]", result.stdout)
+                tests = [line for line in result.stdout.splitlines() if line.startswith("STEP plugin unit tests")]
+                self.assertEqual(len(tests), 1, result.stdout)
+                # exactly this command: `dotnet test -e HAF_TEST_CULTURE=en-US` would hand the variable back
+                self.assertRegex(tests[0], r"^STEP plugin unit tests \(dotnet test\) dotnet test \S+/Tests/HumankindAssetFramework\.Tests\.csproj -c Release --nologo -v q$")
             # The game drill builds the plugin itself, so it is queued LAST on the lane: started beside the drills it
             # built the project at the same moment as the buffer hook drill (the review of PR #312).
             if mode != "parity":

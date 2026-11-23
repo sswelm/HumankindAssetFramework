@@ -22,6 +22,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     suite green (the PR's review). Any other name now fails the run, and the output says why at `dotnet test`'s
     default verbosity. The push gate removes the variable, in any spelling of its name (PowerShell's
     `$env:haf_test_culture` reaches bash in lower case), before its own run of the suite.
+  - **From outside (`Tests/test_culture_override.py`, in the gate and in CI):** a run of `dotnet test` with a listed
+    name passes under it, and with `en-UK`, `xx-YY` or `nl_NL` fails and prints the sentence. A module initializer
+    that swallowed the refusal passed all 2,923 tests (the PR's second review); no test inside the assembly can
+    see that.
   - **New tests (`Tests/TestCultureTests.cs`, 15 cases; the suite is 2,923):** the forced culture, the instance and
     not only its name, is in force on the test thread, a new thread, a thread-pool worker and a parallel loop; the
     default is comma-decimal; an unlisted or misspelled name is refused; and every float a pack can set (the shared
@@ -32,12 +36,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     the bootstrap's culture line removed, the two thread tests fail on the author's Dutch machine too (the first
     version compared names, and both cultures are called nl-NL there). With the listed-name check removed, the five
     refusal cases fail.
-  - **The whole suite passes** under nl-NL (the default), en-US and tr-TR; the PR's CI passed on the en-US runner.
+  - **The whole suite passes** under nl-NL (the default), en-US and tr-TR, and in the PR's CI. CI now prints the
+    runner's own culture before the tests, so that a pass on a dot-decimal machine is in the log.
   - **Found by the review, not fixed here (a runtime defect, in the Review-Backlog):** the regex fallback does not
-    read a number in exponent form whole. `1.5e-2` comes back as the default, `1.5e+2` as 1.5 on eleven dials.
+    read a number in exponent form whole. On 23 float dials `1.5e-2` comes back as the default; on the other
+    eleven it reads 1.5, as `1.5e+2` does.
   - **Not covered:** the `muzzleOffset` and `handPropAngles` strings (parsed inside the injection code, not in a
-    function a test can call); formatting in log lines, warnings and windows (four `InvariantCulture` plants
-    there passed the suite); and culture-sensitive casing: the default culture is not Turkish.
+    function a test can call); what the code FORMATS (five `InvariantCulture` plants in formats passed the suite:
+    the roughness value the F8 window writes back to the config, a cache key of the `.max` reader, a validator
+    warning, a report's size and a log line); and culture-sensitive casing: the default culture is not Turkish.
 
 - **The push gate runs the TechRequireAll game drill (2026-11-23).** From the critical review of that day: the unit
   suite holds the pure rules (`TechRequireAllRules`), and the hook bodies in `Patches/TechRequireAllPatch.cs` (the ALL
