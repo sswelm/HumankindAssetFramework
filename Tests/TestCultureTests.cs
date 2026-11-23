@@ -14,13 +14,17 @@ namespace HumankindAssetFramework.Tests
     // green and culture-blind again on a dot-decimal machine - which is the state this replaced.
     public class TestCultureTests
     {
-        static string Expected => TestBootstrap.Culture.Name;
+        // THE INSTANCE, not the name: on the author's machine the culture the bootstrap forces and the machine's own
+        // are both called nl-NL, so a comparison of names passed with the bootstrap removed (the review of PR #313).
+        // The forced one is the runtime's read-only instance; a thread left to the machine holds another object.
+        static CultureInfo Expected => TestBootstrap.Culture;
 
         [Fact]
         public void TheTestThreadRunsUnderTheForcedCulture()
         {
-            Assert.NotNull(TestBootstrap.Culture);
-            Assert.Equal(Expected, CultureInfo.CurrentCulture.Name);
+            Assert.NotNull(Expected);
+            Assert.Same(Expected, CultureInfo.CurrentCulture);
+            Assert.False(CultureInfo.CurrentCulture.UseUserOverride);   // the machine's own carries the user's regional settings
         }
 
         // A parse on a worker is as culture-sensitive as one on the test thread (the probe, the fuse and the readers
@@ -28,16 +32,16 @@ namespace HumankindAssetFramework.Tests
         [Fact]
         public void ANewThreadAThreadPoolWorkerAndAParallelLoopRunUnderItToo()
         {
-            string onThread = null;
-            var t = new Thread(() => onThread = CultureInfo.CurrentCulture.Name);
+            CultureInfo onThread = null;
+            var t = new Thread(() => onThread = CultureInfo.CurrentCulture);
             t.Start(); t.Join();
-            Assert.Equal(Expected, onThread);
+            Assert.Same(Expected, onThread);
 
-            Assert.Equal(Expected, Task.Run(() => CultureInfo.CurrentCulture.Name).GetAwaiter().GetResult());
+            Assert.Same(Expected, Task.Run(() => CultureInfo.CurrentCulture).GetAwaiter().GetResult());
 
-            var seen = new string[64];
-            Parallel.For(0, seen.Length, i => seen[i] = CultureInfo.CurrentCulture.Name);
-            Assert.All(seen, name => Assert.Equal(Expected, name));
+            var seen = new CultureInfo[64];
+            Parallel.For(0, seen.Length, i => seen[i] = CultureInfo.CurrentCulture);
+            Assert.All(seen, culture => Assert.Same(Expected, culture));
         }
 
         // What the default was chosen for, held against the culture's own data and not against this run's setting (so it
@@ -58,22 +62,62 @@ namespace HumankindAssetFramework.Tests
         public void WithoutTheOverrideTheForcedCultureIsTheDefault()
         {
             string asked = System.Environment.GetEnvironmentVariable("HAF_TEST_CULTURE");
-            Assert.Equal(string.IsNullOrWhiteSpace(asked) ? TestBootstrap.DefaultCultureName : asked.Trim(), Expected);
+            Assert.Equal(string.IsNullOrWhiteSpace(asked) ? TestBootstrap.DefaultCultureName : asked.Trim(), Expected.Name);
+        }
+
+        // Windows answers any well-formed tag with a made-up culture ("Unknown Locale", a decimal point): under such a
+        // name the suite ran green and culture-blind (the review of PR #313: xx-YY and en-UK, 2,913 passed).
+        [Theory]
+        [InlineData("xx-YY")]      // well-formed, made up
+        [InlineData("en-UK")]      // the plausible typo of en-GB
+        [InlineData("nl_NL")]      // the POSIX spelling
+        [InlineData("tr-tr")]      // listed as tr-TR
+        [InlineData("klingon")]
+        public void ANameTheRuntimeDoesNotListAsWrittenIsRefused(string name)
+        {
+            var e = Assert.Throws<System.ArgumentException>(() => TestBootstrap.Resolve(name));
+            Assert.Contains("'" + name + "'", e.Message);
+        }
+
+        [Theory]
+        [InlineData(null, "nl-NL")]
+        [InlineData("", "nl-NL")]
+        [InlineData("  ", "nl-NL")]
+        [InlineData("tr-TR", "tr-TR")]
+        [InlineData(" en-US ", "en-US")]
+        public void AListedNameOrNoneResolves(string asked, string name)
+        {
+            var culture = TestBootstrap.Resolve(asked);
+            Assert.Equal(name, culture.Name);
+            Assert.True(culture.IsReadOnly);
+            Assert.False(culture.UseUserOverride);
         }
 
         // THE GAME-SIDE DIALS THROUGH THE LAST-RESORT PARSER. The regex fallback reads every float dial of the registry
-        // with its own TryParse (37 InvariantCulture sites in ParseModels on 2026-11-23), and until this date no test
-        // gave any of them a fraction: with the culture dropped from all of them the suite stayed green on nl-NL, and in
-        // the game a pack that needs the fallback would read scale 1.5 as its default. Every float field of the shared
-        // schema gets its own fraction here and must come back the same from the fallback as from the JSON parser,
-        // which is culture-invariant by construction. So does `position`, the one dial that is three numbers (the
-        // fallback reads it through a helper of its own, which the float fields never reach).
+        // with a TryParse of its own, and until 2026-11-23 no test gave any of them a fraction: with the culture dropped
+        // from all of them the suite stayed green on nl-NL, and in the game a pack that needs the fallback would read
+        // scale 1.5 as its default. Every float the registry can set gets its own fraction here and must come back the
+        // same from the fallback as from the JSON parser, which is culture-invariant by construction. So does
+        // `position`, the one dial that is three numbers (the fallback reads it through a helper of its own).
+        //
+        // WHICH FLOATS: the fields of ModelEntry that the plugin's own key list (registryConfigKeys) lets a pack set -
+        // the shared schema's, and the plugin-only `rotorSpinSpeed`, which the first version of this test missed by
+        // reflecting over the schema class alone (the review of PR #313).
+        //
+        // NOT HELD HERE: a number in exponent form. The fallback's patterns do not take one whole (1.5e-2 comes back as
+        // the default, 1.5e+2 as 1.5 on eleven dials; Review-Backlog, 2026-11-23), so the fractions below are written
+        // without an exponent.
         [Fact]
-        public void EveryFloatDialOfTheSchema_ReadsAFractionTheSameThroughTheRegexFallback()
+        public void EveryFloatDialAPackCanSet_ReadsAFractionTheSameThroughTheRegexFallback()
         {
-            var floats = typeof(Haf.Schema.HafModelSchema).GetFields(BindingFlags.Public | BindingFlags.Instance)
-                .Where(f => f.FieldType == typeof(float)).OrderBy(f => f.Name, System.StringComparer.Ordinal).ToArray();
-            Assert.True(floats.Length >= 30, "the schema's float dials were not found: " + floats.Length);
+            var keysField = typeof(UniversalInject).GetField("registryConfigKeys", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(keysField);
+            var keys = (System.Collections.Generic.HashSet<string>)keysField.GetValue(null);
+            var floats = typeof(ModelEntry).GetFields(BindingFlags.Public | BindingFlags.Instance)
+                .Where(f => f.FieldType == typeof(float) && keys.Contains(f.Name)).OrderBy(f => f.Name, System.StringComparer.Ordinal).ToArray();
+            Assert.True(floats.Length >= 30, "the float dials were not found: " + floats.Length);
+            Assert.Contains(floats, f => f.Name == "scale");            // a schema field
+            Assert.Contains(floats, f => f.Name == "rotorSpinSpeed");   // a plugin-only one
 
             var body = new StringBuilder("\"resourceName\": \"Dials\", \"pawnDescription\": \"PAWN_A\"");
             var want = new float[floats.Length];

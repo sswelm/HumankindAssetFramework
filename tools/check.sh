@@ -260,7 +260,10 @@ fi
 push_step run "plugin build (dotnet build -c Release)" dotnet build "$ROOT/HumankindAssetFramework.csproj" -c Release --nologo -v q
 
 # 2) unit tests — the pure logic that runs outside Unity (parse/schema/reflection-resolution/smoke rule).
-push_step run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/HumankindAssetFramework.Tests.csproj" -c Release --nologo -v q
+#    Under the suite's OWN culture (Tests/TestBootstrap.cs forces nl-NL): HAF_TEST_CULTURE is a hand tool for looking
+#    at another culture, and a shell that still exports en-US from such a look would make every later push run the
+#    culture-blind suite the bootstrap replaced, with the same "Passed" line (the review of PR #313).
+push_step run "plugin unit tests (dotnet test)" env -u HAF_TEST_CULTURE dotnet test "$ROOT/Tests/HumankindAssetFramework.Tests.csproj" -c Release --nologo -v q
 
 # The gate's own regression tests head the lane: they time subprocesses (a gate's workers, a shell sourcing the oracle
 # wrapper) and timed out under the thirteen parity drills - which the push no longer runs (2026-10-30). The oracle tests

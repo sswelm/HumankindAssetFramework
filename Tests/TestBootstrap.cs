@@ -42,7 +42,9 @@ namespace HumankindAssetFramework.Tests
     // Five tests switch the culture themselves and restore what they found; they are unaffected.
     //
     // HAF_TEST_CULTURE=<name> runs the suite under another culture (tr-TR for the dotless i, en-US to see what a
-    // dot-decimal machine hides). A name the runtime does not know fails every test at once, by design.
+    // dot-decimal machine hides). The name must be one the runtime LISTS, spelled as it lists it: Windows makes up a
+    // culture for any well-formed tag (xx-YY, en-UK: "Unknown Locale", a decimal point), so a mistyped name would
+    // otherwise run the whole suite culture-blind and green. Any other name fails every test at once, and says why.
     internal static class TestBootstrap
     {
         /// <summary>The culture every test runs under unless HAF_TEST_CULTURE names another: comma-decimal, the
@@ -57,10 +59,20 @@ namespace HumankindAssetFramework.Tests
         {
             if (Plugin.Log == null) Plugin.Log = new ManualLogSource("test");
 
-            string asked = Environment.GetEnvironmentVariable("HAF_TEST_CULTURE");
-            Culture = CultureInfo.GetCultureInfo(string.IsNullOrWhiteSpace(asked) ? DefaultCultureName : asked.Trim());
+            Culture = Resolve(Environment.GetEnvironmentVariable("HAF_TEST_CULTURE"));
             CultureInfo.DefaultThreadCurrentCulture = Culture;   // every thread of this domain that sets none of its own
-            CultureInfo.CurrentCulture = Culture;                // and the thread that loaded the assembly
+        }
+
+        /// <summary>The culture for an asked name (none: the default). Throws for a name the runtime does not list
+        /// exactly as written; the instance is the runtime's own read-only one, without the user's regional overrides.</summary>
+        internal static CultureInfo Resolve(string asked)
+        {
+            string name = string.IsNullOrWhiteSpace(asked) ? DefaultCultureName : asked.Trim();
+            foreach (var known in CultureInfo.GetCultures(CultureTypes.AllCultures))
+                if (known.Name.Length > 0 && string.Equals(known.Name, name, StringComparison.Ordinal))
+                    return CultureInfo.GetCultureInfo(name);
+            throw new ArgumentException("HAF_TEST_CULTURE='" + name + "' is not a culture this runtime lists (names are spelled like nl-NL, "
+                + "tr-TR, en-US). The suite does not run under a made-up culture: unset the variable or correct the name.");
         }
     }
 }

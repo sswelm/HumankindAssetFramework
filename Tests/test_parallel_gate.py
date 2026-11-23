@@ -163,6 +163,11 @@ run() { echo "STEP $*"; }; run_bg() { run "$@"; }; run_lane() { echo "LANE $1"; 
                           "mesh layout drill", "prep drill", "deploy drill", "Workshop compaction drill",
                           "rig_anim drill", "vehicle_rig drill", "blender oracle tests"):
                 self.assertEqual("STEP " + label in result.stdout, mode != "push", result.stdout)
+            # The unit tests run under the suite's own culture, whatever the pushing shell exports.
+            if mode != "parity":
+                tests = [line for line in result.stdout.splitlines() if line.startswith("STEP plugin unit tests")]
+                self.assertEqual(len(tests), 1, result.stdout)
+                self.assertIn(" env -u HAF_TEST_CULTURE dotnet test ", tests[0])
             # The game drill builds the plugin itself, so it is queued LAST on the lane: started beside the drills it
             # built the project at the same moment as the buffer hook drill (the review of PR #312).
             if mode != "parity":
