@@ -21,7 +21,9 @@ took the machine's culture: the author's machine is Dutch and CI's runner is en-
 accident. Setting the environment variable `HAF_TEST_CULTURE` to a culture name runs the suite under that culture
 (`tr-TR` for the dotless i, `en-US` to see what a dot-decimal machine hides). The name must be one the runtime lists,
 spelled as it lists it: Windows makes up a dot-decimal culture for any well-formed tag (`xx-YY`, `en-UK`), so any other
-name fails every test and says why. The push gate removes the variable for its own run of the suite.
+name fails every test that touches the test assembly's code; the sentence that says why is in the output at
+`dotnet test`'s default verbosity (under `-v q` only the failures show). The push gate removes the variable, in any
+spelling of its name, before its own run of the suite.
 `Tests/TestCultureTests.cs` holds that the forced culture, the instance itself and not only its name, is in force on
 the test thread and on worker threads, and gives every float a pack can set (the shared schema's, the plugin-only
 `rotorSpinSpeed`, and `position`) a fraction that must read the same through the regex fallback of `ParseModels` as

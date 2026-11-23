@@ -19,8 +19,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     the default culture of every thread in the test domain. The environment variable `HAF_TEST_CULTURE` runs the
     suite under another culture. Its name must be one the runtime lists, as written: Windows makes up a dot-decimal
     culture for any well-formed tag, and under `xx-YY` or `en-UK` the first version of this change ran the whole
-    suite green (the PR's review). Any other name now fails every test and says why. The push gate removes the
-    variable for its own run of the suite.
+    suite green (the PR's review). Any other name now fails the run, and the output says why at `dotnet test`'s
+    default verbosity. The push gate removes the variable, in any spelling of its name (PowerShell's
+    `$env:haf_test_culture` reaches bash in lower case), before its own run of the suite.
   - **New tests (`Tests/TestCultureTests.cs`, 15 cases; the suite is 2,923):** the forced culture, the instance and
     not only its name, is in force on the test thread, a new thread, a thread-pool worker and a parallel loop; the
     default is comma-decimal; an unlisted or misspelled name is refused; and every float a pack can set (the shared

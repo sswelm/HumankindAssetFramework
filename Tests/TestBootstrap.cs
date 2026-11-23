@@ -44,7 +44,8 @@ namespace HumankindAssetFramework.Tests
     // HAF_TEST_CULTURE=<name> runs the suite under another culture (tr-TR for the dotless i, en-US to see what a
     // dot-decimal machine hides). The name must be one the runtime LISTS, spelled as it lists it: Windows makes up a
     // culture for any well-formed tag (xx-YY, en-UK: "Unknown Locale", a decimal point), so a mistyped name would
-    // otherwise run the whole suite culture-blind and green. Any other name fails every test at once, and says why.
+    // otherwise run the whole suite culture-blind and green. Any other name fails the run at once; the sentence
+    // below is in the output at dotnet test's default verbosity.
     internal static class TestBootstrap
     {
         /// <summary>The culture every test runs under unless HAF_TEST_CULTURE names another: comma-decimal, the
@@ -57,10 +58,13 @@ namespace HumankindAssetFramework.Tests
         [ModuleInitializer]
         internal static void Init()
         {
-            if (Plugin.Log == null) Plugin.Log = new ManualLogSource("test");
-
+            // The culture FIRST: touching Plugin runs its type initializer, and whatever a static of the plugin formats
+            // or parses there must already see the forced culture (the second review of PR #313: with the seed first,
+            // Plugin's initializer ran under the machine's own culture).
             Culture = Resolve(Environment.GetEnvironmentVariable("HAF_TEST_CULTURE"));
             CultureInfo.DefaultThreadCurrentCulture = Culture;   // every thread of this domain that sets none of its own
+
+            if (Plugin.Log == null) Plugin.Log = new ManualLogSource("test");
         }
 
         /// <summary>The culture for an asked name (none: the default). Throws for a name the runtime does not list
