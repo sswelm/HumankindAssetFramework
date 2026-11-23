@@ -74,8 +74,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     axle taking the centroid along it, a part listed twice, the line's digits, the warning's shape, and in the script
     the head never moved, the tail from the box centre, only the anchor weighed, the world matrix dropped. One of my
     own new tests did not discriminate at first (both parts listed twice leaves the centroid where it is).
-  - **Not checked:** nothing was looked at in the Vehicle Lab's preview or in the game, and the window's side of the
-    setting (popup to Generate to the tag) is executed by no test: no saved recipe carries `wheelCentre`, and a
+  - **In the user's Vehicle Lab (2026-11-23, the PR branch):** Wheel centre set to Surface centroid on the Hunley,
+    Generate on the C# route - the status box showed `VEHICLE wheel centre: Wheel_00 at its surface centroid
+    (0.005,6.006,0.312), 0.071 from the box centre` and the user's verdict on the preview was "yes it worked".
+  - **Not checked:** nothing was looked at in the game. The window's side of the setting (popup to Generate to the
+    tag) worked in that one run but is executed by no test: no saved recipe carries `wheelCentre`, and a
     planted removal of the field from the window's argument filling passed every check. Rotors, the gun and the
     turret keep their box-based pivots. On a tracked vehicle the two routes agree, but whether a tread still LOOKS
     right is not measured: its path is fitted to the wheels' boxes while its wrap bones follow the moved wheel bones.

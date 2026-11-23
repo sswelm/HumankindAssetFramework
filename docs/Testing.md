@@ -3063,7 +3063,7 @@ links). The drill requires all eight equal through the export and the C#'s own n
 that the port repeats the script. That the bone lands ON the shaft is held by `Tests/VehicleRigWheelCentreTests.cs` (the C#
 stages on a screw of 2, 3, 4, 5 and 7 blades); `WheelCentreTests` in `Tests/test_vehicle_rig_math.py` holds the script's
 helper (its centroid) and, by source text only, the lines that lay the bone - the script's own bone block is executed by the
-drill alone. NOT held by anything: the window's side of the setting (popup to Generate to the tag) - no saved recipe carries
+drill alone. NOT held by any test (seen working once, by the user in the Lab on the Hunley, 2026-11-23): the window's side of the setting (popup to Generate to the tag) - no saved recipe carries
 `wheelCentre`, the Unity Generate drill's fixture list has no wheel-centre key, and the Tests project does not compile the
 window; a planted removal of the field from `RigArgsFromFields` passed every check. NOT covered: a wheel of polygons on
 Blender's route for an `.fbx`, `.obj` or `.blend` source (the fan from a face's first corner is exact for flat convex faces
