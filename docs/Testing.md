@@ -50,9 +50,10 @@ The planner also refuses a locked technology whose prerequisite names are all un
 for a listed technology with only one prerequisite. Three cases hold the tech screen's hint: the marked title, the
 tooltip line (a config text with a stray brace must not throw) and that the line is added once.
 `bash tools/tech_requires_all_game_drill.sh` runs the hooks against the **installed game's own assemblies**. The push
-gate runs it since 2026-11-23 (the step *TechRequireAll game drill*; it SKIPs on a machine without the game, and CI,
-which has no game, does not run it): the unit suite holds the pure rules only, and a planted
-`names.Length < 2` → `< 3` in `StillLocked` passed all 2,908 unit tests while this drill failed four checks. The
+gate runs it since 2026-11-23 (the step *TechRequireAll game drill*, last on the lane; it SKIPs on a machine without
+the game, and CI, which has no game, does not run it): the unit suite holds the pure rules only, and a planted
+`names.Length < 2` → `< 3` in `StillLocked` passed all 2,908 unit tests while this drill failed four checks. A game
+update that changes a hooked method fails this step, and with it every push, until the hooks follow. The
 35 checks cover state updates, locked enqueue, cascading removal and the tech screen's mark. For the mark the game's
 own `TechnologyItem.RefreshTooltips` runs on items built without Unity, with three UI leaves stubbed (the description
 builder and the two widget setters): a listed technology gets the mark and the tooltip line, first with internal

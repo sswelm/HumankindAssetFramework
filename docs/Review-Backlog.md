@@ -1814,6 +1814,13 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   replaces `MoveTechnologyInQueue` with a list operation. A hand port of the game's move, fuzzed over 40,000 random
   queues with several parents per technology, always ended and kept parents in front — a port, not the method. The
   drill could run the real method with only the `SetSynchronizationDirty` call stripped, as it does for the removal.
+- **Five hook behaviours the game drill does not hold (2026-11-23, planted in the review of PR #312).** Each plant in
+  `Patches/TechRequireAllPatch.cs` passed the unit suite and the drill: (1) the config switch inverted (:71; the drill
+  never binds `Plugin.TechRequireAllOn`, so a feature that is off everywhere passes); (2) queueing a listed technology
+  at the BEGINNING with a parent already queued, `Move(…, 0)` changed to 1 (:245; the parent lands behind it); (3) a
+  refused plan returning to the game's own one-chain queueing (:226; no drill case has a refused plan); (4) and (5) the
+  two `catch` blocks returning the wrong answer (:314 locks technologies when a binding throws, :338 queues nothing on
+  a click; no drill case makes a hook throw). Eleven other hook plants failed the drill.
 - **The AI gives a listed technology's second prerequisite no extra weight** (read in
   `ResearchTechnologyPrerequisites.GenerateDesires`, not run): the pass walks the prerequisite names in order and stops
   at the first one that is not available, so with the first one completed it creates no task for the second. Read the

@@ -150,7 +150,7 @@ printf 'refs/heads/test abc refs/heads/test def\\n' | bash "''' + hook + '''"
         stubs = '''
 gate_lock() { :; }; gate_cancel_watch() { :; }; gate_unlock() { :; }
 note() { :; }; run_lane_go() { :; }; run_bg_wait() { :; }; verdict() { :; }
-run() { echo "STEP $*"; }; run_bg() { run "$@"; }; run_lane() { run "$@"; }
+run() { echo "STEP $*"; }; run_bg() { run "$@"; }; run_lane() { echo "LANE $1"; run "$@"; }
 '''
         for mode in ("push", "parity", "all"):
             self.env["HAF_GATE"] = mode
@@ -163,6 +163,14 @@ run() { echo "STEP $*"; }; run_bg() { run "$@"; }; run_lane() { run "$@"; }
                           "mesh layout drill", "prep drill", "deploy drill", "Workshop compaction drill",
                           "rig_anim drill", "vehicle_rig drill", "blender oracle tests"):
                 self.assertEqual("STEP " + label in result.stdout, mode != "push", result.stdout)
+            # The game drill builds the plugin itself, so it is queued LAST on the lane: started beside the drills it
+            # built the project at the same moment as the buffer hook drill (the review of PR #312).
+            if mode != "parity":
+                last = [line for line in result.stdout.splitlines() if line.startswith("STEP ")][-1]
+                self.assertTrue(last.startswith("STEP TechRequireAll game drill"), last)
+                self.assertIn("tools/tech_requires_all_game_drill.sh", last)
+                self.assertNotIn("HAF_DRILL_", last)
+                self.assertIn("LANE TechRequireAll game drill", result.stdout)
 
     def test_gate_stop_request_signals_the_shell_before_it_takes_a_lock(self):
         self.env["HAF_GATE_CANCEL_FILE"] = (self.path / "cancel").as_posix()

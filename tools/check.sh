@@ -349,13 +349,6 @@ push_step run_bg "editor scripts compile (Roslyn)" bash "$ROOT/tools/editor_comp
 push_step run_bg "registry engine drill (SingleSourceRegistry on real files)" bash "$ROOT/tools/registry_engine_drill.sh"
 push_step run_bg "backup dedup drill (BackupDedup on real files: unchanged means the bytes)" bash "$ROOT/tools/backup_dedup_drill.sh"
 push_step run_bg "GPU buffer hook drill (real Harmony adapters and configuration)" bash "$ROOT/tools/buffer_hook_drill.sh"
-# THE TECHREQUIREALL HOOKS AGAINST THE GAME'S OWN ASSEMBLIES (2026-11-23). The unit suite holds the pure rules
-# (TechRequireAllRules); the hook bodies - the ALL rule in the state update, the locked enqueue, the cascading removal's
-# guard - run only here. The 2026-11-23 review planted `names.Length < 2` -> `< 3` in StillLocked (a technology with two
-# prerequisites unlocks on either one): 2,908 of 2,908 unit tests stayed green, this drill failed four checks, and no
-# gate ran it. It reads the installed game's Managed folder (HK_MANAGED, default the Steam path) and needs neither Unity
-# nor Blender; without the game it SKIPs. It drills the plugin the first step built (HAF_DRILL_PLUGIN_PREBUILT=1).
-push_step run_bg "TechRequireAll game drill (the hooks against the installed game's assemblies: the ALL rule, the locked enqueue and the cascading removal, with a list and without one; SKIP without the game)" env HAF_DRILL_PLUGIN_PREBUILT=1 bash "$ROOT/tools/tech_requires_all_game_drill.sh"
 # THE NATIVE FBX READER, step 1 (2026-10-31): the binary record tree (editor/FbxDocument.cs) against an independent
 # Python reader, record for record, over every FBX the project holds, the recipes' FBX sources and generated fixtures.
 # No Blender in it: the claim is two readers written apart agreeing on every record, property and array.
@@ -400,6 +393,19 @@ push_step run_lane "worker thread (no main-thread Unity API inside a Task.Run bo
 push_step run_lane "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
 push_step run_lane "bake-test golden checksums (SKIP without the project)" bash "$ROOT/tools/check-goldens.sh"
 push_step run_lane "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
+# THE TECHREQUIREALL HOOKS AGAINST THE GAME'S OWN ASSEMBLIES (2026-11-23). The unit suite holds the pure rules
+# (TechRequireAllRules); the hook bodies - the ALL rule in the state update, the locked enqueue, the cascading removal's
+# guard - run only here. The 2026-11-23 review planted `names.Length < 2` -> `< 3` in StillLocked (a technology with two
+# prerequisites unlocks on either one): 2,908 of 2,908 unit tests stayed green, this drill failed four checks, and no
+# gate ran it. It reads the installed game's Managed folder (HK_MANAGED, default the Steam path) and needs neither Unity
+# nor Blender; without the game it SKIPs.
+# LAST ON THE LANE, not started beside the drills: the script builds the plugin itself (so it judges the tree being
+# pushed, and a tree that does not build fails here by name), and the buffer hook drill builds the same project the
+# moment the drills start - the two at once failed one round in ten on each other's files (the review of PR #312). By the
+# end of the lane, minutes later, nothing else builds or reads bin/Release.
+# A game update that changes a hooked method fails this step, and so every push, until the hooks follow it: that is also
+# when the feature is broken in the game.
+push_step run_lane "TechRequireAll game drill (the hooks against the installed game's assemblies: the ALL rule, the locked enqueue and the cascading removal, with a list and without one; SKIP without the game)" bash "$ROOT/tools/tech_requires_all_game_drill.sh"
 run_lane_go
 run_bg_wait
 
