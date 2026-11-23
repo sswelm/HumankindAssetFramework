@@ -16,7 +16,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   - **The defect:** the fallback of `ParseModels` (taken when `pack.json` will not parse as JSON) read floats with
     two patterns copied from dial to dial. `-?[\d.eE+]+` has no `-` inside: `1.5e-2` stopped at the `e`, the parse of
     `1.5e` failed, and the dial came back as its default. `-?[0-9.]+`, on eleven dials, has no exponent: `1.5e+2`
-    read 1.5. The first pattern also sat in the district fallback (`footprintMeshFlatHeight`) and in the pack tuning
+    and `1.5e-2` both read 1.5. The first pattern also sat in the district fallback (`footprintMeshFlatHeight`) and in the pack tuning
     table's `scale`, which is read by pattern on the main path: a rule with `"scale": 2.5e-1` was dropped without a
     word.
   - **The fix:** one pattern, `UniversalInject.JsonNumber`, in all 40 places (38 in `ParseModels`, `position`'s three
@@ -47,8 +47,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     the default culture of every thread in the test domain. The environment variable `HAF_TEST_CULTURE` runs the
     suite under another culture. Its name must be one the runtime lists, as written: Windows makes up a dot-decimal
     culture for any well-formed tag, and under `xx-YY` or `en-UK` the first version of this change ran the whole
-    suite green (the PR's review). Any other name now fails every test and says why. The push gate removes the
-    variable for its own run of the suite.
+    suite green (the PR's review). Any other name now fails the run, and the output says why at `dotnet test`'s
+    default verbosity. The push gate removes the variable, in any spelling of its name (PowerShell's
+    `$env:haf_test_culture` reaches bash in lower case), before its own run of the suite.
+  - **From outside (`Tests/test_culture_override.py`, in the gate and in CI):** a run of `dotnet test` with a listed
+    name passes under it, and with `en-UK`, `xx-YY` or `nl_NL` fails and prints the sentence. A module initializer
+    that swallowed the refusal passed all 2,923 tests (the PR's second review); no test inside the assembly can
+    see that.
   - **New tests (`Tests/TestCultureTests.cs`, 15 cases; the suite is 2,923):** the forced culture, the instance and
     not only its name, is in force on the test thread, a new thread, a thread-pool worker and a parallel loop; the
     default is comma-decimal; an unlisted or misspelled name is refused; and every float a pack can set (the shared
@@ -59,12 +64,15 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     the bootstrap's culture line removed, the two thread tests fail on the author's Dutch machine too (the first
     version compared names, and both cultures are called nl-NL there). With the listed-name check removed, the five
     refusal cases fail.
-  - **The whole suite passes** under nl-NL (the default), en-US and tr-TR; the PR's CI passed on the en-US runner.
+  - **The whole suite passes** under nl-NL (the default), en-US and tr-TR, and in the PR's CI. CI now prints the
+    runner's own culture before the tests, so that a pass on a dot-decimal machine is in the log.
   - **Found by the review, not fixed here (a runtime defect, in the Review-Backlog):** the regex fallback does not
-    read a number in exponent form whole. `1.5e-2` comes back as the default, `1.5e+2` as 1.5 on eleven dials.
+    read a number in exponent form whole. On 23 float dials `1.5e-2` comes back as the default; on the other
+    eleven it reads 1.5, as `1.5e+2` does.
   - **Not covered:** the `muzzleOffset` and `handPropAngles` strings (parsed inside the injection code, not in a
-    function a test can call); formatting in log lines, warnings and windows (four `InvariantCulture` plants
-    there passed the suite); and culture-sensitive casing: the default culture is not Turkish.
+    function a test can call); what the code FORMATS (five `InvariantCulture` plants in formats passed the suite:
+    the roughness value the F8 window writes back to the config, a cache key of the `.max` reader, a validator
+    warning, a report's size and a log line); and culture-sensitive casing: the default culture is not Turkish.
 
 - **The push gate runs the TechRequireAll game drill (2026-11-23).** From the critical review of that day: the unit
   suite holds the pure rules (`TechRequireAllRules`), and the hook bodies in `Patches/TechRequireAllPatch.cs` (the ALL
@@ -77,19 +85,25 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     SKIPs, and a SKIP fails the push unless `HAF_ALLOW_SKIP=1` (the gate's rule for every missing prerequisite). CI
     has no game and does not run it.
   - **Why last on the lane:** the script builds the plugin itself, so it judges the tree being pushed. The buffer
-    hook drill builds the same project the moment the drills start; the two builds at once failed one round in ten
-    on each other's files (measured in the PR's review). At the end of the lane nothing else builds the plugin.
-  - **A wrong folder is named:** `HK_MANAGED` pointing at a folder that is not the game's `Managed` folder (the
-    game's root, an empty folder) fails with a sentence that says so. Before, the drill died on its first load with
-    a `FileNotFoundException`.
+    hook drill builds the same project the moment the drills start; the two builds at once, with a recompile forced
+    in every round, failed one round in ten on each other's files (measured in the PR's review). At the end of the
+    lane nothing else builds the plugin. The lane is the gate's longest path, so the gate is about 5 s longer.
+  - **A wrong folder is named:** `HK_MANAGED` pointing at a folder without one of the three game assemblies the
+    drill loads by name (the game's root, an empty folder) fails with a sentence that says so. Before, the drill died
+    on its first load with a `FileNotFoundException`; a folder that holds those three and lacks the rest still does.
+  - **The stage is the script's:** the first pass runs with `HAF_DRILL_STAGE=full` whatever the shell exports. With
+    `load` or `nolist` left over from a hand run the script printed PASS on 12 or 24 checks instead of 47 (the PR's
+    second review).
   - **A game update can fail the push:** if an update changes a hooked method, this step fails on every push until
     the hooks follow. That is also when the feature is broken in the game.
   - **The temp sweeper owns the drill's config folder** (`haf-techall-drill-<guid>` under `%TEMP%`): the drill
     removes it at exit, and a killed drill left it for good.
   - **Checked:** the drill passes on master and fails (rc 1, four checks) with the plant; `HK_MANAGED` pointed at a
     missing folder exits 3 (SKIP), at an empty folder and at the game's root exits 1 with the sentence;
-    `Tests/test_parallel_gate.py` requires the step in the push and all modes, on the lane and last, and its absence
-    in the parity mode, and fails with the step removed or started beside the drills.
+    `Tests/test_parallel_gate.py` requires the step in the push and all modes, on the lane and last, with exactly
+    its command, and its absence in the parity mode, and fails with the step removed, started beside the drills or
+    its command replaced. `Tests/test_tech_drill_script.py` (5 tests, in the gate and in CI) holds the script's
+    statuses without the game; `Tests/test_temp_sweep.py` holds the sweeper's new name.
   - **What the drill itself does not hold** (planted in the PR's review: 11 of 18 hook plants fail the drill, 7
     pass it, 5 of those matter in the game): see [Review-Backlog](docs/Review-Backlog.md), *Five hook behaviours
     the game drill does not hold*. The gate now runs the drill as it is; widening it is separate work.

@@ -110,7 +110,7 @@ namespace HumankindAssetFramework.Tests
         public void EveryFloatDialAPackCanSet_ReadsAFractionTheSameThroughTheRegexFallback()
         {
             var keysField = typeof(UniversalInject).GetField("registryConfigKeys", BindingFlags.NonPublic | BindingFlags.Static);
-            Assert.NotNull(keysField);
+            Assert.True(keysField != null, "UniversalInject.registryConfigKeys was not found (renamed? this test takes its fields from it)");
             var keys = (System.Collections.Generic.HashSet<string>)keysField.GetValue(null);
             var floats = typeof(ModelEntry).GetFields(BindingFlags.Public | BindingFlags.Instance)
                 .Where(f => f.FieldType == typeof(float) && keys.Contains(f.Name)).OrderBy(f => f.Name, System.StringComparer.Ordinal).ToArray();

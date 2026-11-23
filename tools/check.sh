@@ -3,8 +3,9 @@
 # build, a failing unit test, a broken doc link, or a drifted registry schema. Wired as the pre-push hook (tools/git-hooks/pre-push);
 # also runnable by hand any time:  bash tools/check.sh   (lowercase tools/ — this repo, unlike ENCReload's Tools/)
 #
-# Deliberately NOT here (too slow / need Unity or the game): deploy_regression.sh (Blender golden-master), the
-# in-editor Feature Test, and the in-game binding report (haf_bindings_report.txt). The source-only steps take
+# Deliberately NOT here (too slow / need Unity or a RUNNING game): deploy_regression.sh (Blender golden-master), the
+# in-editor Feature Test, and the in-game binding report (haf_bindings_report.txt). One step reads the INSTALLED game's
+# assemblies without starting it: the TechRequireAll game drill (2026-11-23). The source-only steps take
 # seconds; with the Unity-backed drills (in parallel since 2026-10-11, the source guards on a lane beside them since
 # 2026-10-29) the push takes a few minutes.
 #
@@ -263,12 +264,20 @@ push_step run "plugin build (dotnet build -c Release)" dotnet build "$ROOT/Human
 #    Under the suite's OWN culture (Tests/TestBootstrap.cs forces nl-NL): HAF_TEST_CULTURE is a hand tool for looking
 #    at another culture, and a shell that still exports en-US from such a look would make every later push run the
 #    culture-blind suite the bootstrap replaced, with the same "Passed" line (the review of PR #313).
-push_step run "plugin unit tests (dotnet test)" env -u HAF_TEST_CULTURE dotnet test "$ROOT/Tests/HumankindAssetFramework.Tests.csproj" -c Release --nologo -v q
+#    In EVERY spelling: a Windows environment name is one name to the test host whatever its case, and three to bash.
+#    `$env:haf_test_culture = 'en-US'` in PowerShell reaches this shell in lower case, an `env -u HAF_TEST_CULTURE`
+#    left it standing, and the suite ran under en-US (the second review of that PR).
+for culture_var in $(compgen -e | grep -ix 'HAF_TEST_CULTURE'); do unset "$culture_var"; done
+push_step run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/HumankindAssetFramework.Tests.csproj" -c Release --nologo -v q
 
 # The gate's own regression tests head the lane: they time subprocesses (a gate's workers, a shell sourcing the oracle
 # wrapper) and timed out under the thirteen parity drills - which the push no longer runs (2026-10-30). The oracle tests
 # belong to the parity mode, where the record machinery is used.
 push_step run_lane "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
+# The suite's culture override seen from outside (it runs the assembly the unit-test step just built): a listed name runs
+# the suite under it, a made-up one fails the run and says why. No test inside the assembly can hold what its own
+# module initializer does with a refusal.
+push_step run_lane "test culture override tests (a listed name is honoured, a made-up one fails the run and says why)" python "$ROOT/Tests/test_culture_override.py"
 push_step run_lane "deploy timing wrapper tests (runtime failures, oracles and isolated artifacts)" python "$ROOT/Tests/test_deploy_time.py"
 # push-only like the gate regression tests above it (2026-11-10): it times bash-heavy sweeps with a 120 s limit and took
 # 113-206 s under the thirteen parity drills - two parity runs withheld a valid stamp over it; the push runs it alone in 27-46 s
@@ -396,6 +405,9 @@ push_step run_lane "worker thread (no main-thread Unity API inside a Task.Run bo
 push_step run_lane "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
 push_step run_lane "bake-test golden checksums (SKIP without the project)" bash "$ROOT/tools/check-goldens.sh"
 push_step run_lane "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
+# The game drill's own statuses, without the game: a missing folder is a SKIP and never a PASS, a folder that is not the
+# game's is a FAIL that names it, every pass sets its own stage (the second review of PR #312: none of it was tested).
+push_step run_lane "TechRequireAll drill script tests (a missing game is a SKIP, a wrong folder a named FAIL, every pass sets its stage)" python "$ROOT/Tests/test_tech_drill_script.py"
 # THE TECHREQUIREALL HOOKS AGAINST THE GAME'S OWN ASSEMBLIES (2026-11-23). The unit suite holds the pure rules
 # (TechRequireAllRules); the hook bodies - the ALL rule in the state update, the locked enqueue, the cascading removal's
 # guard - run only here. The 2026-11-23 review planted `names.Length < 2` -> `< 3` in StillLocked (a technology with two
@@ -404,8 +416,9 @@ push_step run_lane "exit status (no gate script reads a status from the end of a
 # nor Blender; without the game it SKIPs.
 # LAST ON THE LANE, not started beside the drills: the script builds the plugin itself (so it judges the tree being
 # pushed, and a tree that does not build fails here by name), and the buffer hook drill builds the same project the
-# moment the drills start - the two at once failed one round in ten on each other's files (the review of PR #312). By the
-# end of the lane, minutes later, nothing else builds or reads bin/Release.
+# moment the drills start - the two at once, with a recompile forced in every round, failed one round in ten on each
+# other's files (the review of PR #312; in the gate the plugin's build stamp forces that recompile whenever the minute
+# has turned). By the end of the lane, minutes later, nothing else builds or reads bin/Release.
 # A game update that changes a hooked method fails this step, and so every push, until the hooks follow it: that is also
 # when the feature is broken in the game.
 push_step run_lane "TechRequireAll game drill (the hooks against the installed game's assemblies: the ALL rule, the locked enqueue and the cascading removal, with a list and without one; SKIP without the game)" bash "$ROOT/tools/tech_requires_all_game_drill.sh"

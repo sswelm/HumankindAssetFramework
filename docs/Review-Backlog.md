@@ -1820,9 +1820,10 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   same defect sat in two more readers and went with it: the district fallback's `footprintMeshFlatHeight`, and the
   pack tuning table's `scale`, which is read by pattern on the main path (a rule with `"scale": 2.5e-1` was dropped
   without a word). Original: the fallback runs when `pack.json` will not parse as JSON. Its float patterns were
-  `-?[\d.eE+]+` (no `-` inside, so `1.5e-2`, `1e-05` and `9.999999747378752e-6` stopped at the `e`: the dial came back
-  as its default, `position` as 0,0,0) and, on eleven dials (`moveTilt`, `turnRate`, `turnBank`, the `gunElev*` and
-  `hug*` dials, `combatZ`, `rotorSpinSpeed`), `-?[0-9.]+` (no exponent at all: `1.5e+2` read 1.5).
+  `-?[\d.eE+]+` (no `-` inside, so `1.5e-2`, `1e-05` and `9.999999747378752e-6` stopped at the `e`: on 23 dials the
+  value came back as the default, and a number of `position` as 0) and, on eleven dials (`moveTilt`, `turnRate`,
+  `turnBank`, the `gunElev*` and `hug*` dials, `combatZ`, `rotorSpinSpeed`), `-?[0-9.]+` (no exponent at all: `1.5e+2`
+  and `1.5e-2` both read 1.5, and `9.999999747378752e-6` read 10, a million times too large).
 - **Five hook behaviours the game drill does not hold (2026-11-23, planted in the review of PR #312).** Each plant in
   `Patches/TechRequireAllPatch.cs` passed the unit suite and the drill: (1) the config switch inverted (:71; the drill
   never binds `Plugin.TechRequireAllOn`, so a feature that is off everywhere passes); (2) queueing a listed technology

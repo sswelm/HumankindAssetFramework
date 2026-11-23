@@ -25,7 +25,7 @@ namespace HumankindAssetFramework.Tests
         static FieldInfo[] FloatDials()
         {
             var keysField = typeof(UniversalInject).GetField("registryConfigKeys", BindingFlags.NonPublic | BindingFlags.Static);
-            Assert.NotNull(keysField);
+            Assert.True(keysField != null, "UniversalInject.registryConfigKeys was not found (renamed? these tests take their fields from it)");
             var keys = (HashSet<string>)keysField.GetValue(null);
             var floats = typeof(ModelEntry).GetFields(BindingFlags.Public | BindingFlags.Instance)
                 .Where(f => f.FieldType == typeof(float) && keys.Contains(f.Name)).OrderBy(f => f.Name, System.StringComparer.Ordinal).ToArray();

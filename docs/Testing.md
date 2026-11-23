@@ -21,16 +21,20 @@ took the machine's culture: the author's machine is Dutch and CI's runner is en-
 accident. Setting the environment variable `HAF_TEST_CULTURE` to a culture name runs the suite under that culture
 (`tr-TR` for the dotless i, `en-US` to see what a dot-decimal machine hides). The name must be one the runtime lists,
 spelled as it lists it: Windows makes up a dot-decimal culture for any well-formed tag (`xx-YY`, `en-UK`), so any other
-name fails every test and says why. The push gate removes the variable for its own run of the suite.
+name fails every test that touches the test assembly's code; the sentence that says why is in the output at
+`dotnet test`'s default verbosity (under `-v q` only the failures show). The push gate removes the variable, in any
+spelling of its name, before its own run of the suite.
 `Tests/TestCultureTests.cs` holds that the forced culture, the instance itself and not only its name, is in force on
 the test thread and on worker threads, and gives every float a pack can set (the shared schema's, the plugin-only
 `rotorSpinSpeed`, and `position`) a fraction that must read the same through the regex fallback of `ParseModels` as
 through the JSON parser. Not held by any test: the `muzzleOffset` and `handPropAngles` strings, which are parsed
-inside the injection code; formatting in log lines, warnings and windows; and culture-sensitive casing (the default
-culture is not Turkish). How a number may be SPELLED is held beside it, in `Tests/RegexFallbackNumberTests.cs`: every
-float dial, `position`, the district fallback's flat height and a unit-scale rule read twelve spellings (plain,
-negative, and exponent forms with either sign and either case) as the JSON parser and the runtime's own parse do, and
-a dial left out of an entry defaults the same through the fallback as through the parser.
+inside the injection code; what the code formats (a config value the F8 window writes back, a cache key, warnings,
+reports and log lines); and culture-sensitive casing (the default culture is not Turkish).
+`Tests/test_culture_override.py` holds the override from outside the suite: a made-up name fails the run. How a number
+may be SPELLED is held beside it, in `Tests/RegexFallbackNumberTests.cs`: every float dial, `position`, the district
+fallback's flat height and a unit-scale rule read twelve spellings (plain, negative, and exponent forms with either
+sign and either case) as the JSON parser and the runtime's own parse do, and a dial left out of an entry defaults the
+same through the fallback as through the parser.
 
 The unit suite is a deliberate, bounded suite, not a coverage target: it guards the functions where bugs have actually
 hidden, and stops there on purpose. What it cannot reach — the ~18k lines that reflect into a running game — is not
