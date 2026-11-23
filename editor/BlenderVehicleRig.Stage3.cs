@@ -8,6 +8,8 @@
 //     rock a RootHull bone (0,0,0)-(0,0.2,0) beneath it carrying the body; one Wheel_%02d bone per cluster at the anchor's
 //     centre, its tail along the axle (axle_axis: X/Y/Z forced, else the anchor's thinnest extent, the first on a tie) by
 //     max(0.05, largest extent * 0.25), parented to the body bone; leaving edit mode builds the rest (RestFromEditBones);
+//     under the tagged argument wheelcentre=area (2026-11-23, a screw with an odd blade count) a wheel bone leaves the box
+//     centre for its cluster's area-weighted surface centroid, across the axle only (AreaCentroid; rotors keep their hub);
 //   - the RUDDER, PRESERVE and FLIP name sets (find_opt: a missing name is a WARN) and their lines;
 //   - rigid skinning: every mesh the script holds (the scene's meshes with vertices, in scene order) loses its vertex groups
 //     and gets one group, its bone (its wheel cluster's, else the body bone), every vertex at weight 1, an Armature modifier
@@ -242,7 +244,7 @@ public static partial class BlenderVehicleRig
             var cl = clusters[i];
             var ax = cl.axle ?? AxleAxis(a.AxisArg, cl.sz); wheelAxes.Add((float[])ax.Clone());   // a rotor carries its axle; a wheel infers it
             double q = cl.m * 0.25; float len = (float)(q > 0.05 ? q : 0.05);   // max(0.05, max(s) * 0.25) into the float multiply (Python: 0.05 on a NaN)
-            float[] t; float tailRoll = 0f;
+            float[] t; float tailRoll = 0f; float[] pivot = cl.c;
             if (cl.rotor && cl.tail)
             {
                 // the TAIL FAN: the bone runs along the in-disc direction nearest world up (else nearest +Y), align_roll(axle x that)
@@ -258,9 +260,27 @@ public static partial class BlenderVehicleRig
             {
                 // wheels along +axle; the MAIN rotor along -axle (ax * -1.0 first, then the length)
                 float dirn = cl.rotor ? -1f : 1f;
-                t = new[] { (float)(cl.c[0] + (float)((float)(ax[0] * dirn) * len)), (float)(cl.c[1] + (float)((float)(ax[1] * dirn) * len)), (float)(cl.c[2] + (float)((float)(ax[2] * dirn) * len)) };
+                if (a.WheelCentreArea && !cl.rotor)
+                {
+                    // wheelcentre=area: the pivot leaves the box centre for the cluster's surface centroid, across the axle only
+                    // (Vector(tuple(c[k] if ax[k] != 0.0 else centroid[k])): the Python floats into float32)
+                    var members = new List<BlenderRigAnim.SceneObject>();
+                    foreach (var wn in cl.names) members.Add(Find(wn));   // found once already, at the clustering
+                    var ac = AreaCentroid(members);
+                    string wheel = string.Format(CultureInfo.InvariantCulture, "Wheel_{0:00}", i);
+                    if (ac == null) { s.Logs3.Add("VEHICLE WARNING: wheel centre: " + wheel + " has no surface area - the box centre kept"); Note(s, "a wheel without surface area under wheelcentre=area"); }
+                    else
+                    {
+                        var piv = new float[3];
+                        for (int k = 0; k < 3; k++) piv[k] = ax[k] != 0f ? cl.c[k] : (float)ac[k];
+                        s.Logs3.Add("VEHICLE wheel centre: " + wheel + " at its surface centroid (" + P3(piv[0]) + "," + P3(piv[1]) + "," + P3(piv[2]) + "), "
+                            + BlenderRigAnim.PyFixed(VecLength(Sub(piv, cl.c)), 3) + " from the box centre");
+                        pivot = piv; Note(s, "a wheel bone at its surface centroid (wheelcentre=area)");
+                    }
+                }
+                t = new[] { (float)(pivot[0] + (float)((float)(ax[0] * dirn) * len)), (float)(pivot[1] + (float)((float)(ax[1] * dirn) * len)), (float)(pivot[2] + (float)((float)(ax[2] * dirn) * len)) };
             }
-            int id = AddBone(string.Format(CultureInfo.InvariantCulture, "Wheel_{0:00}", i), (float[])cl.c.Clone(), t, body);
+            int id = AddBone(string.Format(CultureInfo.InvariantCulture, "Wheel_{0:00}", i), (float[])pivot.Clone(), t, body);
             roll[id] = tailRoll; clusterBoneIds.Add(id);
             foreach (var wn in cl.names) boneOf[wn] = boneNames[id - RigBoneBase];
         }
@@ -968,6 +988,43 @@ public static partial class BlenderVehicleRig
     }
 
     static string P2(float v) => BlenderRigAnim.PyFixed(v, 2);
+
+    /// <summary>_area_centroid: the area-weighted centroid of the parts' surfaces in world space, in Python floats; null when the
+    /// surface has no area (or a non-finite one). Per face a fan of triangles from its first corner, each point
+    /// <c>matrix_world @ v.co</c> (mathutils float32); every sum a plain double addition in face order, as the script writes them.</summary>
+    internal static double[] AreaCentroid(IEnumerable<BlenderRigAnim.SceneObject> parts)
+    {
+        double sa = 0.0, sx = 0.0, sy = 0.0, sz = 0.0;
+        foreach (var o in parts)
+        {
+            var it = VehicleProbe.ToRowMajor(o.World); var m = o.Mesh;
+            var pts = new float[3 * m.Vertices];
+            for (int v = 0; v < m.Vertices; v++)
+            {
+                float x = m.Positions[3 * v], y = m.Positions[3 * v + 1], z = m.Positions[3 * v + 2];
+                pts[3 * v] = MulPointRow(it, 0, x, y, z); pts[3 * v + 1] = MulPointRow(it, 1, x, y, z); pts[3 * v + 2] = MulPointRow(it, 2, x, y, z);
+            }
+            for (int f = 0; f < m.FaceCount; f++)
+            {
+                int c0 = m.CornerStart(f), n = m.CornerCount(f); int ia = 3 * m.Faces[c0];
+                double ax = pts[ia], ay = pts[ia + 1], az = pts[ia + 2];
+                for (int k = 1; k < n - 1; k++)
+                {
+                    int ib = 3 * m.Faces[c0 + k], ic = 3 * m.Faces[c0 + k + 1];
+                    double bx = pts[ib], by = pts[ib + 1], bz = pts[ib + 2], cx = pts[ic], cy = pts[ic + 1], cz = pts[ic + 2];
+                    double ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
+                    double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+                    double w = Math.Sqrt(nx * nx + ny * ny + nz * nz);   // twice the triangle's area: the factor cancels
+                    sa = sa + w;
+                    sx = sx + w * (ax + bx + cx);
+                    sy = sy + w * (ay + by + cy);
+                    sz = sz + w * (az + bz + cz);
+                }
+            }
+        }
+        if (!(sa > 0.0) || double.IsInfinity(sa)) return null;
+        return new[] { sx / (3.0 * sa), sy / (3.0 * sa), sz / (3.0 * sa) };
+    }
 
     /// <summary>One connected island of an oar part (_oar_islands): its vertex indices in walk order, their world points (shared by
     /// reference: the roll and the length rewrite them in place) and the points' mean.</summary>

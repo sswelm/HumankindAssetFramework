@@ -10,6 +10,52 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Vehicle Lab: Wheel centre, for a screw that wobbles (2026-11-23).** Reported by the user on the H.L. Hunley
+  submarine: "there is a problem making the screw rotate correctly, the middle of the axis is way off when rotating".
+  - **Measured first.** The Lab puts a wheel bone at the middle of the wheel's bounding box. The Hunley's screw has
+    three blades (0.60 wide, hub radius 0.067). In the GLB the user generated, `Wheel_00` sat at (-0.041, 6.006, 0.258);
+    the hub, fitted as a circle on its own vertices, is at (0.00, 0.316) across the shaft. That is 0.072 apart: the hub
+    orbited by more than its own radius. An odd blade count does this to every screw - one blade points up, two point
+    down and out, and the box is not centred on the shaft. With an even count the box is centred.
+  - **Three candidates, measured on that part** against the fitted hub: the box centre 0.072 off; the centre of the
+    smallest circle around the part 0.014 (the three tips do not lie on one circle); the area-weighted centroid of the
+    surface 0.006. The centroid of a shape that maps onto itself under a turn about its axle lies ON the axle, whatever
+    the blade count, and does not depend on how finely the surface is cut into faces.
+  - **The setting.** *Spin — wheels & tracks* ▸ **Wheel centre**: *Box centre (round wheels)*, the default, which every
+    earlier recipe bakes exactly as before; or *Surface centroid (screws, propellers)*. Saved in the recipe as
+    `wheelCentre`, sent to the script as the tagged argument `wheelcentre=area`. It is a choice, not a detection: whether
+    a part is a screw is something the user can see and a threshold can only guess. It covers every part marked Wheel;
+    parts that share a hub are weighed together (a propeller cut into a hub and separate blades); rotors keep their
+    hub. Only the pivot moves, and only across the axle - along it the box centre stays. The clustering, the axle
+    direction, the rolling-contact speeds and the tread's wheel geometry still read the box. Greyed out on the
+    source-skeleton fast path, where the source's own bones are the pivots and the tag is not sent.
+  - **Both routes.** `vehicle_rig.py` (`_area_centroid`: per face a fan of triangles from its first corner, plain
+    double sums in face order) and the C# port (`BlenderVehicleRig.AreaCentroid`, the same sums). Generate prints
+    `VEHICLE wheel centre: Wheel_00 at its surface centroid (0.005,6.006,0.312), 0.071 from the box centre`; a wheel
+    with no surface area keeps its box centre and says so.
+  - **On the Hunley:** the bone in the generated GLB is now at (0.005, 6.006, 0.312), 0.006 from the fitted hub (was
+    0.072); the same recipe without the setting gives the user's GLB's bone to the digit.
+  - **Held by:** the vehicle_rig drill (Blender against the C# at all five stages and the exported GLB byte for byte)
+    on the Hunley with and without the setting and on seven new fixtures - `fx_r_wheel_centre` (a three-bladed screw
+    whose box centre is 0.19 off its shaft, a fan of two parts, a rotor that must stay), `_box` (the same model
+    without the tag), `_x` (a forced axle), `_flat` (a wheel of one zero-area triangle), and the setting on live
+    tracks, where the tread's wrap bones copy wheel bones that no longer sit at their clusters' box centres:
+    `fx_r_tracks_centre` (the nine carriers), `fx_r_tracks_hybrid_centre` (the conveyor's link bones) and
+    `fx_links_centre` (rigid links). The drill fails if one of the seven is left to Blender by name or the C# never
+    takes the branch. Measured with them: 178 jobs, 172 equal, 6 left by name as before, 124 exports byte-identical;
+    unit tests that take their
+    expectation from the shape - the bone ON the shaft for 2, 3, 4, 5 and 7 blades, a two-part cluster against areas
+    worked out by hand, a four-corner face against its two triangles - in C# and for the script's helper in Python.
+    Twelve planted defects (the tag ignored, every triangle weighing the same, the centroid on every axis, a rotor
+    moved too, only the anchor part weighed, the tag sent on the fast path, any `wheelcentre=` value accepted, the
+    bone's tail laid from the box centre; four in the script's helper) each fail at least one of those tests. The
+    first round caught eleven: the test screw's first blade stood at 90 degrees, which leaves the box centred in x,
+    so a tail laid from the box centre passed. The screw now starts at 20 degrees, off the shaft on both axes.
+  - **Not checked:** nothing was looked at in the Vehicle Lab's preview or in the game. Rotors, the gun and the
+    turret keep their box-based pivots. On a tracked vehicle the two routes agree, but whether a tread still LOOKS
+    right is not measured: its path is fitted to the wheels' boxes while its wrap bones follow the moved wheel bones.
+    The setting is one per model, not per wheel.
+
 - **Tech Tree viewer: a technology's title, description and image (2026-11-22, PR #309; the review's fixes in the PR after it).** Asked for by the user:
   "edit more, starting with the tech title and description and the ability to change the tech image".
   - **Where they live.** All three are in the technology's UI mapper (inherited from `Amplitude.UI.UIMapper`). In

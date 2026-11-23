@@ -147,6 +147,26 @@ For ordinary wheels, leave **Axle axis = Auto**, **Spin frames = 15**, and start
 backward, reverse the sign of **Spin degrees**. Tracks, trails, gun deployment/recoil, rotors, and wave rock reveal their
 own controls only when the corresponding roles are present.
 
+**A screw or propeller that wobbles: Wheel centre (2026-11-23).** A wheel bone sits at the middle of the wheel's bounding
+box. That is the axle of a round wheel, and of a propeller with an even number of blades. With an odd number (3, 5, 7) one
+blade points up while two point down and out, so the box is not centred on the shaft and the screw turns about a point
+beside it. Set **Wheel centre = Surface centroid (screws, propellers)** in *Spin — wheels & tracks* and press **Generate
+rig** again: the bone moves to the area-weighted middle of the wheel's surface, which lies on the shaft whatever the blade
+count. Generate prints where it went:
+
+```
+VEHICLE wheel centre: Wheel_00 at its surface centroid (0.005,6.006,0.312), 0.071 from the box centre
+```
+
+Measured on the H.L. Hunley's three-bladed screw (0.60 wide, hub radius 0.067): the box centre lies 0.072 off the shaft,
+the surface centroid 0.006. The setting covers every part marked **Wheel** in the model - parts that share a hub are
+weighed together, so a propeller cut into a hub and separate blades works too - and is saved in the recipe as
+`wheelCentre`. Rotors keep their hub. Only the pivot moves: the axle direction, the speeds and the tread's wheel geometry
+still read the box. On the source-skeleton fast path the source's own bones are the pivots, so the setting is greyed out
+there. Leave it at **Box centre** for round wheels: every earlier recipe bakes exactly as before. On a tracked vehicle
+keep **Box centre** as well: the tread's path is fitted to the wheels' boxes, and how a tread looks around wheel bones
+moved off them has not been judged.
+
 **Recoil, as Generate reports it (2026-11-07).** With **Recoil (fraction of tube)** set, Generate prints the breech
 clearance at full recoil:
 
@@ -474,6 +494,7 @@ Probe refreshes the part boxes on the next load.
 | Black cockpit becomes grey | Turn on **Keep black** and re-bake. |
 | Materials work at reduction 0 but break when reduced | Raise the triangle ceiling until mapping is stable. |
 | Tail rotor spins in the wrong plane | Adjust Tail-rotor axle/trim, then **Generate rig** again. |
+| A screw or propeller wobbles about a point beside its shaft | Odd blade count: set **Wheel centre = Surface centroid** in *Spin — wheels & tracks*, then **Generate rig** again. |
 | Wheels spin while parked or stay still while moving | Review the state-driven wheel recipe and `Spin[0..0]`/`Spin` roles. |
 | A flat animated donor rotor remains over your real rotor | In Model Factory's Runtime section enable **Silence donor VFX (flashes)**, Save settings, and relaunch. This suppresses donor VFX; it does not remove donor mesh geometry. |
 | First borrowed donor rotor sits too low | **Respawn after load** is only for models borrowing a donor's animated rotor, not models using their own generated rotor bones. |

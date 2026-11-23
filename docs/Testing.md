@@ -2822,7 +2822,17 @@ the first, a cube wheel whose tied extents give X, the tire listed twice, the ro
 a missing name in each set, a body part named `Mesh_Wheel_00`, an animated part joined into the hull), `fx_r_axis` (the axle
 forced to Z; a one-frame rock cycle), `fx_r_many` (101 clusters, the last `Wheel_100`; a 0.1-wide wheel on the 0.05 length
 floor; a hundred tied sizes), `fx_r_missing_wheel` (find()'s exit in stage 3, `EXIT:3:`; the exit fixtures now name their
-stage in a table). Eleven plants, one per rule, each caught on its own job with a row difference: the axle tie, the RootHull,
+stage in a table). **Wheel centre (2026-11-23, `wheelcentre=area`):** four more - `fx_r_wheel_centre` (a three-bladed screw
+whose box centre lies 0.19 off its shaft, a fan of a hub and one separate blade weighed together, a main rotor of a triangular
+plate that must keep its hub), `fx_r_wheel_centre_box` (the same model without the tag: no line, the box centres),
+`fx_r_wheel_centre_x` (the axle forced to X: the pivot keeps the box centre along X) and `fx_r_wheel_centre_flat` (a wheel of
+one zero-area triangle: the WARNING, the box centre kept); and three with the tag on LIVE TRACKS, every wheel cluster
+carrying an off-centre shard so its bone leaves the cluster's box centre, which the tread's wrap bones copy:
+`fx_r_tracks_centre` (the nine carriers), `fx_r_tracks_hybrid_centre` (the conveyor's link bones), `fx_links_centre` (rigid
+links). The drill requires all seven equal through the export and the C#'s own note of the branch. The drill states parity only - that the port repeats the script; that
+the bone lands ON the shaft is held by `Tests/VehicleRigWheelCentreTests.cs` and `WheelCentreTests` in
+`Tests/test_vehicle_rig_math.py`, whose expectations come from the shape (see the changelog entry of that date for the plants).
+Eleven plants, one per rule, each caught on its own job with a row difference: the axle tie, the RootHull,
 the one-frame cycle, the rudder/preserve precedence, the length floor, the stable sort, the 0.75 threshold, the name
 collision, the WARN lines, the exit, and a wheel bone's head moved by 1e-6 (caught on Ribauldequin). The first plant run
 reported all eleven caught when every job had died of a missing Newtonsoft.Json beside the plant's exe; the harness now
