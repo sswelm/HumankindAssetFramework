@@ -1815,15 +1815,31 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   queues with several parents per technology, always ended and kept parents in front — a port, not the method. The
   drill could run the real method with only the `SetSynchronizationDirty` call stripped, as it does for the removal.
 - ~~**The regex fallback of `ParseModels` does not read a number in exponent form (2026-11-23, measured in the review
-  of PR #313).**~~ **FIXED 2026-11-23** (the PR after it): every regex reader of a float takes one pattern,
-  `UniversalInject.JsonNumber`, and `Tests/RegexFallbackNumberTests.cs` gives every float dial twelve spellings. The
+  of PR #313).**~~ **FIXED 2026-11-23** (PR #315): the three readers that had the defect take one pattern,
+  `UniversalInject.JsonNumber`, and `Tests/RegexFallbackNumberTests.cs` gives every float dial fourteen spellings. The
   same defect sat in two more readers and went with it: the district fallback's `footprintMeshFlatHeight`, and the
   pack tuning table's `scale`, which is read by pattern on the main path (a rule with `"scale": 2.5e-1` was dropped
-  without a word). Original: the fallback runs when `pack.json` will not parse as JSON. Its float patterns were
-  `-?[\d.eE+]+` (no `-` inside, so `1.5e-2`, `1e-05` and `9.999999747378752e-6` stopped at the `e`: on 23 dials the
-  value came back as the default, and a number of `position` as 0) and, on eleven dials (`moveTilt`, `turnRate`,
-  `turnBank`, the `gunElev*` and `hug*` dials, `combatZ`, `rotorSpinSpeed`), `-?[0-9.]+` (no exponent at all: `1.5e+2`
-  and `1.5e-2` both read 1.5, and `9.999999747378752e-6` read 10, a million times too large).
+  without a word). Original: the fallback runs when a pack's entries cannot be read as JSON objects. Its float
+  patterns were `-?[\d.eE+]+` (no `-` inside, so `1.5e-2`, `1e-05` and `9.999999747378752e-6` stopped at the `e`: on 23
+  dials the value came back as the default, and a number of `position` as 0) and, on eleven dials (`moveTilt`,
+  `turnRate`, `turnBank`, the `gunElev*` and `hug*` dials, `combatZ`, `rotorSpinSpeed`), `-?[0-9.]+` (no exponent at
+  all: `1.5e+2` and `1.5e-2` both read 1.5, and `9.999999747378752e-6` read 10, a million times too large).
+- **Neither path clamps a float dial (2026-11-23, read in the review of PR #315; NOT fixed).** A value the registry
+  gives is used as given. Three consumers that an extreme value reaches: a unit-scale rule of `1e-30` (the guard is
+  only `> 0`) into the shared mesh buffer (`UniversalInject.ScaleEra.cs:346-364`); an entry `scale` of `1e-30` into
+  `UniversalInject.Muzzle.cs:1154-1160`; a `soundIdleInterval` of `1e-30`, with which `UniversalInject.Audio.cs:451-476`
+  plays the clip on every poll. The JSON path always read such values; since PR #315 the fallback reads them too
+  (before, a negative exponent came back as the default). The divisions are guarded (`PoseMath.cs:172`,
+  `Muzzle.cs:523` and `:531`, `Combat.cs:1036`). The pre-flight validator does not look at ranges for these dials.
+- **The JSON path reads `1e39`, `NaN` and `Infinity` as Infinity and NaN (2026-11-23, executed in the same review; NOT
+  fixed).** `float.TryParse` refuses `1e39` on the CLR and on Unity's Mono, so the pattern readers give the default
+  and a unit-scale rule of `1e39` is dropped without a warning; Newtonsoft does not refuse it, and
+  `PackValidator.cs:91` (`<= 0f`) and `Muzzle.cs:1154` let a non-finite value through.
+- **The integer dials of the fallback read a number written as a float as their default (2026-11-23, executed in the
+  same review; NOT fixed).** `attackRepeats` reads `3.0` and `2e0` as 1 where the JSON path gives 3 and 2;
+  `gunElevAxis` and `turretAxis` read `1.9` as 1 where the JSON path rounds to 2. The Factory writes these as plain
+  integers. The tuning table's `threshold` keeps a pattern of its own (`[0-9.eE+-]+`): it reads exponents and
+  negatives, and drops a row whose value is `1-2` without a word.
 - **Five hook behaviours the game drill does not hold (2026-11-23, planted in the review of PR #312).** Each plant in
   `Patches/TechRequireAllPatch.cs` passed the unit suite and the drill: (1) the config switch inverted (:71; the drill
   never binds `Plugin.TechRequireAllOn`, so a feature that is off everywhere passes); (2) queueing a listed technology
@@ -1982,8 +1998,8 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   (ENC unused), so deferred.
 - ~~**`idleAltInterval` default mismatch** (editor 25f / plugin 0f) — a pack.json missing the key gets idle-alt
   disabled instead of the documented 25s cadence.~~ **FIXED 2026-08-16** by the shared-schema field initializers
-  (one authoritative default = 25f, test-pinned; see the Framework-Review generic-parse row). **Half fixed, as four
-  reviews found (10-12 to 11-23):** that fix and its test covered the JSON path; the regex fallback kept its own
+  (one authoritative default = 25f, test-pinned; see the Framework-Review generic-parse row). **Half fixed, as the
+  reviews from 2026-10-12 on found:** that fix and its test covered the JSON path; the regex fallback kept its own
   literal `0f` until **2026-11-23**, when `RegexFallbackNumberTests.AFloatDialLeftOut_DefaultsTheSameThroughTheRegexFallback`
   began to hold every float dial's default on both paths.
 - ~~**`haf_districts.json` has no regex fallback**~~ — **STALE (duplicate): already struck above, fixed 2026-08-22.** `ParseDistricts` = `Usable(ParseDistrictsRaw(text))` with a per-entry try and `RegexDistricts` as the fallback. Original: — one malformed char disables ALL custom districts (the model

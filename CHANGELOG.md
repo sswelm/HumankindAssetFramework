@@ -10,32 +10,54 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
-- **The regex readers take a number in any JSON spelling, and the fallback's `idleAltInterval` default is the
+- **The regex readers take a number however it is spelled, and the fallback's `idleAltInterval` default is the
   schema's (2026-11-23).** Found by the review of the culture PR, whose fraction test passes because a plain decimal
   was always read right.
-  - **The defect:** the fallback of `ParseModels` (taken when `pack.json` will not parse as JSON) read floats with
-    two patterns copied from dial to dial. `-?[\d.eE+]+` has no `-` inside: `1.5e-2` stopped at the `e`, the parse of
-    `1.5e` failed, and the dial came back as its default. `-?[0-9.]+`, on eleven dials, has no exponent: `1.5e+2`
-    and `1.5e-2` both read 1.5. The first pattern also sat in the district fallback (`footprintMeshFlatHeight`) and in the pack tuning
-    table's `scale`, which is read by pattern on the main path: a rule with `"scale": 2.5e-1` was dropped without a
-    word.
-  - **The fix:** one pattern, `UniversalInject.JsonNumber`, in all 40 places (38 in `ParseModels`, `position`'s three
-    numbers among them). It takes a whole token or nothing: `2.5em` is not read as 2.5, the dial keeps its default.
-    The two old patterns disagreed there.
+  - **The defect:** the fallback of `ParseModels` read floats with two patterns copied from dial to dial.
+    `-?[\d.eE+]+` has no `-` inside: on 23 dials `1.5e-2` stopped at the `e`, the parse of `1.5e` failed, and the dial
+    came back as its default. `-?[0-9.]+`, on eleven dials, has no exponent: `1.5e+2` and `1.5e-2` both read 1.5. The
+    first pattern also sat in the district fallback (`footprintMeshFlatHeight`) and in the pack tuning table's
+    `scale`, which is read by pattern on the main path: a rule with `"scale": 2.5e-1` was dropped without a word.
+  - **When the fallback runs:** when the document does not parse as JSON, and also when it parses and no entry can be
+    mapped (a one-model pack with one refused value), or when `models` sits under a wrapper key.
+  - **The fix:** one pattern, `UniversalInject.JsonNumber`, in those three readers (40 captures, 38 of them in
+    `ParseModels`: 39 floats and the integer `attackRepeats`, which shared the first pattern). It is lenient on purpose: these readers exist for a file a hand has damaged, and the number is
+    often the damage. It reads the number a token starts with: a sign of either kind, digits and points, an exponent
+    when it is complete. `+1.5` reads 1.5, `0.5f` reads 0.5, `2.5em` reads 2.5.
+  - **Also:** a number in quotes is read (the JSON parser takes `"0.5"` for a float; the fallback never matched one).
+    In `position`, a suffix on x or y no longer costs the whole vector. The district reader, which pairs values with
+    districts by position, now matches every occurrence of the key: a height that is not a number takes its place
+    with the default and does not hand its place to the next district's.
   - **A second fix in the same lines:** a pack that needed the fallback and left `idleAltInterval` out got 0 (the
-    idle-alt one-shots off) where the JSON path gives the schema's 25. Four reviews carried it; the Review-Backlog had
-    marked it fixed on the strength of the JSON path alone.
-  - **Tests (`Tests/RegexFallbackNumberTests.cs`, 27 cases; the suite is 2,952):** every float a pack can set, and
-    `position`, in twelve spellings against the runtime's own parse and the JSON parser; tokens that are not wholly a
-    number; every float dial left out; the district fallback; the unit-scale rule. On the code before the fix 18 of
-    them fail. `PackTuningLegacyParityTests` loses its `1e-3` row, which held the parser to the legacy loop's defect,
-    and gains it as a second intended divergence (2 cases, both failing before the fix).
-  - **Planted in the fixed code, eight defects, all caught:** the lookahead removed, the exponent's `-` removed, one
-    dial put back on each old pattern (`turnRate`, `soundVolume`, `position`'s z), the default back to 0, the district
-    reader and the tuning table back on the old pattern.
-  - **On the real data:** ENC's `pack.json` holds no number in exponent form and names `idleAltInterval` on every
-    entry. Broken on purpose to force the fallback, its 49 models and 2,156 float values read the same as through the
-    JSON parser, before and after the fix. Nothing changes for the pack as it is.
+    idle-alt one-shots off) where the JSON path gives the schema's 25. Reviews carried it from 2026-10-12 on; the Review-Backlog had
+    marked it fixed on the strength of the JSON path alone. A quoted `"0"` still reads 0.
+  - **The first version of this fix was wrong, and the review caught it:** it refused any token that was not wholly
+    a number. `+1.5` and `0.5f`, which the old patterns read, came back as defaults, and in the district reader an
+    unread height shifted every later district's height by one. It was never merged.
+  - **Tests (`Tests/RegexFallbackNumberTests.cs`, 59 cases; the suite is 2,984):** every float a pack can set, and
+    `position`, in fourteen spellings against the runtime's own parse and the JSON parser; six spellings that are not
+    JSON; four things that are not numbers; quoted numbers on both paths; `idleAltInterval` with a value that is not
+    a number; a parseable document that still takes the fallback; every float dial left out; the district fallback,
+    its spellings and its alignment over three districts; the unit-scale rule; `attackRepeats`; one unreadable
+    number of `position`. `PackTuningLegacyParityTests` loses
+    its `1e-3` row, which held the parser to the legacy loop's defect, and gains it as a second intended divergence.
+  - **Old against new, token by token:** over 602,118 tokens (floats over the whole range in five spellings, and
+    about 4,500 hand-made shapes) all 597,675 valid numbers read right, where the first old pattern was wrong on
+    151,207 and the second on 270,819. Nothing an old pattern read correctly is lost. The one class that went from
+    a read to the default: a number past a float's range (`1e39`), which the second old pattern read as 1.
+  - **Planted in the fixed code, fourteen defects, all caught:** the lookahead back, the leading `+` removed, either
+    sign of the exponent removed, a lower-case `e` only, an exponent without digits accepted, the quotes removed,
+    `position`'s comma strict again, `turnRate` and `soundVolume` back on their old patterns, the default back to 0,
+    the district capture not optional, the district reader and the tuning table back on the old pattern.
+  - **On the real data:** nothing changes. ENC's `pack.json` (50 models) holds no number in exponent form and names
+    `idleAltInterval` on every entry. The old and the new readers were run over the source pack, the deployed pack,
+    the live district registry, its backup, and a corrupt district backup of 2026-08-20 that only the fallback can
+    read: the dump of all five is byte for byte the same. Through the fallback (forced by breaking a copy) the pack
+    reads as through the JSON parser: 1,700 dial floats, 150 numbers of `position` and 150 integers, none different
+    (a reviewer's count, on 50 models).
+  - **Not fixed, recorded in the Review-Backlog:** neither path clamps an extreme value (a `scale` of `1e-30` is now
+    read by the fallback as the JSON path always read it); the JSON path reads `1e39` as Infinity where the fallback
+    gives the default; the integer dials read `3.0` as their default.
   - **Needs a plugin build and deploy** to reach the game (`tools/deploy-plugin.sh`); not done by this PR.
 
 - **The unit suite runs under a comma-decimal culture on every machine (2026-11-23).** From the critical review of
