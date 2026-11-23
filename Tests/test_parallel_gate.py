@@ -177,8 +177,7 @@ run_bg() { run "$@"; }; run_lane() { echo "LANE $1"; run "$@"; }
             if mode != "parity":
                 last = [line for line in result.stdout.splitlines() if line.startswith("STEP ")][-1]
                 self.assertTrue(last.startswith("STEP TechRequireAll game drill"), last)
-                self.assertIn("tools/tech_requires_all_game_drill.sh", last)
-                self.assertNotIn("HAF_DRILL_", last)
+                self.assertRegex(last, r"\) bash \S+/tools/tech_requires_all_game_drill\.sh$")   # the label, then exactly this command
                 self.assertIn("LANE TechRequireAll game drill", result.stdout)
 
     def test_gate_stop_request_signals_the_shell_before_it_takes_a_lock(self):

@@ -50,19 +50,25 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     SKIPs, and a SKIP fails the push unless `HAF_ALLOW_SKIP=1` (the gate's rule for every missing prerequisite). CI
     has no game and does not run it.
   - **Why last on the lane:** the script builds the plugin itself, so it judges the tree being pushed. The buffer
-    hook drill builds the same project the moment the drills start; the two builds at once failed one round in ten
-    on each other's files (measured in the PR's review). At the end of the lane nothing else builds the plugin.
-  - **A wrong folder is named:** `HK_MANAGED` pointing at a folder that is not the game's `Managed` folder (the
-    game's root, an empty folder) fails with a sentence that says so. Before, the drill died on its first load with
-    a `FileNotFoundException`.
+    hook drill builds the same project the moment the drills start; the two builds at once, with a recompile forced
+    in every round, failed one round in ten on each other's files (measured in the PR's review). At the end of the
+    lane nothing else builds the plugin. The lane is the gate's longest path, so the gate is about 5 s longer.
+  - **A wrong folder is named:** `HK_MANAGED` pointing at a folder without one of the three game assemblies the
+    drill loads by name (the game's root, an empty folder) fails with a sentence that says so. Before, the drill died
+    on its first load with a `FileNotFoundException`; a folder that holds those three and lacks the rest still does.
+  - **The stage is the script's:** the first pass runs with `HAF_DRILL_STAGE=full` whatever the shell exports. With
+    `load` or `nolist` left over from a hand run the script printed PASS on 12 or 24 checks instead of 47 (the PR's
+    second review).
   - **A game update can fail the push:** if an update changes a hooked method, this step fails on every push until
     the hooks follow. That is also when the feature is broken in the game.
   - **The temp sweeper owns the drill's config folder** (`haf-techall-drill-<guid>` under `%TEMP%`): the drill
     removes it at exit, and a killed drill left it for good.
   - **Checked:** the drill passes on master and fails (rc 1, four checks) with the plant; `HK_MANAGED` pointed at a
     missing folder exits 3 (SKIP), at an empty folder and at the game's root exits 1 with the sentence;
-    `Tests/test_parallel_gate.py` requires the step in the push and all modes, on the lane and last, and its absence
-    in the parity mode, and fails with the step removed or started beside the drills.
+    `Tests/test_parallel_gate.py` requires the step in the push and all modes, on the lane and last, with exactly
+    its command, and its absence in the parity mode, and fails with the step removed, started beside the drills or
+    its command replaced. `Tests/test_tech_drill_script.py` (5 tests, in the gate and in CI) holds the script's
+    statuses without the game; `Tests/test_temp_sweep.py` holds the sweeper's new name.
   - **What the drill itself does not hold** (planted in the PR's review: 11 of 18 hook plants fail the drill, 7
     pass it, 5 of those matter in the game): see [Review-Backlog](docs/Review-Backlog.md), *Five hook behaviours
     the game drill does not hold*. The gate now runs the drill as it is; widening it is separate work.

@@ -1,7 +1,8 @@
 # CI — build + full test suite on every push, from PUBLIC sources only (no game files on the runner).
 # tools/fetch-refs.ps1 collects the reference DLLs (Newtonsoft/BepInEx/Harmony/Unity — see its header);
 # the game's own DLLs are not needed: the plugin's only compile-time game surface is string-based reflection.
-# NOT here (need the game or Unity): bindcheck (game DLLs), the editor Feature/Smoke tests, in-game verification.
+# NOT here (need the game or Unity): bindcheck and the TechRequireAll game drill (game DLLs; the push gate runs the
+# drill), the editor Feature/Smoke tests, in-game verification.
 name: CI
 on:
   push:
@@ -59,6 +60,10 @@ jobs:
         run: python Tests/test_deploy_time.py
       - name: Temp sweep deletion-safety tests
         run: python Tests/test_temp_sweep.py
+      # The TechRequireAll game drill itself needs the game and runs in the push gate; what its script says about a
+      # missing or a wrong game folder (SKIP, never PASS; a named FAIL) needs neither the game nor a build.
+      - name: TechRequireAll drill script tests
+        run: python Tests/test_tech_drill_script.py
       - name: Advisor corpus and held-out evaluation tests
         run: python Tests/test_advisor_corpus.py
       - name: blender oracle tests
