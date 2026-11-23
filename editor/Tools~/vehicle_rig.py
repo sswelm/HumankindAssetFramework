@@ -1672,8 +1672,8 @@ for grp, is_tail in ((rotor_names, False), (tailrotor_names, True)):
 
 def _area_centroid(names):
     # The area-weighted centroid of the named parts' surfaces in world space, as three Python floats; None when the
-    # surface has no area (or a non-finite one). Per face a fan of triangles from its first corner; every sum a plain
-    # double addition in face order, so the C# port (BlenderVehicleRig.AreaCentroid) repeats it bit for bit.
+    # surface has no area (or a non-finite one). Use Blender's loop triangles, as the exporter does, so concave faces
+    # count only the area inside their boundary. The C# port uses the same tessellation and double sums.
     _sa = 0.0; _sx = 0.0; _sy = 0.0; _sz = 0.0
     _seen = set()
     for _n in names:
@@ -1683,24 +1683,23 @@ def _area_centroid(names):
         _o = find(_n)
         _mw = _o.matrix_world
         _pts = [_mw @ _v.co for _v in _o.data.vertices]
-        for _p in _o.data.polygons:
-            _vs = _p.vertices
-            _a = _pts[_vs[0]]
+        _o.data.calc_loop_triangles()
+        for _tri in _o.data.loop_triangles:
+            _ia, _ib, _ic = _tri.vertices
+            _a, _b, _c = _pts[_ia], _pts[_ib], _pts[_ic]
             _ax, _ay, _az = _a.x, _a.y, _a.z
-            for _k in range(1, len(_vs) - 1):
-                _b = _pts[_vs[_k]]; _c = _pts[_vs[_k + 1]]
-                _bx, _by, _bz = _b.x, _b.y, _b.z
-                _cx, _cy, _cz = _c.x, _c.y, _c.z
-                _ux = _bx - _ax; _uy = _by - _ay; _uz = _bz - _az
-                _vx = _cx - _ax; _vy = _cy - _ay; _vz = _cz - _az
-                _nx = _uy * _vz - _uz * _vy
-                _ny = _uz * _vx - _ux * _vz
-                _nz = _ux * _vy - _uy * _vx
-                _w = math.sqrt(_nx * _nx + _ny * _ny + _nz * _nz)   # twice the triangle's area: the factor cancels
-                _sa = _sa + _w
-                _sx = _sx + _w * (_ax + _bx + _cx)
-                _sy = _sy + _w * (_ay + _by + _cy)
-                _sz = _sz + _w * (_az + _bz + _cz)
+            _bx, _by, _bz = _b.x, _b.y, _b.z
+            _cx, _cy, _cz = _c.x, _c.y, _c.z
+            _ux = _bx - _ax; _uy = _by - _ay; _uz = _bz - _az
+            _vx = _cx - _ax; _vy = _cy - _ay; _vz = _cz - _az
+            _nx = _uy * _vz - _uz * _vy
+            _ny = _uz * _vx - _ux * _vz
+            _nz = _ux * _vy - _uy * _vx
+            _w = math.sqrt(_nx * _nx + _ny * _ny + _nz * _nz)   # twice the triangle's area: the factor cancels
+            _sa = _sa + _w
+            _sx = _sx + _w * (_ax + _bx + _cx)
+            _sy = _sy + _w * (_ay + _by + _cy)
+            _sz = _sz + _w * (_az + _bz + _cz)
     if not (_sa > 0.0) or math.isinf(_sa):
         return None
     return (_sx / (3.0 * _sa), _sy / (3.0 * _sa), _sz / (3.0 * _sa))

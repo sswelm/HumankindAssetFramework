@@ -281,12 +281,14 @@ class WheelCentreTests(unittest.TestCase):
             return co
 
     @classmethod
-    def _part(cls, points, faces):
+    def _part(cls, points, faces, triangles=None):
         class _V:
             def __init__(self, co): self.co = co
         class _F:
             def __init__(self, vertices): self.vertices = vertices
-        class _Data: pass
+        class _Data:
+            def calc_loop_triangles(self):
+                self.loop_triangles = [_F(t) for t in (faces if triangles is None else triangles)]
         class _O: pass
         o = _O(); o.matrix_world = cls._World(); o.data = _Data()
         o.data.vertices = [_V(cls._P(*p)) for p in points]; o.data.polygons = [_F(f) for f in faces]
@@ -327,7 +329,7 @@ class WheelCentreTests(unittest.TestCase):
 
     def test_a_cluster_weighs_its_parts_by_area_and_a_quad_as_its_two_triangles(self):
         # a 2 x 1 rectangle (area 2, centre (1, 0.5)) as ONE four-corner face, and a right triangle (area 0.5, centroid (10 + 1/3, 1/3))
-        quad = self._part([(0, 0, 0), (2, 0, 0), (2, 0, 1), (0, 0, 1)], [(0, 1, 2, 3)])
+        quad = self._part([(0, 0, 0), (2, 0, 0), (2, 0, 1), (0, 0, 1)], [(0, 1, 2, 3)], [(0, 1, 2), (0, 2, 3)])
         tri = self._part([(10, 0, 0), (11, 0, 0), (10, 0, 1)], [(0, 1, 2)])
         c = self._centroid({"Quad": quad, "Tri": tri})
         self.assertAlmostEqual((2 * 1.0 + 0.5 * (10 + 1 / 3.0)) / 2.5, c[0], places=12)
@@ -335,6 +337,15 @@ class WheelCentreTests(unittest.TestCase):
         self.assertEqual(0.0, c[1])
         # a part LISTED TWICE is one surface (review 2026-11-23): the same centroid, to the bit
         self.assertEqual(c, self._centroid({"Quad": quad, "Tri": tri}, names=["Quad", "Tri", "Tri"]))   # ONE of the two repeated: repeating both would leave the centroid where it is
+
+    def test_a_concave_face_counts_only_the_area_inside_its_boundary(self):
+        # An L: a 4 x 1 rectangle centred at (2, 0.5), plus a 1 x 2 rectangle centred at (0.5, 2).
+        points = [(4, 0, 0), (4, 0, 1), (1, 0, 1), (1, 0, 3), (0, 0, 3), (0, 0, 0)]
+        face = (0, 1, 2, 3, 4, 5)
+        triangles = [(5, 0, 1), (5, 1, 2), (5, 2, 4), (2, 3, 4)]
+        for f, t in ((face, triangles), ((0, 5, 4, 3, 2, 1), [tri[::-1] for tri in triangles])):
+            centroid = self._centroid({"ConcaveWheel": self._part(points, [f], t)})
+            self.assertEqual((1.5, 0.0, 1.0), centroid)
 
     def test_the_part_s_world_matrix_is_applied(self):
         # review 2026-11-23: the identity world of the other tests let a dropped `_mw @` through

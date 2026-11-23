@@ -990,8 +990,8 @@ public static partial class BlenderVehicleRig
     static string P2(float v) => BlenderRigAnim.PyFixed(v, 2);
 
     /// <summary>_area_centroid: the area-weighted centroid of the parts' surfaces in world space, in Python floats; null when the
-    /// surface has no area (or a non-finite one). Per face a fan of triangles from its first corner, each point
-    /// <c>matrix_world @ v.co</c> (mathutils float32); every sum a plain double addition in face order, as the script writes them.</summary>
+    /// surface has no area (or a non-finite one). Uses the exporter's loop triangles in face order and world points
+    /// from <c>matrix_world @ v.co</c> (mathutils float32), with double sums as in the script.</summary>
     internal static double[] AreaCentroid(IEnumerable<BlenderRigAnim.SceneObject> parts)
     {
         double sa = 0.0, sx = 0.0, sy = 0.0, sz = 0.0;
@@ -1004,23 +1004,23 @@ public static partial class BlenderVehicleRig
                 float x = m.Positions[3 * v], y = m.Positions[3 * v + 1], z = m.Positions[3 * v + 2];
                 pts[3 * v] = MulPointRow(it, 0, x, y, z); pts[3 * v + 1] = MulPointRow(it, 1, x, y, z); pts[3 * v + 2] = MulPointRow(it, 2, x, y, z);
             }
-            for (int f = 0; f < m.FaceCount; f++)
+            void AddTriangle(int a, int b, int c)
             {
-                int c0 = m.CornerStart(f), n = m.CornerCount(f); int ia = 3 * m.Faces[c0];
+                int ia = 3 * m.Faces[a], ib = 3 * m.Faces[b], ic = 3 * m.Faces[c];
                 double ax = pts[ia], ay = pts[ia + 1], az = pts[ia + 2];
-                for (int k = 1; k < n - 1; k++)
-                {
-                    int ib = 3 * m.Faces[c0 + k], ic = 3 * m.Faces[c0 + k + 1];
-                    double bx = pts[ib], by = pts[ib + 1], bz = pts[ib + 2], cx = pts[ic], cy = pts[ic + 1], cz = pts[ic + 2];
-                    double ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
-                    double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-                    double w = Math.Sqrt(nx * nx + ny * ny + nz * nz);   // twice the triangle's area: the factor cancels
-                    sa = sa + w;
-                    sx = sx + w * (ax + bx + cx);
-                    sy = sy + w * (ay + by + cy);
-                    sz = sz + w * (az + bz + cz);
-                }
+                double bx = pts[ib], by = pts[ib + 1], bz = pts[ib + 2], cx = pts[ic], cy = pts[ic + 1], cz = pts[ic + 2];
+                double ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
+                double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+                double w = Math.Sqrt(nx * nx + ny * ny + nz * nz);   // twice the triangle's area: the factor cancels
+                sa = sa + w;
+                sx = sx + w * (ax + bx + cx);
+                sy = sy + w * (ay + by + cy);
+                sz = sz + w * (az + bz + cz);
             }
+            if (m.PolyStart == null)
+                for (int i = 0; i + 2 < m.Faces.Length; i += 3) AddTriangle(i, i + 1, i + 2);
+            else
+                foreach (var t in FbxModel.Tessellate(m.Positions, m.Faces, m.PolyStart)) AddTriangle(t.C0, t.C1, t.C2);
         }
         if (!(sa > 0.0) || double.IsInfinity(sa)) return null;
         return new[] { sx / (3.0 * sa), sy / (3.0 * sa), sz / (3.0 * sa) };

@@ -107,6 +107,22 @@ public class VehicleRigWheelCentreTests
         Near((1 * 4.0 / 3.0 + 3 * 2.0 / 3.0) / 4.0, cq[0], 1e-12); Near((1 * 1.0 / 3.0 + 3 * 4.0 / 3.0) / 4.0, cq[1], 1e-12); Assert.Equal(0.0, cq[2]);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_concave_face_weighs_only_the_surface_inside_its_boundary(bool reverse)
+    {
+        // An L: a 4 x 1 rectangle centred at (2, 0.5), plus a 1 x 2 rectangle centred at (0.5, 2).
+        // The face starts at the far tip, so a fan from that corner crosses the notch.
+        float[] positions = { 4, 0, 0, 4, 1, 0, 1, 1, 0, 1, 3, 0, 0, 3, 0, 0, 0, 0 };
+        int[] face = { 0, 1, 2, 3, 4, 5 };
+        if (reverse) Array.Reverse(face, 1, face.Length - 1);
+        var centroid = Centroid(Part(positions, face, new[] { 0, 6 }));
+        Near(1.5, centroid[0], 1e-12);
+        Near(1.0, centroid[1], 1e-12);
+        Assert.Equal(0.0, centroid[2]);
+    }
+
     [Fact]
     public void The_centroid_does_not_depend_on_how_finely_a_surface_is_cut()
     {

@@ -3065,9 +3065,11 @@ stages on a screw of 2, 3, 4, 5 and 7 blades); `WheelCentreTests` in `Tests/test
 helper (its centroid) and, by source text only, the lines that lay the bone - the script's own bone block is executed by the
 drill alone. NOT held by any test (seen working once, by the user in the Lab on the Hunley, 2026-11-23): the window's side of the setting (popup to Generate to the tag) - no saved recipe carries
 `wheelCentre`, the Unity Generate drill's fixture list has no wheel-centre key, and the Tests project does not compile the
-window; a planted removal of the field from `RigArgsFromFields` passed every check. NOT covered: a wheel of polygons on
-Blender's route for an `.fbx`, `.obj` or `.blend` source (the fan from a face's first corner is exact for flat convex faces
-only, and the C# reads an `.fbx` as triangles).
+window; a planted removal of the field from `RigArgsFromFields` passed every check.
+
+The concave-face cases use an L-shaped polygon with an area centroid of (1.5, 0, 1) in the wheel's plane. Both
+winding orders give that centroid. The original triangle fan gave (1.75, 0, 1.167) by counting area in the notch.
+A native Blender rig of a `.blend` containing the L-shaped wheel exported at the corrected pivot.
 
 Review of PR #291 (2026-11-17): composition provenance follows both source imports through material gathering, including an FBX
 merged into a GLB job. Ordinary source PNGs still require identical bytes; the job's filename does not grant a pixel-only exception.

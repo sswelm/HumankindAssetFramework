@@ -34,8 +34,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     radius and the tread's wheel geometry still read the box; a tread's wrap bones and the spoke-symmetry snap of a
     ground wheel's degrees read the bone and follow it. Greyed out on the source-skeleton fast path, where the
     source's own bones are the pivots and the tag is not sent.
-  - **Both routes.** `vehicle_rig.py` (`_area_centroid`: per face a fan of triangles from its first corner, plain
-    double sums in face order) and the C# port (`BlenderVehicleRig.AreaCentroid`, the same sums). Generate shows
+  - **Both routes.** `vehicle_rig.py` and the C# port sum the area of the same triangles the exporter uses.
+    This keeps a concave face's contribution inside its boundary. Generate shows
     `VEHICLE wheel centre: Wheel_00 at its surface centroid (0.005,6.006,0.312), 0.071 from the box centre` in its
     status box; a wheel with no surface area keeps its box centre and says so there (`*** WARNING: wheel centre`).
     Verify notes that the positions it lists are box centres.
@@ -82,9 +82,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     planted removal of the field from the window's argument filling passed every check. Rotors, the gun and the
     turret keep their box-based pivots. On a tracked vehicle the two routes agree, but whether a tread still LOOKS
     right is not measured: its path is fitted to the wheels' boxes while its wrap bones follow the moved wheel bones.
-    A wheel of polygons on Blender's route (an `.fbx`, `.obj` or `.blend` source) is not covered: the fan from a
-    face's first corner is exact for flat convex faces only. With spin disabled the control is greyed with the rest
-    of the section but the tag is still sent (the bone's place does not depend on the spin).
+    With spin disabled the control is greyed with the rest of the section but the tag is still sent (the bone's
+    place does not depend on the spin).
 
 - **Tech Tree viewer: a technology's title, description and image (2026-11-22, PR #309; the review's fixes in the PR after it).** Asked for by the user:
   "edit more, starting with the tech title and description and the ability to change the tech image".
