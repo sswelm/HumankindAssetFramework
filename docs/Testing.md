@@ -38,7 +38,10 @@ rules: the list parser (a broken file is no names plus a reason, never an empty 
 The planner also refuses a locked technology whose prerequisite names are all unknown and uses the vanilla route
 for a listed technology with only one prerequisite. Three cases hold the tech screen's hint: the marked title, the
 tooltip line (a config text with a stray brace must not throw) and that the line is added once.
-`bash tools/tech_requires_all_game_drill.sh` runs the hooks against the **installed game's own assemblies**. The
+`bash tools/tech_requires_all_game_drill.sh` runs the hooks against the **installed game's own assemblies**. The push
+gate runs it since 2026-11-23 (the step *TechRequireAll game drill*; it SKIPs on a machine without the game, and CI,
+which has no game, does not run it): the unit suite holds the pure rules only, and a planted
+`names.Length < 2` → `< 3` in `StillLocked` passed all 2,908 unit tests while this drill failed four checks. The
 35 checks cover state updates, locked enqueue, cascading removal and the tech screen's mark. For the mark the game's
 own `TechnologyItem.RefreshTooltips` runs on items built without Unity, with three UI leaves stubbed (the description
 builder and the two widget setters): a listed technology gets the mark and the tooltip line, first with internal
@@ -294,7 +297,7 @@ also exercises the edited gate.
 
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
-| **Runtime + shared contract** | `dotnet build` · `dotnet test` · the gate's own tests · GPU buffer hook drill · docs guard · binding-catalog surface · hot path · parse shape · member shape · worker thread · reader-gate drill · schema parity · parity stamp and its drill | all source-only checks (the stamp's drill; the stamp itself is the push's) | the build and tests first (seconds); the guards on a lane beside the drills |
+| **Runtime + shared contract** | `dotnet build` · `dotnet test` · the gate's own tests · GPU buffer hook drill · TechRequireAll game drill (the hooks against the installed game's assemblies; SKIP without the game) · docs guard · binding-catalog surface · hot path · parse shape · member shape · worker thread · reader-gate drill · schema parity · parity stamp and its drill | all source-only checks (the stamp's drill; the stamp itself is the push's) | the build and tests first (seconds); the guards on a lane beside the drills |
 | **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · FBX reader drill (the binary record tree against an independent reader) · native kernels drill · hand-list gate · package meta · golden checksums | hand-list; compile check and drills stay local | the drills AT ONCE, the lane beside them: a few minutes |
 | **Blender parity** (`HAF_GATE=parity`: `tools/blender_parity.sh`, the Bake Tests row *Do the C# ports still match Blender?*) | GLB reader drill · GLB writer drill · Workshop compaction drill · vehicle probe drill · mesh layout, prep and deploy drills · rig_anim and vehicle_rig drills · blender exit drill · the oracle tests | never (Blender) | about twenty minutes, NOT in the push |
 

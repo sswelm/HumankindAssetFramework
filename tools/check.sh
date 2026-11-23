@@ -138,7 +138,7 @@ verdict() {  # the one summary line, and the status the hook returns
     note "DONE PASS ($n skipped, allowed by HAF_ALLOW_SKIP=1)"; return 0
   fi
   printf 'CHECK: FAIL — %d step(s) SKIPPED: their claim was NOT tested on this machine, and a gate that cannot see is not green:%s\n' "$n" "$list"
-  printf 'Install the missing prerequisite (the modding project, HAF_UNITY_PROJECT; Blender for the parity mode), or, meaning it: HAF_ALLOW_SKIP=1 git push\n'
+  printf 'Install the missing prerequisite (the modding project, HAF_UNITY_PROJECT; the game, HK_MANAGED; Blender for the parity mode), or, meaning it: HAF_ALLOW_SKIP=1 git push\n'
   note "DONE FAIL ($n skipped)"; return 1
 }
 # The drills are independent of one another (each works in its own mktemp directory and builds its own exe), and the
@@ -349,6 +349,13 @@ push_step run_bg "editor scripts compile (Roslyn)" bash "$ROOT/tools/editor_comp
 push_step run_bg "registry engine drill (SingleSourceRegistry on real files)" bash "$ROOT/tools/registry_engine_drill.sh"
 push_step run_bg "backup dedup drill (BackupDedup on real files: unchanged means the bytes)" bash "$ROOT/tools/backup_dedup_drill.sh"
 push_step run_bg "GPU buffer hook drill (real Harmony adapters and configuration)" bash "$ROOT/tools/buffer_hook_drill.sh"
+# THE TECHREQUIREALL HOOKS AGAINST THE GAME'S OWN ASSEMBLIES (2026-11-23). The unit suite holds the pure rules
+# (TechRequireAllRules); the hook bodies - the ALL rule in the state update, the locked enqueue, the cascading removal's
+# guard - run only here. The 2026-11-23 review planted `names.Length < 2` -> `< 3` in StillLocked (a technology with two
+# prerequisites unlocks on either one): 2,908 of 2,908 unit tests stayed green, this drill failed four checks, and no
+# gate ran it. It reads the installed game's Managed folder (HK_MANAGED, default the Steam path) and needs neither Unity
+# nor Blender; without the game it SKIPs. It drills the plugin the first step built (HAF_DRILL_PLUGIN_PREBUILT=1).
+push_step run_bg "TechRequireAll game drill (the hooks against the installed game's assemblies: the ALL rule, the locked enqueue and the cascading removal, with a list and without one; SKIP without the game)" env HAF_DRILL_PLUGIN_PREBUILT=1 bash "$ROOT/tools/tech_requires_all_game_drill.sh"
 # THE NATIVE FBX READER, step 1 (2026-10-31): the binary record tree (editor/FbxDocument.cs) against an independent
 # Python reader, record for record, over every FBX the project holds, the recipes' FBX sources and generated fixtures.
 # No Blender in it: the claim is two readers written apart agreeing on every record, property and array.

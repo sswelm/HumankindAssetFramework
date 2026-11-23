@@ -9,11 +9,18 @@
 #
 # The Managed dir is arg 1, else $HK_MANAGED, else the default Steam path (as tools/check-bindings.sh).
 # HAF_DRILL_MONO=<mono.exe> runs it a second time under that Mono.
+# HAF_DRILL_PLUGIN_PREBUILT=1 (the push gate sets it) drills bin/Release/HumankindAssetFramework.dll as it stands and does
+# not build the plugin: the gate built it in its first step, and the buffer hook drill builds the same project beside this
+# one - two builds of one project at once can fail on each other's files.
 set -uo pipefail
 cd "$(dirname "$0")/.." && ROOT="$(pwd)" || exit 2
 MANAGED="${1:-${HK_MANAGED:-/c/Program Files (x86)/Steam/steamapps/common/Humankind/Humankind_Data/Managed}}"
 [ -d "$MANAGED" ] || { echo "SKIP — Managed dir not found: $MANAGED (the hooks were NOT drilled)"; exit 3; }
-dotnet build "$ROOT/HumankindAssetFramework.csproj" -c Release --nologo -v q -p:WarningLevel=0 || { echo 'FAIL — plugin build'; exit 1; }
+if [ "${HAF_DRILL_PLUGIN_PREBUILT:-0}" = 1 ]; then
+  [ -s "$ROOT/bin/Release/HumankindAssetFramework.dll" ] || { echo 'FAIL — HAF_DRILL_PLUGIN_PREBUILT=1, but bin/Release/HumankindAssetFramework.dll is not there (build the plugin first)'; exit 1; }
+else
+  dotnet build "$ROOT/HumankindAssetFramework.csproj" -c Release --nologo -v q -p:WarningLevel=0 || { echo 'FAIL — plugin build'; exit 1; }
+fi
 dotnet build "$ROOT/tools/tech-requires-all-drill/TechRequireAllGameDrill.csproj" -c Release --nologo -v q || { echo 'FAIL — drill build'; exit 1; }
 EXE="$ROOT/tools/tech-requires-all-drill/bin/Release/HumankindAssetFramework.Tests.exe"
 WMANAGED="$(cygpath -m "$MANAGED" 2>/dev/null || echo "$MANAGED")"

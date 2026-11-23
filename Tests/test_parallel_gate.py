@@ -157,7 +157,7 @@ run() { echo "STEP $*"; }; run_bg() { run "$@"; }; run_lane() { run "$@"; }
             self.env["HAF_ORACLE"] = "live"
             result = self.run_shell(self.helpers() + stubs + steps)
             self.assertEqual(result.returncode, 0, result.stderr)
-            for label in ("plugin build", "plugin unit tests", "native kernels drill", "exit status"):
+            for label in ("plugin build", "plugin unit tests", "native kernels drill", "TechRequireAll game drill", "exit status"):
                 self.assertEqual("STEP " + label in result.stdout, mode != "parity", result.stdout)
             for label in ("blender exit drill", "GLB reader drill", "GLB writer drill", "vehicle probe drill",
                           "mesh layout drill", "prep drill", "deploy drill", "Workshop compaction drill",
