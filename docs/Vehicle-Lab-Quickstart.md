@@ -152,20 +152,33 @@ box. That is the axle of a round wheel, and of a propeller with an even number o
 blade points up while two point down and out, so the box is not centred on the shaft and the screw turns about a point
 beside it. Set **Wheel centre = Surface centroid (screws, propellers)** in *Spin — wheels & tracks* and press **Generate
 rig** again: the bone moves to the area-weighted middle of the wheel's surface, which lies on the shaft whatever the blade
-count. Generate prints where it went:
+count. Generate shows where it went, in the status box under the button and in the Console:
 
 ```
 VEHICLE wheel centre: Wheel_00 at its surface centroid (0.005,6.006,0.312), 0.071 from the box centre
 ```
 
 Measured on the H.L. Hunley's three-bladed screw (0.60 wide, hub radius 0.067): the box centre lies 0.072 off the shaft,
-the surface centroid 0.006. The setting covers every part marked **Wheel** in the model - parts that share a hub are
-weighed together, so a propeller cut into a hub and separate blades works too - and is saved in the recipe as
-`wheelCentre`. Rotors keep their hub. Only the pivot moves: the axle direction, the speeds and the tread's wheel geometry
-still read the box. On the source-skeleton fast path the source's own bones are the pivots, so the setting is greyed out
-there. Leave it at **Box centre** for round wheels: every earlier recipe bakes exactly as before. On a tracked vehicle
-keep **Box centre** as well: the tread's path is fitted to the wheels' boxes, and how a tread looks around wheel bones
-moved off them has not been judged.
+the surface centroid 0.006. The setting is one per model, covers every part marked **Wheel** and is saved in the recipe
+as `wheelCentre`. Rotors keep their hub.
+
+- **The screw must come out as ONE wheel.** Parts are grouped into wheels as before - a part joins the biggest part
+  whose centre is near enough - and the centroid is taken per wheel. A screw that is one part, like the Hunley's, is one
+  wheel. A propeller cut into separate blades is NOT: the biggest part is a blade, the other blades lie outside its
+  reach, and each blade becomes a wheel of its own turning about itself (measured: three blades and a hub, three wheel
+  bones, none on the shaft). The `VEHICLE RIG DONE` line counts them - `4 wheel part(s) clustered into 3 wheel(s)` is
+  that case. Join the blades and hub into one part in the Model Fuser first.
+- **Every part of a wheel is weighed**, where Box centre reads only the biggest. A part marked Wheel that sits beside the
+  axle - a bracket, a fender - pulls the pivot towards it under this setting.
+- **What moves and what does not.** Only the bone's pivot moves, and only across the axle. The axle direction, the
+  rolling-contact radius and the tread's wheel geometry still read the box. Two things read the bone and follow it: a
+  tread's wrap bones, and the spoke-symmetry snap of a ground wheel's degrees, which measures the rim about the bone -
+  a wheel on the ground whose pivot moves far can come out at another snapped speed.
+- **A wheel with no surface area** keeps its box centre, and the status box says so (`*** WARNING: wheel centre`).
+- On the source-skeleton fast path the source's own bones are the pivots: the setting is greyed out and not sent.
+- Leave it at **Box centre** for round wheels: every earlier recipe bakes exactly as before. On a tracked vehicle keep
+  **Box centre** as well: the tread's path is fitted to the wheels' boxes, and how a tread looks around wheel bones moved
+  off them has not been judged.
 
 **Recoil, as Generate reports it (2026-11-07).** With **Recoil (fraction of tube)** set, Generate prints the breech
 clearance at full recoil:

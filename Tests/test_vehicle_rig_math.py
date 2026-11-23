@@ -304,10 +304,10 @@ class WheelCentreTests(unittest.TestCase):
             faces += [(at, at + 1, at + 2), (at + 1, at + 3, at + 2)]
         return pts, faces
 
-    def _centroid(self, parts):
+    def _centroid(self, parts, names=None):
         NAMESPACE["find"] = lambda name: parts[name]
         try:
-            return NAMESPACE["_area_centroid"](list(parts))
+            return NAMESPACE["_area_centroid"](list(parts) if names is None else names)
         finally:
             del NAMESPACE["find"]
 
@@ -333,6 +333,24 @@ class WheelCentreTests(unittest.TestCase):
         self.assertAlmostEqual((2 * 1.0 + 0.5 * (10 + 1 / 3.0)) / 2.5, c[0], places=12)
         self.assertAlmostEqual((2 * 0.5 + 0.5 * (1 / 3.0)) / 2.5, c[2], places=12)
         self.assertEqual(0.0, c[1])
+        # a part LISTED TWICE is one surface (review 2026-11-23): the same centroid, to the bit
+        self.assertEqual(c, self._centroid({"Quad": quad, "Tri": tri}, names=["Quad", "Tri", "Tri"]))   # ONE of the two repeated: repeating both would leave the centroid where it is
+
+    def test_the_part_s_world_matrix_is_applied(self):
+        # review 2026-11-23: the identity world of the other tests let a dropped `_mw @` through
+        class _Shift:
+            def __matmul__(self, co):
+                return WheelCentreTests._P(co.x + 10.0, co.y, co.z * 2.0)
+        tri = self._part([(0, 0, 0), (3, 0, 0), (0, 0, 3)], [(0, 1, 2)]); tri.matrix_world = _Shift()
+        c = self._centroid({"Tri": tri})
+        self.assertAlmostEqual(11.0, c[0], places=12); self.assertAlmostEqual(2.0, c[2], places=12)
+
+    def test_the_warning_is_one_the_lab_surfaces_and_the_bone_is_laid_from_the_pivot(self):
+        loop = SOURCE[SOURCE.index("for i, cl in enumerate(clusters):"):SOURCE.index("# ONE Turret bone shared by every turret part")]
+        self.assertIn('print("VEHICLE *** WARNING: wheel centre: Wheel_%02d has no surface area - the box centre kept" % i)', loop)
+        self.assertIn("                eb.head = _wpiv\n", loop.replace("\r\n", "\n"))
+        self.assertIn('        eb.tail = _wpiv + ax * _dirn * max(0.05, max(cl["s"]) * 0.25)', loop)
+        self.assertIn('_wac = _area_centroid(cl["names"])', loop)
 
     def test_no_area_or_a_non_finite_one_is_no_centroid(self):
         self.assertIsNone(self._centroid({"Line": self._part([(0, 0, 0), (1, 0, 0), (2, 0, 0)], [(0, 1, 2)])}))

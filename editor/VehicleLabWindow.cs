@@ -952,7 +952,8 @@ public class VehicleLabWindow : EditorWindow
                 wheelCentre = EditorGUILayout.Popup(new GUIContent("Wheel centre", "WHERE A WHEEL TURNS ABOUT. Box centre: the middle of the wheel's bounding box - exact for a round wheel, and what every earlier bake used. " +
                     "Surface centroid: the area-weighted middle of the wheel's surface - pick it when a screw or propeller WOBBLES about a point beside its shaft. " +
                     "A shape with an odd number of blades (3, 5, 7) has a box that is not centred on its axis; its surface centroid is. " +
-                    "Applies to every part marked Wheel (rotors keep their hub); only the pivot moves, never the axle direction or the speed. " +
+                    "Applies to every part marked Wheel (rotors keep their hub), per wheel as the parts are grouped: EVERY part of a wheel is weighed, so join a screw cut into separate blades into one part first, and do not mark off-axle furniture Wheel. " +
+                    "Only the pivot moves; the axle direction stays. Generate shows where each bone went in the status box. " +
                     "Greyed out on the source-skeleton fast path: there the source's own bones are the pivots."), wheelCentre == 1 ? 1 : 0, WheelCentreNames);
                 if (list.Any(x => x.role == Role.TailRotor))
                 {
@@ -1788,7 +1789,8 @@ public class VehicleLabWindow : EditorWindow
     }
 
     // Sanity report on the current classification — mirrors the rig script's wheel clustering so the numbers
-    // shown here are exactly the bones Vehicleize will build.
+    // shown here are exactly the bones Vehicleize will build (under Wheel centre = Surface centroid the wheel bones
+    // leave these box centres across the axle: the report says so, Generate prints where).
     void VerifySelection()
     {
         var report = new List<(string text, string part)>();
@@ -1828,6 +1830,9 @@ public class VehicleLabWindow : EditorWindow
                                 (stray ? "  ⚠ small anchor — stray shard far from every wheel? (becomes its own bone)" : ""), c.anchor.name));
                 }
                 if (clusters.Count > 12) report.Add(($"    … and {clusters.Count - 12} more", null));
+                // the positions above are the anchors' BOX centres; under Wheel centre = Surface centroid the bone is elsewhere across the axle
+                if (wheelCentre == 1 && !FastPath)
+                    report.Add(("    Wheel centre = Surface centroid: each wheel bone will sit at its parts' surface centroid across the axle, not at the box centre shown above (Generate prints where).", null));
                 // axle-agreement + left/right-mirror are CAR geometry (paired wheels, one shared axle) — WHEELS ONLY.
                 if (clusters.Select(c => AxleIdx(c.anchor)).Distinct().Count() > 1)
                 { report.Add(("  ⚠ wheel anchors disagree on the axle axis — a stray cluster, or set the Axle axis override.", null)); warn = true; }
@@ -2639,7 +2644,7 @@ public class VehicleLabWindow : EditorWindow
         // breech, and a split-trail pair that came out un-mirrored — were printed only to the Console, i.e. exactly
         // where a "the rig looks wrong" question does NOT get answered. They are the lines most worth reading.
         string muzzle = string.Join("\n", stdout.Split('\n')
-            .Where(l => l.Contains("VEHICLE MUZZLE") || l.Contains("VEHICLE CRADLE")
+            .Where(l => l.Contains("VEHICLE MUZZLE") || l.Contains("VEHICLE CRADLE") || l.Contains("VEHICLE wheel centre:")   // where Wheel centre = Surface centroid put each bone
                      || l.Contains("*** WARNING") || l.Contains("DEPLOY gun: SKIPPED"))
             .Select(l => l.Trim()));
         // Native availability is reported separately from the selected route; managed runs must not claim C++ kernels.

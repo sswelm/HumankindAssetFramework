@@ -2822,17 +2822,7 @@ the first, a cube wheel whose tied extents give X, the tire listed twice, the ro
 a missing name in each set, a body part named `Mesh_Wheel_00`, an animated part joined into the hull), `fx_r_axis` (the axle
 forced to Z; a one-frame rock cycle), `fx_r_many` (101 clusters, the last `Wheel_100`; a 0.1-wide wheel on the 0.05 length
 floor; a hundred tied sizes), `fx_r_missing_wheel` (find()'s exit in stage 3, `EXIT:3:`; the exit fixtures now name their
-stage in a table). **Wheel centre (2026-11-23, `wheelcentre=area`):** four more - `fx_r_wheel_centre` (a three-bladed screw
-whose box centre lies 0.19 off its shaft, a fan of a hub and one separate blade weighed together, a main rotor of a triangular
-plate that must keep its hub), `fx_r_wheel_centre_box` (the same model without the tag: no line, the box centres),
-`fx_r_wheel_centre_x` (the axle forced to X: the pivot keeps the box centre along X) and `fx_r_wheel_centre_flat` (a wheel of
-one zero-area triangle: the WARNING, the box centre kept); and three with the tag on LIVE TRACKS, every wheel cluster
-carrying an off-centre shard so its bone leaves the cluster's box centre, which the tread's wrap bones copy:
-`fx_r_tracks_centre` (the nine carriers), `fx_r_tracks_hybrid_centre` (the conveyor's link bones), `fx_links_centre` (rigid
-links). The drill requires all seven equal through the export and the C#'s own note of the branch. The drill states parity only - that the port repeats the script; that
-the bone lands ON the shaft is held by `Tests/VehicleRigWheelCentreTests.cs` and `WheelCentreTests` in
-`Tests/test_vehicle_rig_math.py`, whose expectations come from the shape (see the changelog entry of that date for the plants).
-Eleven plants, one per rule, each caught on its own job with a row difference: the axle tie, the RootHull,
+stage in a table). Eleven plants, one per rule, each caught on its own job with a row difference: the axle tie, the RootHull,
 the one-frame cycle, the rudder/preserve precedence, the length floor, the stable sort, the 0.75 threshold, the name
 collision, the WARN lines, the exit, and a wheel bone's head moved by 1e-6 (caught on Ribauldequin). The first plant run
 reported all eleven caught when every job had died of a missing Newtonsoft.Json beside the plant's exe; the harness now
@@ -3060,6 +3050,24 @@ pixel equal Blender's bytes stand in, and the rest of the file - the JSON, every
 The `EXPORTS` line counts them (`pixelImages`), a `PIXELS <job>` line names the job. Planted: one bit of one pixel flipped fails
 both images by pixel and channel. NOT modelled, left by name: Rigid links (`treadmode=links`), and the stage 5 passes on a
 polygon tread. NOT checked: nothing ran in Unity or in the game - the Bradley's C# rig has not been looked at there.
+
+**Wheel centre (2026-11-23, `wheelcentre=area`, PR #314).** Eight fixtures: `fx_r_wheel_centre` (a three-bladed screw whose
+box centre lies 0.19 off its shaft; a fan whose 1 x 1 hub is the anchor with one small blade beside it, the blade listed
+twice and weighed once; a main rotor of a triangular plate that must keep its hub), `fx_r_wheel_centre_box` (the same model
+without the tag: no line, the anchors' box centres), `fx_r_wheel_centre_x` and `_z` (the axle forced: the pivot keeps the box
+centre along it), `fx_r_wheel_centre_flat` (a wheel of one zero-area triangle: the `*** WARNING`, the box centre kept); and
+three with the tag on LIVE TRACKS, where the four wheels the tread's wrap bones copy (sprocket, idler, first and last road
+wheel; all four wheels of the pitched belts) each carry an off-centre shard so the bone leaves its anchor's box centre:
+`fx_r_tracks_centre` (the nine carriers), `fx_r_tracks_hybrid_centre` (the conveyor's link bones), `fx_links_centre` (rigid
+links). The drill requires all eight equal through the export and the C#'s own note of the branch. It states parity only -
+that the port repeats the script. That the bone lands ON the shaft is held by `Tests/VehicleRigWheelCentreTests.cs` (the C#
+stages on a screw of 2, 3, 4, 5 and 7 blades); `WheelCentreTests` in `Tests/test_vehicle_rig_math.py` holds the script's
+helper (its centroid) and, by source text only, the lines that lay the bone - the script's own bone block is executed by the
+drill alone. NOT held by anything: the window's side of the setting (popup to Generate to the tag) - no saved recipe carries
+`wheelCentre`, the Unity Generate drill's fixture list has no wheel-centre key, and the Tests project does not compile the
+window; a planted removal of the field from `RigArgsFromFields` passed every check. NOT covered: a wheel of polygons on
+Blender's route for an `.fbx`, `.obj` or `.blend` source (the fan from a face's first corner is exact for flat convex faces
+only, and the C# reads an `.fbx` as triangles).
 
 Review of PR #291 (2026-11-17): composition provenance follows both source imports through material gathering, including an FBX
 merged into a GLB job. Ordinary source PNGs still require identical bytes; the job's filename does not grant a pixel-only exception.

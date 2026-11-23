@@ -239,10 +239,10 @@ for key in fx_r_tracks_fallback fx_r_tracks_recoil fx_r_tracks_roads fx_r_tracks
 done
 grep -qE "^STAGE3 DIES:3:fx_links_full: equal - dies: RuntimeError: rigid links need at least 4 bones per track" "$TMPD/s1.txt" || { echo "FAIL — vehicle_rig drill: the rigid-links budget error (fx_links_full) is not held as the script's death in stage 3"; exit 1; }
 grep -qE "^STAGE5 DIES:5:fx_links_fallback: equal - dies: RuntimeError: rigid links exceed the 126-bone budget" "$TMPD/s1.txt" || { echo "FAIL — vehicle_rig drill: the rigid-links bone-wall error (fx_links_fallback) is not held as the script's death in stage 5"; exit 1; }
-# THE WHEEL CENTRE FIXTURES ARE COMPARED, NOT LEFT (2026-11-23, wheelcentre=area): the screw, its forced axle, the zero-area wheel
-# and the three treads whose wheel bones leave their clusters' box centres must each come out equal through the export, and the
+# THE WHEEL CENTRE FIXTURES ARE COMPARED, NOT LEFT (2026-11-23, wheelcentre=area): the screw, its forced axles (X and Z), the zero-area
+# wheel and the three treads whose wheel bones leave their anchors' box centres must each come out equal through the export, and the
 # C# must have taken the branch itself (its MODEL note) - a leave by name here would be the new rule unheld.
-for key in fx_r_wheel_centre fx_r_wheel_centre_box fx_r_wheel_centre_x fx_r_wheel_centre_flat fx_r_tracks_centre fx_r_tracks_hybrid_centre fx_links_centre; do
+for key in fx_r_wheel_centre fx_r_wheel_centre_box fx_r_wheel_centre_x fx_r_wheel_centre_z fx_r_wheel_centre_flat fx_r_tracks_centre fx_r_tracks_hybrid_centre fx_links_centre; do
   grep -qE "^EXPORT $key: equal - .* byte-identical GLB" "$TMPD/s1.txt" || { grep -E "^(FAIL|STAGE[0-9]) $key" "$TMPD/s1.txt" | head -3 | cut -c1-300; echo "FAIL — vehicle_rig drill: the wheel centre fixture $key is not equal to Blender through the export"; exit 1; }
 done
 grep -qE "^MODEL [0-9]+ a wheel bone at its surface centroid \(wheelcentre=area\)" "$TMPD/s1.txt" && grep -qE "^MODEL [0-9]+ a wheel without surface area under wheelcentre=area" "$TMPD/s1.txt" \

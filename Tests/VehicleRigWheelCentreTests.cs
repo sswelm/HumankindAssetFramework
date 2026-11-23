@@ -34,10 +34,13 @@ public class VehicleRigWheelCentreTests
         Assert.Equal(hb[1], ha[1]);                                         // along the axle: the box centre, to the bit
         Assert.Equal(Axis(box, "Wheel_00"), Axis(area, "Wheel_00"));        // the bone still runs along +Y
         Assert.Equal(new[] { 0f, 1f, 0f }, Axis(area, "Wheel_00"));
-        string line = Assert.Single(area.Logs3.Where(l => l.StartsWith("VEHICLE wheel centre: Wheel_00 at its surface centroid (", StringComparison.Ordinal)));
-        Assert.EndsWith(" from the box centre", line);
-        // every other bone and every mesh is where the box rig has it: only the wheel's pivot moved
-        foreach (string bone in new[] { "Root" }) Assert.Equal(Head(box, bone), Head(area, bone));
+        // the whole line, by hand: the shaft at (2, 1) across the axle, the box's middle 3 along it; the box centre of this screw is
+        // 0.0868 and 0.1710 off the shaft (recomputed from the blade angles), which is 0.192 apart
+        Assert.Equal("VEHICLE wheel centre: Wheel_00 at its surface centroid (2.000,3.000,1.000), 0.192 from the box centre",
+            Assert.Single(area.Logs3.Where(l => l.StartsWith("VEHICLE wheel centre:", StringComparison.Ordinal))));
+        // the Root bone and the hull's mesh are where the box rig has them
+        Assert.Equal(Head(box, "Root"), Head(area, "Root"));
+        Assert.Equal(Assert.Single(box.Objects.Where(o => o.Name == "Mesh_Root")).Mesh.Positions, Assert.Single(area.Objects.Where(o => o.Name == "Mesh_Root")).Mesh.Positions);
     }
 
     [Theory]
@@ -52,16 +55,22 @@ public class VehicleRigWheelCentreTests
         Near(ShaftX, h[0], 1e-5); Near(ShaftZ, h[2], 1e-5);
     }
 
-    [Fact]
-    public void A_forced_axle_keeps_the_box_centre_along_it_and_takes_the_centroid_across_it()
+    [Theory]
+    [InlineData("X", 0, 2)]
+    [InlineData("Z", 2, 0)]   // review 2026-11-23: a plant that took the centroid ALONG a Z axle passed every test
+    public void A_forced_axle_keeps_the_box_centre_along_it_and_takes_the_centroid_across_it(string axis, int along, int across)
     {
-        var box = Stages(ScrewModel(), ScrewArgs(axis: "X")); var area = Stages(ScrewModel(), ScrewArgs(axis: "X", tags: Tag));
+        var box = Stages(ScrewModel(), ScrewArgs(axis: axis)); var area = Stages(ScrewModel(), ScrewArgs(axis: axis, tags: Tag));
         var hb = Head(box, "Wheel_00"); var ha = Head(area, "Wheel_00");
+        float[] shaft = { ShaftX, 0f, ShaftZ };
         Assert.True(Math.Abs(hb[0] - ShaftX) > 0.05 && Math.Abs(hb[2] - ShaftZ) > 0.05, "the box centre must be off the shaft on both axes for this to say anything");
-        Assert.Equal(hb[0], ha[0]);                       // along X: the box centre, to the bit - NOT the centroid
-        Near(ShaftZ, ha[2], 1e-5);                        // across it: the centroid (the screw's own shaft height)
-        Assert.NotEqual(hb[1], ha[1]);                    // ... on the other axis across it too
-        Assert.Equal(new[] { 1f, 0f, 0f }, Axis(area, "Wheel_00"));
+        Assert.Equal(hb[along], ha[along]);               // along the forced axle: the box centre, to the bit - NOT the centroid
+        Near(shaft[across], ha[across], 1e-5);            // across it: the centroid (the screw's own shaft)
+        // the third axis is across the forced axle too: the centroid's height through the screw's thickness, by hand - the hub's
+        // faces are centred on y 3, the six blade triangles lie at y 3 and 2.98; weighed by area that is below 3 and above 2.98
+        Assert.True(ha[1] < 3f && ha[1] > 2.98f, "across a forced axle the screw's own thin axis takes the centroid, got " + ha[1]);
+        var want = new float[3]; want[along] = 1f;
+        Assert.Equal(want, Axis(area, "Wheel_00"));
     }
 
     // ---- the centroid is the whole cluster's, weighted by area
@@ -82,6 +91,9 @@ public class VehicleRigWheelCentreTests
         var h = Head(s, "Wheel_00");
         Near(x, h[0], 1e-5); Near(z, h[2], 1e-5);
         Assert.Equal(0f, h[1]);                            // along the axle (Y): the anchor's box centre
+        // a part LISTED TWICE is one surface (review 2026-11-23: the blade weighed double and the pivot moved)
+        var twice = Args(Tag); Mark(twice, "wheels", "FanHub", "FanBlade", "FanBlade");
+        Assert.Equal(h, Head(Stages(m, twice), "Wheel_00"));
     }
 
     [Fact]
@@ -116,7 +128,7 @@ public class VehicleRigWheelCentreTests
         var box = Args(); Mark(box, "wheels", "Line"); var area = Args(Tag); Mark(area, "wheels", "Line");
         var sb = Stages(m, box); var sa = Stages(m, area);
         Assert.Equal(Head(sb, "Wheel_00"), Head(sa, "Wheel_00"));
-        Assert.Contains("VEHICLE WARNING: wheel centre: Wheel_00 has no surface area - the box centre kept", sa.Logs3);
+        Assert.Contains("VEHICLE *** WARNING: wheel centre: Wheel_00 has no surface area - the box centre kept", sa.Logs3);   // "*** WARNING": the shape the Lab's status box surfaces
         Assert.DoesNotContain(sa.Logs3, l => l.StartsWith("VEHICLE wheel centre:", StringComparison.Ordinal));
         Assert.Null(Centroid(Part(new float[] { 4, 0, 0, 5, 0, 0, 6, 0, 0 }, new[] { 0, 1, 2 }, null)));
         Assert.Null(Centroid(Part(new float[] { 0, 0, 0, float.NaN, 0, 0, 0, 1, 0 }, new[] { 0, 1, 2 }, null)));

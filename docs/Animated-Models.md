@@ -116,7 +116,8 @@ escape-ray visibility pass now shoots through one combined BVH and the preview e
   bbox center is the axle point, its thinnest extent the axle direction — and every member shard (spokes, rim,
   bolts) skins to that ONE bone, so off-center wheel furniture is safe to mark Wheel *by design*. A screw or
   propeller with an ODD number of blades is the exception to "bbox center = axle point": set **Wheel centre =
-  Surface centroid** (2026-11-23, [Vehicle Lab Quickstart ▸ 4](Vehicle-Lab-Quickstart.md#4-tune-and-generate)). All Turret
+  Surface centroid** (2026-11-23, [Vehicle Lab Quickstart ▸ 4](Vehicle-Lab-Quickstart.md#4-tune-and-generate)) -
+  under that setting every member is weighed, so off-center furniture is NOT safe to mark Wheel. All Turret
   parts share a single `Turret` bone. Shards are then **joined to one mesh per bone** (a 3,350-object GLB times
   out the bake's Blender step; 6 meshes fly), the source file's own stowaway skeleton/helpers are stripped
   (`SKM_` rips carry one), and the LINEAR `Spin` action exports as `<name>_Spin.glb` with a turntable preview

@@ -49,13 +49,16 @@ Stage 3 (step (d), part d1: the frame every rig shares):
                      WARNs); a body part named Mesh_Wheel_00 (the wheel group renamed Mesh_Wheel_00.001); an animated part joined
   fx_r_axis          the axle forced to Z; the wave on with a one-frame cycle (no RootHull)
   fx_r_wheel_centre  wheelcentre=area (2026-11-23): a three-bladed screw whose box centre lies 0.19 off its shaft, a fan of two
-                     parts (the centroid over the whole cluster), a main rotor of a triangular plate (untouched: it keeps its hub)
+                     parts (the centroid over the whole cluster; the blade LISTED TWICE, weighed once), a main rotor of a
+                     triangular plate (untouched: it keeps its hub)
   fx_r_wheel_centre_box the same model without the tag: every wheel bone at its box centre, no wheel centre line
   fx_r_wheel_centre_x the screw with the axle forced to X: the pivot keeps the box centre along X, the centroid across it
+  fx_r_wheel_centre_z the same with the axle forced to Z (review 2026-11-23: no fixture had a Z axle under the tag)
   fx_r_wheel_centre_flat a wheel of one zero-area triangle: the WARNING, the box centre kept
   fx_r_tracks_centre, fx_r_tracks_hybrid_centre, fx_links_centre  wheelcentre=area on LIVE TRACKS (the nine carriers, the
-                     conveyor's link bones, rigid links): every wheel cluster carries an off-centre shard, so its bone leaves
-                     the cluster's box centre - the wrap bones copy the wheel bones, the tread's path reads the boxes
+                     conveyor's link bones, rigid links): the wheels the wrap bones copy each carry an off-centre shard in
+                     their cluster, so the bone leaves its anchor's box centre - the wrap bones copy the wheel bones, the
+                     tread's path reads the boxes
   fx_r_many          101 clusters (the last bone Wheel_100); a 0.1-wide wheel on the 0.05 length floor; a hundred tied sizes
   fx_r_wall          130 clusters: a finished rig past the 126-bone budget prints the *** WARNING (the bone-index wall)
   fx_r_missing_wheel a wheel name the scene has not: find()'s VEHICLE ERROR and exit in stage 3 (EXIT:3:)
@@ -387,8 +390,9 @@ def boxes_in_one(r, name, material, count):
 
 def tracked_roads(out, models, key="fx_r_tracks_roads", lugs=False, **fields):
     """fx_r_tracks_roads: a ribbon belt round a sprocket, two road wheels, an idler and under a return roller (glTF: x forward, y up, z the side).
-    `lugs` gives the sprocket, the idler and the first road wheel a small off-centre shard each, marked Wheel: it joins its
-    wheel's cluster and pulls the cluster's surface centroid off the anchor's box centre (the wheel centre fixtures)."""
+    `lugs` gives the sprocket, the idler and the first and last road wheel - the four wheels the tread's wrap bones copy - a
+    small off-centre shard each, marked Wheel: it joins its wheel's cluster and pulls the cluster's surface centroid off the
+    anchor's box centre (the wheel centre fixtures). The return roller and the far side's wheel carry none."""
     r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
     r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.5, -0.5), material=ma), scale=[2.0, 0.6, 1.0])
     parts = [("Hull", 0, {})]
@@ -398,7 +402,7 @@ def tracked_roads(out, models, key="fx_r_tracks_roads", lugs=False, **fields):
     for name, x, y, d, side in wheels:
         r.node(name, mesh=r.mesh(name, at=(-0.5, -0.5, -0.5), material=ma), translation=[x, y, side], scale=[d, d, 0.25])
         parts.append((name, 1, {}))
-        if lugs and name in ("Sprocket", "Idler", "RoadF"):
+        if lugs and name in ("Sprocket", "Idler", "RoadF", "RoadR"):   # the four wheels the tread's wrap bones copy
             r.node(name + "Lug", mesh=r.mesh(name + "Lug", at=(-0.5, -0.5, -0.5), material=ma), translation=[x + 0.12, y + 0.08, side], scale=[0.1, 0.1, 0.25])
             parts.append((name + "Lug", 1, {}))
     path = []
@@ -704,10 +708,12 @@ def main(out):
                                      [0, 1, 2, 3, 5, 4, 0, 3, 4, 0, 4, 1, 1, 4, 5, 1, 5, 2, 2, 5, 3, 2, 3, 0]), translation=[-6.0, 2.0, 0.0])
         r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, -1.0, -1.0), size=2.0, material=ma))
         return r.write(models, key)
-    screw_parts = [("Screw", 1, {}), ("FanHub", 1, {}), ("FanBlade", 1, {}), ("Mast", 8, {}), ("Hull", 0, {})]
+    # FanBlade is listed TWICE (review 2026-11-23): one surface, weighed once - weighed twice the fan's pivot moves
+    screw_parts = [("Screw", 1, {}), ("FanHub", 1, {}), ("FanBlade", 1, {}), ("FanBlade", 1, {}), ("Mast", 8, {}), ("Hull", 0, {})]
     recipe(out, "fx_r_wheel_centre", screw_model("fx_r_wheel_centre"), screw_parts, wheelCentre=1)
     recipe(out, "fx_r_wheel_centre_box", screw_model("fx_r_wheel_centre_box"), screw_parts)
     recipe(out, "fx_r_wheel_centre_x", screw_model("fx_r_wheel_centre_x"), screw_parts, wheelCentre=1, axisChoice=1)
+    recipe(out, "fx_r_wheel_centre_z", screw_model("fx_r_wheel_centre_z"), screw_parts, wheelCentre=1, axisChoice=3)
     r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
     r.node("Line", mesh=raw_mesh(r, "Line", ma, [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)], [0, 1, 2]), translation=[4.0, 0.0, 0.0])
     r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, -1.0, -1.0), size=2.0, material=ma))

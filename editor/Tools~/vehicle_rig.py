@@ -1137,7 +1137,10 @@ tread_links = (not tracks_static) and any(a.strip() == "treadmode=links" for a i
 # area-weighted centroid of a shape that maps onto itself under a turn about its axle lies ON that axle whatever the
 # blade count, and does not depend on how finely the surface is cut into faces (measured on the Hunley: 0.006 off).
 # Only the bone's pivot moves: the clustering, the axle direction, the rolling-contact radius and the tread's wheel
-# geometry keep reading the box.
+# geometry keep reading the box. What reads the BONE follows it: the tread's wrap bones (copies of wheel bones) and the
+# spoke-symmetry snap of a ground wheel's or idler's degrees (_wheel_symmetry measures the rim about the bone's head).
+# The centroid is per CLUSTER and the clustering is unchanged: a propeller cut into separate blades is one wheel per
+# blade (the biggest part anchors, the other blades' boxes lie outside its reach) - fuse it into one part first.
 wheel_centre_area = any(a.strip() == "wheelcentre=area" for a in argv)
 # WAVE ROCK (argv[17] amplitude in degrees, argv[18] cycle length in frames; canoe finding 2026-07-31): a slow
 # idle sway for FLOATING units. Authored on a dedicated "Hull" bone (child of Root, carrying every part that
@@ -1672,7 +1675,11 @@ def _area_centroid(names):
     # surface has no area (or a non-finite one). Per face a fan of triangles from its first corner; every sum a plain
     # double addition in face order, so the C# port (BlenderVehicleRig.AreaCentroid) repeats it bit for bit.
     _sa = 0.0; _sx = 0.0; _sy = 0.0; _sz = 0.0
+    _seen = set()
     for _n in names:
+        if _n in _seen:     # a part listed twice is ONE surface (review 2026-11-23: it weighed double and moved the pivot)
+            continue
+        _seen.add(_n)
         _o = find(_n)
         _mw = _o.matrix_world
         _pts = [_mw @ _v.co for _v in _o.data.vertices]
@@ -1753,7 +1760,8 @@ for i, cl in enumerate(clusters):
             # only - along the axle the box centre stays (a turn about the axle does not care where on it the bone sits).
             _wac = _area_centroid(cl["names"])
             if _wac is None:
-                print("VEHICLE WARNING: wheel centre: Wheel_%02d has no surface area - the box centre kept" % i)
+                # "*** WARNING": the shape the Lab's status box surfaces - a setting that silently did nothing is the line to read
+                print("VEHICLE *** WARNING: wheel centre: Wheel_%02d has no surface area - the box centre kept" % i)
             else:
                 _wpiv = Vector(tuple(cl["c"][_k] if ax[_k] != 0.0 else _wac[_k] for _k in range(3)))
                 print("VEHICLE wheel centre: Wheel_%02d at its surface centroid (%.3f,%.3f,%.3f), %.3f from the box centre"

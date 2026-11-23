@@ -10,7 +10,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
-- **Vehicle Lab: Wheel centre, for a screw that wobbles (2026-11-23).** Reported by the user on the H.L. Hunley
+- **Vehicle Lab: Wheel centre, for a screw that wobbles (2026-11-23, PR #314).** Reported by the user on the H.L. Hunley
   submarine: "there is a problem making the screw rotate correctly, the middle of the axis is way off when rotating".
   - **Measured first.** The Lab puts a wheel bone at the middle of the wheel's bounding box. The Hunley's screw has
     three blades (0.60 wide, hub radius 0.067). In the GLB the user generated, `Wheel_00` sat at (-0.041, 6.006, 0.258);
@@ -24,26 +24,33 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   - **The setting.** *Spin — wheels & tracks* ▸ **Wheel centre**: *Box centre (round wheels)*, the default, which every
     earlier recipe bakes exactly as before; or *Surface centroid (screws, propellers)*. Saved in the recipe as
     `wheelCentre`, sent to the script as the tagged argument `wheelcentre=area`. It is a choice, not a detection: whether
-    a part is a screw is something the user can see and a threshold can only guess. It covers every part marked Wheel;
-    parts that share a hub are weighed together (a propeller cut into a hub and separate blades); rotors keep their
-    hub. Only the pivot moves, and only across the axle - along it the box centre stays. The clustering, the axle
-    direction, the rolling-contact speeds and the tread's wheel geometry still read the box. Greyed out on the
-    source-skeleton fast path, where the source's own bones are the pivots and the tag is not sent.
+    a part is a screw is something the user can see and a threshold can only guess. It is one setting per model and
+    covers every part marked Wheel; rotors keep their hub. The parts are grouped into wheels as before and the
+    centroid is taken per wheel, over EVERY part of it (Box centre reads only the biggest part, the anchor). So the
+    screw must come out as one wheel: a screw that is one part does; a propeller cut into separate blades does not -
+    the biggest part is a blade, the others lie outside its reach, and each blade becomes a wheel of its own
+    (`4 wheel part(s) clustered into 3 wheel(s)`) - join it in the Model Fuser first. Only the pivot moves, and only
+    across the axle - along it the anchor's box centre stays. The clustering, the axle direction, the rolling-contact
+    radius and the tread's wheel geometry still read the box; a tread's wrap bones and the spoke-symmetry snap of a
+    ground wheel's degrees read the bone and follow it. Greyed out on the source-skeleton fast path, where the
+    source's own bones are the pivots and the tag is not sent.
   - **Both routes.** `vehicle_rig.py` (`_area_centroid`: per face a fan of triangles from its first corner, plain
-    double sums in face order) and the C# port (`BlenderVehicleRig.AreaCentroid`, the same sums). Generate prints
-    `VEHICLE wheel centre: Wheel_00 at its surface centroid (0.005,6.006,0.312), 0.071 from the box centre`; a wheel
-    with no surface area keeps its box centre and says so.
+    double sums in face order) and the C# port (`BlenderVehicleRig.AreaCentroid`, the same sums). Generate shows
+    `VEHICLE wheel centre: Wheel_00 at its surface centroid (0.005,6.006,0.312), 0.071 from the box centre` in its
+    status box; a wheel with no surface area keeps its box centre and says so there (`*** WARNING: wheel centre`).
+    Verify notes that the positions it lists are box centres.
   - **On the Hunley:** the bone in the generated GLB is now at (0.005, 6.006, 0.312), 0.006 from the fitted hub (was
     0.072); the same recipe without the setting gives the user's GLB's bone to the digit.
   - **Held by:** the vehicle_rig drill (Blender against the C# at all five stages and the exported GLB byte for byte)
-    on the Hunley with and without the setting and on seven new fixtures - `fx_r_wheel_centre` (a three-bladed screw
-    whose box centre is 0.19 off its shaft, a fan of two parts, a rotor that must stay), `_box` (the same model
-    without the tag), `_x` (a forced axle), `_flat` (a wheel of one zero-area triangle), and the setting on live
-    tracks, where the tread's wrap bones copy wheel bones that no longer sit at their clusters' box centres:
-    `fx_r_tracks_centre` (the nine carriers), `fx_r_tracks_hybrid_centre` (the conveyor's link bones) and
-    `fx_links_centre` (rigid links). The drill fails if one of the seven is left to Blender by name or the C# never
-    takes the branch. Measured with them: 178 jobs, 172 equal, 6 left by name as before, 124 exports byte-identical;
-    unit tests that take their
+    on the Hunley with and without the setting and on eight new fixtures - `fx_r_wheel_centre` (a three-bladed screw
+    whose box centre is 0.19 off its shaft, a fan of a hub and one blade with the blade listed twice, a rotor that
+    must stay), `_box` (the same model without the tag), `_x` and `_z` (a forced axle), `_flat` (a wheel of one
+    zero-area triangle), and the setting on live tracks, where the tread's wrap bones copy wheel bones that no longer
+    sit at their anchors' box centres: `fx_r_tracks_centre` (the nine carriers), `fx_r_tracks_hybrid_centre` (the
+    conveyor's link bones) and `fx_links_centre` (rigid links). The drill fails if one of the eight is left to
+    Blender by name or the C# never takes the branch. Measured on a scratch project holding the two Hunley recipes
+    (the full recipe set ran in the Blender parity run): 179 jobs, 173 equal, 6 left to Blender by name, none of them
+    a wheel centre fixture, 125 exports byte-identical; unit tests that take their
     expectation from the shape - the bone ON the shaft for 2, 3, 4, 5 and 7 blades, a two-part cluster against areas
     worked out by hand, a four-corner face against its two triangles - in C# and for the script's helper in Python.
     Twelve planted defects (the tag ignored, every triangle weighing the same, the centroid on every axis, a rotor
@@ -51,10 +58,30 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     bone's tail laid from the box centre; four in the script's helper) each fail at least one of those tests. The
     first round caught eleven: the test screw's first blade stood at 90 degrees, which leaves the box centred in x,
     so a tail laid from the box centre passed. The screw now starts at 20 degrees, off the shaft on both axes.
-  - **Not checked:** nothing was looked at in the Vehicle Lab's preview or in the game. Rotors, the gun and the
+  - **Review before the merge (two reviewers on a scratch copy, by execution).** No input was found on which the
+    script and the port differ: 17 further fixtures of the reviewer's own were equal through the export (animated
+    and reduced wheels, mirrored nodes, a Z axle, point and line wheels), and a probe of 40 centroids and 30 stage
+    runs gave the same bits on .NET and on Unity's Mono. Found and fixed: (1) the docs said a propeller cut into a
+    hub and separate blades "works too" - it gives one wheel per blade (the fixture's fan had the HUB as its biggest
+    part; a real propeller is the reverse); the claim is replaced by the rule above. (2) The zero-area warning was
+    not of the shape the status box shows, and neither was the line that says where the bone went: both are shown
+    now. (3) A part listed twice in the wheel names weighed double and moved the pivot (0.07 on the reviewer's
+    model): a name counts once, in the script and the port. (4) "Never the speed" was wrong: the symmetry snap reads
+    the bone - on the reviewer's ground wheel with a large off-axle part the snapped 60 degrees became 80, three
+    screws kept theirs; tooltip and docs now say what follows the bone. (5) Verify printed box centres as "the bones
+    Generate will build": it says so under the setting. (6) No fixture had a Z axle under the tag and the last road
+    wheel had no shard (`fx_r_wheel_centre_z`; a lug on RoadR). Ten more plants from the review, each now caught: a Z
+    axle taking the centroid along it, a part listed twice, the line's digits, the warning's shape, and in the script
+    the head never moved, the tail from the box centre, only the anchor weighed, the world matrix dropped. One of my
+    own new tests did not discriminate at first (both parts listed twice leaves the centroid where it is).
+  - **Not checked:** nothing was looked at in the Vehicle Lab's preview or in the game, and the window's side of the
+    setting (popup to Generate to the tag) is executed by no test: no saved recipe carries `wheelCentre`, and a
+    planted removal of the field from the window's argument filling passed every check. Rotors, the gun and the
     turret keep their box-based pivots. On a tracked vehicle the two routes agree, but whether a tread still LOOKS
     right is not measured: its path is fitted to the wheels' boxes while its wrap bones follow the moved wheel bones.
-    The setting is one per model, not per wheel.
+    A wheel of polygons on Blender's route (an `.fbx`, `.obj` or `.blend` source) is not covered: the fan from a
+    face's first corner is exact for flat convex faces only. With spin disabled the control is greyed with the rest
+    of the section but the tag is still sent (the bone's place does not depend on the spin).
 
 - **Tech Tree viewer: a technology's title, description and image (2026-11-22, PR #309; the review's fixes in the PR after it).** Asked for by the user:
   "edit more, starting with the tech title and description and the ability to change the tech image".

@@ -264,11 +264,11 @@ public static partial class BlenderVehicleRig
                 {
                     // wheelcentre=area: the pivot leaves the box centre for the cluster's surface centroid, across the axle only
                     // (Vector(tuple(c[k] if ax[k] != 0.0 else centroid[k])): the Python floats into float32)
-                    var members = new List<BlenderRigAnim.SceneObject>();
-                    foreach (var wn in cl.names) members.Add(Find(wn));   // found once already, at the clustering
+                    var members = new List<BlenderRigAnim.SceneObject>(); var seen = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var wn in cl.names) if (seen.Add(wn)) members.Add(Find(wn));   // found once already, at the clustering; a part listed twice is one surface
                     var ac = AreaCentroid(members);
                     string wheel = string.Format(CultureInfo.InvariantCulture, "Wheel_{0:00}", i);
-                    if (ac == null) { s.Logs3.Add("VEHICLE WARNING: wheel centre: " + wheel + " has no surface area - the box centre kept"); Note(s, "a wheel without surface area under wheelcentre=area"); }
+                    if (ac == null) { s.Logs3.Add("VEHICLE *** WARNING: wheel centre: " + wheel + " has no surface area - the box centre kept"); Note(s, "a wheel without surface area under wheelcentre=area"); }
                     else
                     {
                         var piv = new float[3];
