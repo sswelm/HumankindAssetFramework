@@ -10,6 +10,34 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **The regex readers take a number in any JSON spelling, and the fallback's `idleAltInterval` default is the
+  schema's (2026-11-23).** Found by the review of the culture PR, whose fraction test passes because a plain decimal
+  was always read right.
+  - **The defect:** the fallback of `ParseModels` (taken when `pack.json` will not parse as JSON) read floats with
+    two patterns copied from dial to dial. `-?[\d.eE+]+` has no `-` inside: `1.5e-2` stopped at the `e`, the parse of
+    `1.5e` failed, and the dial came back as its default. `-?[0-9.]+`, on eleven dials, has no exponent: `1.5e+2`
+    read 1.5. The first pattern also sat in the district fallback (`footprintMeshFlatHeight`) and in the pack tuning
+    table's `scale`, which is read by pattern on the main path: a rule with `"scale": 2.5e-1` was dropped without a
+    word.
+  - **The fix:** one pattern, `UniversalInject.JsonNumber`, in all 40 places (38 in `ParseModels`, `position`'s three
+    numbers among them). It takes a whole token or nothing: `2.5em` is not read as 2.5, the dial keeps its default.
+    The two old patterns disagreed there.
+  - **A second fix in the same lines:** a pack that needed the fallback and left `idleAltInterval` out got 0 (the
+    idle-alt one-shots off) where the JSON path gives the schema's 25. Four reviews carried it; the Review-Backlog had
+    marked it fixed on the strength of the JSON path alone.
+  - **Tests (`Tests/RegexFallbackNumberTests.cs`, 27 cases; the suite is 2,952):** every float a pack can set, and
+    `position`, in twelve spellings against the runtime's own parse and the JSON parser; tokens that are not wholly a
+    number; every float dial left out; the district fallback; the unit-scale rule. On the code before the fix 18 of
+    them fail. `PackTuningLegacyParityTests` loses its `1e-3` row, which held the parser to the legacy loop's defect,
+    and gains it as a second intended divergence (2 cases, both failing before the fix).
+  - **Planted in the fixed code, eight defects, all caught:** the lookahead removed, the exponent's `-` removed, one
+    dial put back on each old pattern (`turnRate`, `soundVolume`, `position`'s z), the default back to 0, the district
+    reader and the tuning table back on the old pattern.
+  - **On the real data:** ENC's `pack.json` holds no number in exponent form and names `idleAltInterval` on every
+    entry. Broken on purpose to force the fallback, its 49 models and 2,156 float values read the same as through the
+    JSON parser, before and after the fix. Nothing changes for the pack as it is.
+  - **Needs a plugin build and deploy** to reach the game (`tools/deploy-plugin.sh`); not done by this PR.
+
 - **The unit suite runs under a comma-decimal culture on every machine (2026-11-23).** From the critical review of
   that day: the suite took the machine's culture, so a dropped `InvariantCulture` failed on the author's Dutch machine
   and passed on CI's en-US runner.

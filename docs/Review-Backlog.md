@@ -1814,14 +1814,15 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   replaces `MoveTechnologyInQueue` with a list operation. A hand port of the game's move, fuzzed over 40,000 random
   queues with several parents per technology, always ended and kept parents in front — a port, not the method. The
   drill could run the real method with only the `SetSynchronizationDirty` call stripped, as it does for the removal.
-- **The regex fallback of `ParseModels` does not read a number in exponent form (2026-11-23, measured in the review of
-  PR #313; NOT fixed).** The fallback runs when `pack.json` will not parse as JSON. Its float patterns are
-  `-?[\d.eE+]+` (no `-` inside, so `1.5e-2`, `1e-05` and `9.999999747378752e-6` stop at the `e`: the dial comes back as
-  its default, `position` as 0,0,0) and, on eleven dials (`moveTilt`, `turnRate`, `turnBank`, the `gunElev*` and `hug*`
-  dials, `combatZ`, `rotorSpinSpeed`), `-?[0-9.]+` (no exponent at all: `1.5e+2` reads 1.5). Plain decimals agree with
-  the JSON parser on every dial (the test of that PR). A writer that spells a small float with an exponent, in a
-  pack that also needs the fallback, loses those dials without a word. Fix: one pattern for every float,
-  `-?[0-9.]+(?:[eE][+-]?[0-9]+)?`, and exponent spellings in `TestCultureTests`' fraction test.
+- ~~**The regex fallback of `ParseModels` does not read a number in exponent form (2026-11-23, measured in the review
+  of PR #313).**~~ **FIXED 2026-11-23** (the PR after it): every regex reader of a float takes one pattern,
+  `UniversalInject.JsonNumber`, and `Tests/RegexFallbackNumberTests.cs` gives every float dial twelve spellings. The
+  same defect sat in two more readers and went with it: the district fallback's `footprintMeshFlatHeight`, and the
+  pack tuning table's `scale`, which is read by pattern on the main path (a rule with `"scale": 2.5e-1` was dropped
+  without a word). Original: the fallback runs when `pack.json` will not parse as JSON. Its float patterns were
+  `-?[\d.eE+]+` (no `-` inside, so `1.5e-2`, `1e-05` and `9.999999747378752e-6` stopped at the `e`: the dial came back
+  as its default, `position` as 0,0,0) and, on eleven dials (`moveTilt`, `turnRate`, `turnBank`, the `gunElev*` and
+  `hug*` dials, `combatZ`, `rotorSpinSpeed`), `-?[0-9.]+` (no exponent at all: `1.5e+2` read 1.5).
 - **Five hook behaviours the game drill does not hold (2026-11-23, planted in the review of PR #312).** Each plant in
   `Patches/TechRequireAllPatch.cs` passed the unit suite and the drill: (1) the config switch inverted (:71; the drill
   never binds `Plugin.TechRequireAllOn`, so a feature that is off everywhere passes); (2) queueing a listed technology
@@ -1980,7 +1981,10 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   (ENC unused), so deferred.
 - ~~**`idleAltInterval` default mismatch** (editor 25f / plugin 0f) — a pack.json missing the key gets idle-alt
   disabled instead of the documented 25s cadence.~~ **FIXED 2026-08-16** by the shared-schema field initializers
-  (one authoritative default = 25f, test-pinned; see the Framework-Review generic-parse row).
+  (one authoritative default = 25f, test-pinned; see the Framework-Review generic-parse row). **Half fixed, as four
+  reviews found (10-12 to 11-23):** that fix and its test covered the JSON path; the regex fallback kept its own
+  literal `0f` until **2026-11-23**, when `RegexFallbackNumberTests.AFloatDialLeftOut_DefaultsTheSameThroughTheRegexFallback`
+  began to hold every float dial's default on both paths.
 - ~~**`haf_districts.json` has no regex fallback**~~ — **STALE (duplicate): already struck above, fixed 2026-08-22.** `ParseDistricts` = `Usable(ParseDistrictsRaw(text))` with a per-entry try and `RegexDistricts` as the fallback. Original: — one malformed char disables ALL custom districts (the model
   registry has a fallback; districts don't).
 - ~~**`animated` flag written but not read**~~ — **STALE, closed 2026-08-23 sweep — this is BY DESIGN and already policed.** `check_schema_parity.sh` lists `animated` in its "baker fields not read at runtime (bake-time-only, expected)" allowlist, so the asymmetry is declared and gated, not drifting. Original: — the plugin infers animation from the clip-GUID presence, so the field

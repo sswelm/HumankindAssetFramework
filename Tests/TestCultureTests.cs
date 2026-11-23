@@ -104,9 +104,8 @@ namespace HumankindAssetFramework.Tests
         // the shared schema's, and the plugin-only `rotorSpinSpeed`, which the first version of this test missed by
         // reflecting over the schema class alone (the review of PR #313).
         //
-        // NOT HELD HERE: a number in exponent form. The fallback's patterns do not take one whole (1.5e-2 comes back as
-        // the default, 1.5e+2 as 1.5 on eleven dials; Review-Backlog, 2026-11-23), so the fractions below are written
-        // without an exponent.
+        // NOT HELD HERE: how a number is spelled (an exponent, a sign). RegexFallbackNumberTests holds that, on the same
+        // fields; the fractions below are plain decimals because the culture is this test's subject.
         [Fact]
         public void EveryFloatDialAPackCanSet_ReadsAFractionTheSameThroughTheRegexFallback()
         {

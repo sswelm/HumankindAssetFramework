@@ -4,7 +4,7 @@ HAF is verified in **three tiers**, each a machine, each at the level where its 
 
 | Tier | Runs | Guards |
 |---|---|---|
-| **Unit tests** — **2,923 as of 2026-11-23** (`dotnet test` prints the live number; this one drifts) | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
+| **Unit tests** — **2,952 as of 2026-11-23** (`dotnet test` prints the live number; this one drifts) | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
 | **Headless game checks** | `tools/check-catalog.sh` in the push gate; `tools/check-bindings.sh` on demand / after a game update | **two halves of one claim**: `check-catalog.sh` proves the catalog **covers the code** (every by-name literal at a reflection site is catalogued or allowlisted with a reason), `bindcheck` proves it **resolves** against the real DLLs; `typeprobe --find` / `--exact` locate a seam or a member's owner before a binding is written |
 | **In-game smoke test** — `[load]` automatic, `[full]` on the F8 button | every load (a few ms, once), and on request | the injecting half, read from the **engine**: bindings, registry, roles, assets, sounds, files, GPU budget, district tiles and textures, patched seams — and, on the button, every live pawn on *our* skeleton, pose-hook liveness, the sub-pawn walk vs a scene scan, the write-back self-test |
 
@@ -26,9 +26,11 @@ name fails every test and says why. The push gate removes the variable for its o
 the test thread and on worker threads, and gives every float a pack can set (the shared schema's, the plugin-only
 `rotorSpinSpeed`, and `position`) a fraction that must read the same through the regex fallback of `ParseModels` as
 through the JSON parser. Not held by any test: the `muzzleOffset` and `handPropAngles` strings, which are parsed
-inside the injection code; a number in exponent form in the fallback (a defect, in the
-[Review-Backlog](Review-Backlog.md)); formatting in log lines, warnings and windows; and culture-sensitive
-casing (the default culture is not Turkish).
+inside the injection code; formatting in log lines, warnings and windows; and culture-sensitive casing (the default
+culture is not Turkish). How a number may be SPELLED is held beside it, in `Tests/RegexFallbackNumberTests.cs`: every
+float dial, `position`, the district fallback's flat height and a unit-scale rule read twelve spellings (plain,
+negative, and exponent forms with either sign and either case) as the JSON parser and the runtime's own parse do, and
+a dial left out of an entry defaults the same through the fallback as through the parser.
 
 The unit suite is a deliberate, bounded suite, not a coverage target: it guards the functions where bugs have actually
 hidden, and stops there on purpose. What it cannot reach — the ~18k lines that reflect into a running game — is not

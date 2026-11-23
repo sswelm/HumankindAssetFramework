@@ -205,7 +205,7 @@ namespace HumankindAssetFramework
             var fbw  = Regex.Matches(text, "\"footprintMeshBW\"\\s*:\\s*(true|false)");
             var ffl  = Regex.Matches(text, "\"footprintMeshFlat\"\\s*:\\s*(true|false)");
             var fhd  = Regex.Matches(text, "\"footprintMeshHideDecal\"\\s*:\\s*(true|false)");
-            var ffh  = Regex.Matches(text, "\"footprintMeshFlatHeight\"\\s*:\\s*(-?[\\d.eE+]+)");
+            var ffh  = Regex.Matches(text, "\"footprintMeshFlatHeight\"\\s*:\\s*(" + UniversalInject.JsonNumber + ")");
             for (int i = 0; i < names.Count; i++)
             {
                 var e = new DistrictModel
