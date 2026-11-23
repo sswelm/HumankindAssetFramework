@@ -22,7 +22,10 @@ dotnet build "$ROOT/HumankindAssetFramework.csproj" -c Release --nologo -v q -p:
 dotnet build "$ROOT/tools/tech-requires-all-drill/TechRequireAllGameDrill.csproj" -c Release --nologo -v q || { echo 'FAIL — drill build'; exit 1; }
 EXE="$ROOT/tools/tech-requires-all-drill/bin/Release/HumankindAssetFramework.Tests.exe"
 WMANAGED="$(cygpath -m "$MANAGED" 2>/dev/null || echo "$MANAGED")"
-"$EXE" "$WMANAGED"; rc=$?
+# The stage is this script's to set, never the shell's: with HAF_DRILL_STAGE=load or nolist still exported from a hand
+# run, the first pass ran that stage and the script printed PASS on 12 or 24 checks instead of 47 (the second review of
+# PR #312). "full" is no stage the drill knows: the whole run, with a list.
+HAF_DRILL_STAGE=full "$EXE" "$WMANAGED"; rc=$?
 [ "$rc" -eq 0 ] || { echo "FAIL — TechRequireAll game drill (rc=$rc)"; exit 1; }
 # The removal guard must hold WITHOUT a list: a save made with one keeps its queue constraints. A run of its own,
 # because the plugin reads the list once per process.

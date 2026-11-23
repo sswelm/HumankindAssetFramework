@@ -3,8 +3,9 @@
 # build, a failing unit test, a broken doc link, or a drifted registry schema. Wired as the pre-push hook (tools/git-hooks/pre-push);
 # also runnable by hand any time:  bash tools/check.sh   (lowercase tools/ — this repo, unlike ENCReload's Tools/)
 #
-# Deliberately NOT here (too slow / need Unity or the game): deploy_regression.sh (Blender golden-master), the
-# in-editor Feature Test, and the in-game binding report (haf_bindings_report.txt). The source-only steps take
+# Deliberately NOT here (too slow / need Unity or a RUNNING game): deploy_regression.sh (Blender golden-master), the
+# in-editor Feature Test, and the in-game binding report (haf_bindings_report.txt). One step reads the INSTALLED game's
+# assemblies without starting it: the TechRequireAll game drill (2026-11-23). The source-only steps take
 # seconds; with the Unity-backed drills (in parallel since 2026-10-11, the source guards on a lane beside them since
 # 2026-10-29) the push takes a few minutes.
 #
@@ -393,6 +394,9 @@ push_step run_lane "worker thread (no main-thread Unity API inside a Task.Run bo
 push_step run_lane "package meta (every editor/ path has one)" bash "$ROOT/tools/check-package-meta.sh"
 push_step run_lane "bake-test golden checksums (SKIP without the project)" bash "$ROOT/tools/check-goldens.sh"
 push_step run_lane "exit status (no gate script reads a status from the end of a pipeline)" bash "$ROOT/tools/check-exit-status.sh"
+# The game drill's own statuses, without the game: a missing folder is a SKIP and never a PASS, a folder that is not the
+# game's is a FAIL that names it, every pass sets its own stage (the second review of PR #312: none of it was tested).
+push_step run_lane "TechRequireAll drill script tests (a missing game is a SKIP, a wrong folder a named FAIL, every pass sets its stage)" python "$ROOT/Tests/test_tech_drill_script.py"
 # THE TECHREQUIREALL HOOKS AGAINST THE GAME'S OWN ASSEMBLIES (2026-11-23). The unit suite holds the pure rules
 # (TechRequireAllRules); the hook bodies - the ALL rule in the state update, the locked enqueue, the cascading removal's
 # guard - run only here. The 2026-11-23 review planted `names.Length < 2` -> `< 3` in StillLocked (a technology with two
@@ -401,8 +405,9 @@ push_step run_lane "exit status (no gate script reads a status from the end of a
 # nor Blender; without the game it SKIPs.
 # LAST ON THE LANE, not started beside the drills: the script builds the plugin itself (so it judges the tree being
 # pushed, and a tree that does not build fails here by name), and the buffer hook drill builds the same project the
-# moment the drills start - the two at once failed one round in ten on each other's files (the review of PR #312). By the
-# end of the lane, minutes later, nothing else builds or reads bin/Release.
+# moment the drills start - the two at once, with a recompile forced in every round, failed one round in ten on each
+# other's files (the review of PR #312; in the gate the plugin's build stamp forces that recompile whenever the minute
+# has turned). By the end of the lane, minutes later, nothing else builds or reads bin/Release.
 # A game update that changes a hooked method fails this step, and so every push, until the hooks follow it: that is also
 # when the feature is broken in the game.
 push_step run_lane "TechRequireAll game drill (the hooks against the installed game's assemblies: the ALL rule, the locked enqueue and the cascading removal, with a list and without one; SKIP without the game)" bash "$ROOT/tools/tech_requires_all_game_drill.sh"
