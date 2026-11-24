@@ -33,6 +33,7 @@ public static partial class GlbDisconnectedParts
         public bool Changed => NodesSplit > 0;
         // FUSE (2026-09-15) — what the weld and the winding pass did, so the Workshop can say it in one line
         public int VerticesBefore, VerticesAfter, IslandsBefore, IslandsAfter, FacesRewound;
+        public int HiddenFacesRemoved;   // faces left out because they lay exactly on a face wound the other way where no camera above the horizon sees them (GlbDisconnectedParts.Covered.cs); SourceTriangles = OutputTriangles + this
         public readonly List<string> IslandLines = new List<string>();   // EVERY sheet's verdict, largest first (the report; Details keeps the largest six for the status)
         public int FusedNodeIndex = -1; public string FusedNodeName;   // the appended shell (a fuse only): the output sidecar names it with its group's letter
         public Compaction Compaction;   // what writing the output left out (never null on a written result); its line is the LAST of Details when it has one
@@ -1323,8 +1324,10 @@ public static partial class GlbDisconnectedParts
     // the same day: a blind normal recalc flipped 40 % of a 99.6 %-edge-consistent island (overlapping plates are
     // not the manifold solid it assumes), and the radial score on a closed thin shell reads ~0 (inner faces cancel
     // outer). Vertex normals follow the final winding (negated where every incident face was reversed, recomputed
-    // where mixed). Triangles are preserved exactly; the source nodes keep their transforms and children and lose
-    // only their mesh; the fused mesh lands on a new root node in world space.
+    // where mixed). Triangles are preserved exactly, but for HIDDEN TWINS, which are left out (2026-11-24,
+    // GlbDisconnectedParts.Covered.cs: a face lying exactly on a face wound the other way, seen by no camera above the
+    // horizon); the source nodes keep their transforms and children and lose only their mesh; the fused mesh lands on a
+    // new root node in world space.
     // An open island's signed volume counts as a judgement of facing only when |volume| / area^1.5 (~ thickness over
     // sheet width for a thin solid) clears this. Measured on the Teutonic (2026-09-15): plating regions read 0.044,
     // 0.047, 0.137, 0.158 and 0.222; an 18-face strip 0.004; the lap-over-plate fixture 0.001. A flat sheet reads 0.
@@ -1523,6 +1526,7 @@ public static partial class GlbDisconnectedParts
         public double Weld, WeldFraction, Longest; public int MadeConsistent, OpenJudged, OpenReversed, ClosedReversed, FaceCount, CollapsedFaces, NotOrientable;
         public string LargestIslands, StitchedLine, RewoundByPart, Timing, FrameLine;
         public string MirroredLine;   // the mirrored-part check's verdicts (null unless the check ran with the option on)
+        public string HiddenTwinsLine;   // what the hidden-twin pass removed and kept (null unless it found a candidate)
         public string TwinsLine, TwinsRestoredLine, AsAuthoredLine, FromAboveLine, UndersideLine;   // doubled-face diagnostics (null unless found) - appended AFTER the summary, which the Workshop shows as Details[0] (review of PR #82, P3)
         public int MirroredJudgedUndo, MirroredJudgedKeep, MirroredParts;   // this group's evidence, pooled across the run by FuseGroups
         public IList<int> NodeIndices; public string FusedName; public bool CheckMirrored;   // enough to re-plan the group once the run's verdict is known
@@ -2995,13 +2999,54 @@ public static partial class GlbDisconnectedParts
             "double walls: {0} sheet(s) twinned on most faces with an undecided vote keep their authored winding - the radial score and the parity walk judge single skins", asAuthoredSheets);
         if (twinsRestored > 0) plan.TwinsRestoredLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
             "twins: {0} face(s) of doubled pairs had been turned by the winding passes and keep their authored winding instead - a pair wound both ways is already two-sided", twinsRestored);
-        foreach (bool b in flip) if (b) result.FacesRewound++;
+        // HIDDEN TWINS (2026-11-24, the RSS Centurion's upper deck; GlbDisconnectedParts.Covered.cs): where a face lies exactly
+        // on a face wound the other way and no camera above the horizon sees its front, the fused mesh carries the visible
+        // one only. Judged on the FINAL winding, after every pass above, and before any count is taken: FacesRewound and
+        // the per-part line count what is in the output.
+        bool[] drop;
+        {
+            var finalCorners = new double[9 * faceCount]; var glassFace = new bool[faceCount];
+            JArray materialsJson = root["materials"] as JArray;
+            for (int f = 0; f < faceCount; f++)
+            {
+                for (int c = 0; c < 3; c++)
+                {
+                    Vec3 v = P(f, flip[f] && c > 0 ? 3 - c : c);
+                    finalCorners[9 * f + 3 * c] = v.X; finalCorners[9 * f + 3 * c + 1] = v.Y; finalCorners[9 * f + 3 * c + 2] = v.Z;
+                }
+                glassFace[f] = MaterialIsBlend(materialsJson, mat[tris[f * 3]]);
+            }
+            CoveredFaces hiddenTwins = FindCoveredFaces(finalCorners, rounding, glassFace, () =>
+            {
+                // every other node of the file, as the exposure tests above read them: the fuse's one ray tree, this group's own nodes left out
+                TriBvh file = fileCache.RayTree();
+                var ownNodes = new bool[nodes.Count]; foreach (int ni in picked) if (ni >= 0 && ni < ownNodes.Length) ownNodes[ni] = true;
+                return (ox, oy, oz, dx, dy, dz) => file.Blocked(ox, oy, oz, dx, dy, dz, ownNodes, null);
+            }, FuseParallel.MaxDegreeOfParallelism);
+            drop = hiddenTwins.Drop; result.HiddenFacesRemoved = hiddenTwins.Removed;
+            if (hiddenTwins.Candidates > 0)
+            {
+                var removedOf = new int[picked.Count];
+                for (int f = 0; f < faceCount; f++) if (drop[f]) removedOf[partOf[tris[f * 3]]]++;
+                string byPart = string.Join(", ", Enumerable.Range(0, picked.Count).Where(pp => removedOf[pp] > 0).OrderByDescending(pp => removedOf[pp]).Take(6)
+                    .Select(pp => partNames[pp] + " " + removedOf[pp].ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                var culture = System.Globalization.CultureInfo.InvariantCulture;
+                string kept = string.Format(culture, "kept: {0} whose pair shows on both sides (two-sided by duplication), {1} buried on both sides; of {2} coincident face(s), found in {3} ms, rays {4} ms",
+                    hiddenTwins.TwoSidedKept, hiddenTwins.BuriedKept, hiddenTwins.Candidates, hiddenTwins.CoincideMs, hiddenTwins.RayMs);
+                plan.HiddenTwinsLine = hiddenTwins.Removed > 0
+                    ? string.Format(culture, "hidden twins: {0} face(s) lay exactly on a face wound the other way and no camera above the horizon can see them - left out, so one surface remains{1}; {2}",
+                        hiddenTwins.Removed, byPart.Length > 0 ? " (by part: " + byPart + ")" : "", kept)
+                    : "hidden twins: none left out; " + kept;
+            }
+        }
+        Mark("hidden twins");
+        for (int f = 0; f < faceCount; f++) if (flip[f] && !drop[f]) result.FacesRewound++;
         // per PART: how many of its faces were turned — the reader's question after "why does my port side still render
         // inside out" is which part the pass left alone (2026-09-18, the Romanic's group D)
         string rewoundByPart;
         {
             var facesOf = new int[picked.Count]; var turnedOf = new int[picked.Count];
-            for (int f = 0; f < faceCount; f++) { int pp = partOf[tris[f * 3]]; facesOf[pp]++; if (flip[f]) turnedOf[pp]++; }
+            for (int f = 0; f < faceCount; f++) { int pp = partOf[tris[f * 3]]; facesOf[pp]++; if (flip[f] && !drop[f]) turnedOf[pp]++; }
             rewoundByPart = "rewound by part: " + string.Join("; ", Enumerable.Range(0, picked.Count).Select(pp => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} {1}/{2}", partNames[pp], turnedOf[pp], facesOf[pp])));
         }
         // the largest islands, so a reader can see WHAT was judged (faces, boundary share, how many faces the majority
@@ -3031,7 +3076,7 @@ public static partial class GlbDisconnectedParts
         Mark("report");
         // 6) vertex normals follow the final winding
         var incident = new List<int>[pos.Count];
-        for (int f = 0; f < faceCount; f++) for (int c = 0; c < 3; c++) { int v = tris[f * 3 + c]; (incident[v] ?? (incident[v] = new List<int>())).Add(f); }
+        for (int f = 0; f < faceCount; f++) if (!drop[f]) for (int c = 0; c < 3; c++) { int v = tris[f * 3 + c]; (incident[v] ?? (incident[v] = new List<int>())).Add(f); }   // a face left out shapes no normal and keeps no vertex
         // The authored normal is kept (its smoothing is the artist's) with its SIGN chosen to agree with the final winding:
         // the sum of the incident faces' geometric normals. "Negate it when every incident face was flipped" was the
         // first rule, and it assumed the authored normal agreed with the authored winding — a mirrored instance (the
@@ -3099,14 +3144,15 @@ public static partial class GlbDisconnectedParts
         }
         for (int f = 0; f < faceCount; f++)
         {
+            if (drop[f]) continue;
             FusePrimitive prim = primitiveOf[mat[tris[f * 3]]];
             int i0 = vertexMap[tris[f * 3]], i1 = vertexMap[tris[f * 3 + 1]], i2 = vertexMap[tris[f * 3 + 2]];
             if (flip[f]) { int t = i1; i1 = i2; i2 = t; }
             prim.Indices.Add((uint)i0); prim.Indices.Add((uint)i1); prim.Indices.Add((uint)i2);
             result.OutputTriangles++;
         }
-        if (result.OutputTriangles != result.SourceTriangles)
-            throw new InvalidDataException("Triangle preservation check failed: source " + result.SourceTriangles + ", output " + result.OutputTriangles + ".");
+        if (result.OutputTriangles + result.HiddenFacesRemoved != result.SourceTriangles)
+            throw new InvalidDataException("Triangle preservation check failed: source " + result.SourceTriangles + ", output " + result.OutputTriangles + ", hidden twins left out " + result.HiddenFacesRemoved + ".");
         foreach (FusePrimitive prim in primitiveOf.Values) result.VerticesAfter += prim.Positions.Count / 3;
 
         Mark("vertices");
@@ -3167,10 +3213,11 @@ public static partial class GlbDisconnectedParts
         result.FusedNodeIndex = newNodeIndex; result.FusedNodeName = newNodeName;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         result.Details.Add(string.Format(inv,
-            "Fused {0} part(s) -> '{1}': {2} -> {3} verts (seams welded within {4:0.####} = {5:0.##}‰ of {6:0.#}); islands {7} -> {8}; {9} made consistent{16}; {10} open sheet(s) judged, {11} reversed; {12} closed shell(s) reversed whole; {13} of {14} face(s) rewound; {15} face(s) smaller than the weld kept collapsed",
+            "Fused {0} part(s) -> '{1}': {2} -> {3} verts (seams welded within {4:0.####} = {5:0.##}‰ of {6:0.#}); islands {7} -> {8}; {9} made consistent{16}; {10} open sheet(s) judged, {11} reversed; {12} closed shell(s) reversed whole; {13} of {14} face(s) rewound; {15} face(s) smaller than the weld kept collapsed{17}",
             picked.Count, newNodeName, result.VerticesBefore, result.VerticesAfter, plan.Weld, plan.WeldFraction * 1000.0, plan.Longest, result.IslandsBefore, result.IslandsAfter,
             plan.MadeConsistent, plan.OpenJudged, plan.OpenReversed, plan.ClosedReversed, result.FacesRewound, plan.FaceCount, plan.CollapsedFaces,
-            plan.NotOrientable > 0 ? string.Format(inv, ", {0} not orientable by traversal (kept as authored)", plan.NotOrientable) : ""));
+            plan.NotOrientable > 0 ? string.Format(inv, ", {0} not orientable by traversal (kept as authored)", plan.NotOrientable) : "",
+            result.HiddenFacesRemoved > 0 ? string.Format(inv, "; {0} hidden twin face(s) left out", result.HiddenFacesRemoved) : ""));   // said only when it happened: the line is as it was otherwise
         result.Details.Add(plan.LargestIslands);
         if (plan.StitchedLine != null) result.Details.Add(plan.StitchedLine);   // Details[2] when present: the lap test pins it there
         result.Details.Add(plan.RewoundByPart);
@@ -3182,6 +3229,7 @@ public static partial class GlbDisconnectedParts
         if (plan.AsAuthoredLine != null) result.Details.Add(plan.AsAuthoredLine);
         if (plan.FromAboveLine != null) result.Details.Add(plan.FromAboveLine);
         if (plan.UndersideLine != null) result.Details.Add(plan.UndersideLine);
+        if (plan.HiddenTwinsLine != null) result.Details.Add(plan.HiddenTwinsLine);
     }
 
     // REMOVE (2026-09-18, user: "an easy way to mark a unit for removal with the Del key"): the marked nodes lose their

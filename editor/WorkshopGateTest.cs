@@ -163,7 +163,9 @@ public static class WorkshopGateTest
         { snap.Add("FUSE skipped (a skinned source — the Workshop fuses static parts only)"); return; }
         var r = results[0];
         if (r.OutputTriangles > r.SourceTriangles) problems.Add($"the fuse GAINED triangles ({r.SourceTriangles} -> {r.OutputTriangles})");
-        if (r.OutputTriangles * 2 < r.SourceTriangles) problems.Add($"the fuse kept only {r.OutputTriangles} of {r.SourceTriangles} triangles");
+        // every triangle is in the shell or is a hidden twin the fuse left out (2026-11-24; a doubled model loses close to half
+        // that way, which the old "kept at least half" bound took for damage): the two must add up, exactly
+        if (r.OutputTriangles + r.HiddenFacesRemoved != r.SourceTriangles) problems.Add($"the fuse lost triangles it does not account for ({r.SourceTriangles} -> {r.OutputTriangles}, {r.HiddenFacesRemoved} hidden twin(s) left out)");
         var fusedParts = GlbDisconnectedParts.Analyze(fused, 0);
         var shell = fusedParts.FirstOrDefault(p => p.NodeName == job.Name);
         if (shell == null) problems.Add("the fused shell is missing from the output");

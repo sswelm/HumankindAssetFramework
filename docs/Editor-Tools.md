@@ -579,7 +579,15 @@ windows. **Deep dive:**
   are read, never which way the thing above or below faces: a group's own faces carry whatever the passes have
   already done to them, and the source's own winding is what is in question. A part *double-sided by duplication* (every
   face twice, wound both ways) is kept as two copies through the weld, so each is judged and emitted whole — welded
-  together they made four-face edges everywhere and an importer then dropped one copy at random. Every sheet's report line now carries its
+  together they made four-face edges everywhere and an importer then dropped one copy at random. **Hidden twins are left out** (0.5.7): where a face lies
+  exactly on a face wound the other way — a ceiling under the deck laid on it, the inner copy of a doubled mast — and no
+  camera above the horizon can see its front while the other side is seen, the fused shell carries the visible face only.
+  The game drew the hidden one through the visible one (the RSS Centurion's upper deck, in grey patches). A pair that
+  shows on both sides (a flag, a boat's shell with a painted inside) keeps both, and so does a pair nothing sees; glass
+  hides nothing. The fused part then has FEWER triangles than its sources: the status line ends with
+  `N hidden twin face(s) left out`, and the report's `hidden twins:` line names the parts they came from and what was kept.
+  It also follows that the underside of a level sheet doubled in the open (an awning) is left out. Faces lying on each
+  other and wound the SAME way are a different defect and are not touched. Every sheet's report line now carries its
   levelness (`level +1.00` = every face up) and height, which is what makes a wrong verdict traceable. Welded vertices share one position even where a UV seam or hard edge keeps them separate;
   vertex colours, further UV sets and custom attributes ride along and keep their own seams too (tangents are the
   one thing dropped — the importer recomputes them from the new winding); and a mirrored instance (a node with negative scale, the usual "other half" of a symmetric hull) is read with the
@@ -621,7 +629,7 @@ windows. **Deep dive:**
   Backspace clear every mark. The Split checks and the deletion marks persist in `<source>.marks.txt` (S = split,
   X = delete, the fuse sidecar's format): **Save marks** / **Load marks** in the Cutter, Save/Load groups in the Fuser,
   and every Split, Plane cut and Fuse writes it; the first Probe of a file reads it. Both windows share it.
-  Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh;
+  Triangles are preserved exactly, hidden twins apart (above: they are left out); the source parts keep their transforms and children and lose only their mesh;
   the fused part is a new root node named `Fused_<letter>_<first row of the group>`. The output can never be the source file.
   The ⊕ letters persist beside the source as `<source>.glb.fuse.txt` (a `#fuse-groups v2` header, then one
   `letter|node index|name` line per marked part — the name last, so it may contain anything; written by every Fuse

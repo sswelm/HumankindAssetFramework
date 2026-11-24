@@ -76,6 +76,28 @@ public static partial class GlbDisconnectedParts
             FallbackBellyFrame(fallback, out lengthAxis, out widthAxis, out centreW, out bellyYOut, out floorY);
         }
 
+        // THE FILE IN ONE RAY TREE (2026-11-24, the hidden twins - GlbDisconnectedParts.Covered.cs): every node read, one
+        // segment a node (so a group leaves its own nodes out by index), the nodes made only of glass left empty. Built on
+        // first use under the lock, published last, shared read-only by every group of the fuse.
+        TriBvh rayGrid;
+        internal TriBvh RayTree()
+        {
+            var built = System.Threading.Volatile.Read(ref rayGrid);
+            if (built != null) return built;
+            lock (gate)
+            {
+                if (rayGrid != null) return rayGrid;
+                if (nodes == null) Build();
+                var solid = new double[nodes.Length][];
+                JObject root = document?.Root;
+                JArray fileNodes = root?["nodes"] as JArray ?? new JArray(), meshes = root?["meshes"] as JArray ?? new JArray(), materials = root?["materials"] as JArray;
+                for (int ni = 0; ni < nodes.Length; ni++)
+                    solid[ni] = nodes[ni].Length > 0 && NodeIsGlass(fileNodes, meshes, materials, ni) ? Array.Empty<double>() : nodes[ni];
+                System.Threading.Volatile.Write(ref rayGrid, new TriBvh(solid, null, 0));
+                return rayGrid;
+            }
+        }
+
         /// <summary>The segments of every node not in `picked`, in node order; boundsLo/Hi widened by those nodes' corners.</summary>
         public OccluderView View(ISet<int> picked, double[] boundsLo, double[] boundsHi)
         {
