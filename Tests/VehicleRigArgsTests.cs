@@ -128,6 +128,39 @@ public class VehicleRigArgsTests
         Assert.Equal(expected, r.args.treadMode);
     }
 
+    /// <summary>The wheel centre travels as a tagged argument, and only when it is the surface centroid: every recipe before
+    /// 2026-11-23 gives the argument line it always gave.</summary>
+    [Fact]
+    public void The_surface_centroid_wheel_centre_is_a_tag_of_its_own()
+    {
+        var a = Sample();
+        var box = VehicleRigArgLine.RigArgv(a);
+        Assert.DoesNotContain(box, v => v.value.StartsWith("wheelcentre=", StringComparison.Ordinal));
+        a.wheelCentre = 1;
+        var area = VehicleRigArgLine.RigArgv(a);
+        Assert.Equal(("wheelcentre=area", true), Assert.Single(area.Where(v => v.value.StartsWith("wheelcentre=", StringComparison.Ordinal))));
+        Assert.Equal(box.Select(v => v.value).ToList(), area.Select(v => v.value).Where(v => v != "wheelcentre=area").ToList());   // the tag is the only difference
+        Assert.Contains("\"wheelcentre=area\"", VehicleRigArgLine.RigArgLine(a));                                                  // one quoted token, like every tagged argument
+        a.spinEnabled = false; Assert.Contains(VehicleRigArgLine.RigArgv(a), v => v.value == "wheelcentre=area");                  // where the bone sits does not depend on the spin
+        a.fast = true; Assert.DoesNotContain(VehicleRigArgLine.RigArgv(a), v => v.value.StartsWith("wheelcentre=", StringComparison.Ordinal));     // the fast path places no wheel bone
+        a.fast = false; a.wheelCentre = 2; Assert.DoesNotContain(VehicleRigArgLine.RigArgv(a), v => v.value.StartsWith("wheelcentre=", StringComparison.Ordinal));   // an unknown kind sends nothing
+    }
+
+    [Theory]
+    [InlineData("", 0)]
+    [InlineData(",\"wheelCentre\":0", 0)]
+    [InlineData(",\"wheelCentre\":1", 1)]
+    [InlineData(",\"wheelCentre\":7", 0)]      // an unknown kind is the box centre, never a guess
+    [InlineData(",\"wheelCentre\":null", 0)]
+    public void A_recipe_names_the_wheel_centre_or_means_the_box(string field, int expected)
+    {
+        var r = VehicleRigArgLine.RigArgsFromRecipe("{\"srcFile\":\"D:/m/a.glb\",\"outGlb\":\"D:/m/a_Spin.glb\",\"frames\":15,\"axisChoice\":0,\"minVerts\":1,\"degrees\":60.0" + field + ",\"parts\":[{\"name\":\"P\",\"verts\":8,\"role\":1}]}");
+        Assert.Equal(expected, r.args.wheelCentre);
+        Assert.Equal(expected == 1, VehicleRigArgLine.RigArgv(WithNames(r.args)).Any(v => v.value == "wheelcentre=area"));
+    }
+
+    static VehicleRigArgs WithNames(VehicleRigArgs a) { foreach (var role in VehicleRigArgLine.NamesRoles) a.namesFiles[role] = "C:/p/a_" + role + ".txt"; return a; }
+
     [Fact]
     public void A_bare_recipe_reads_as_the_windows_defaults()
     {

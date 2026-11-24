@@ -210,6 +210,8 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] bool tracksStatic = false; // isolation switch: rig tread loops rigid to the hull (no link bones, no conveyor)
     [SerializeField] int treadMode = 0;         // 0 = hybrid conveyor (the tread since 2026-07), 1 = rigid links (instanced, full circuit - 2026-11-10)
     static readonly string[] TreadModeNames = { "Conveyor (cells + shuttles, short loop)", "Rigid links (instanced, full circuit)" };
+    [SerializeField] int wheelCentre = 0;       // 0 = a wheel bone at its anchor's box centre (every recipe before 2026-11-23), 1 = at the cluster's surface centroid (a screw with an odd blade count)
+    static readonly string[] WheelCentreNames = { "Box centre (round wheels)", "Surface centroid (screws, propellers)" };
     [SerializeField] bool spinEnabled = true;   // MASTER spin switch (2026-08-19, user request: disabling spin on a wheeled vehicle meant unmarking every wheel — the wave-checkbox lesson again). Off = generate with 0 spin degrees + static tracks; bones/markings all kept.
     [SerializeField] bool doubleSided = false;  // DOUBLE-SIDED at the source (2026-09-03): the game culls backfaces, so single-sided / CAD parts (thin spokes, plates) render see-through. On = vehicle_rig.py appends reversed, slightly-inset faces so the exported Spin GLB is genuinely two-sided — no runtime doubling, no preview mismatch.
     [SerializeField] Role bulkRole = Role.Ignore;   // "Mark all shown as" — the role applied to every filtered-in part at once
@@ -392,6 +394,7 @@ public class VehicleLabWindow : EditorWindow
         public int recoilLead = 0;         // held frames before the kick
         public bool tracksStatic = false;
         public int treadMode = 0;
+        public int wheelCentre = 0;        // absent-field = the box centre, as before
         public bool spinEnabled = true;    // default true: recipes that predate the field keep their spin (absent-field = old behavior)
         public bool doubleSided = false;   // source double-siding (absent-field = old behavior: off)
         public bool fixInsideOut = false;  // outward normal recalc (absent-field = old behavior: off)
@@ -945,6 +948,13 @@ public class VehicleLabWindow : EditorWindow
                 using (new EditorGUI.DisabledScope(spinInert || !spinEnabled))
                 {
                 axisChoice = EditorGUILayout.Popup(new GUIContent("Axle axis", "Auto infers each wheel's axle as its thinnest bbox extent — right for normal wheels; override only if a wheel spins the wrong way around."), axisChoice, AxisOptions);
+                using (new EditorGUI.DisabledScope(FastPath))   // the fast path spins the SOURCE's bones: no wheel bone is placed, the setting is not sent
+                wheelCentre = EditorGUILayout.Popup(new GUIContent("Wheel centre", "WHERE A WHEEL TURNS ABOUT. Box centre: the middle of the wheel's bounding box - exact for a round wheel, and what every earlier bake used. " +
+                    "Surface centroid: the area-weighted middle of the wheel's surface - pick it when a screw or propeller WOBBLES about a point beside its shaft. " +
+                    "A shape with an odd number of blades (3, 5, 7) has a box that is not centred on its axis; its surface centroid is. " +
+                    "Applies to every part marked Wheel (rotors keep their hub), per wheel as the parts are grouped: EVERY part of a wheel is weighed, so join a screw cut into separate blades into one part first, and do not mark off-axle furniture Wheel. " +
+                    "Only the pivot moves; the axle direction stays. Generate shows where each bone went in the status box. " +
+                    "Greyed out on the source-skeleton fast path: there the source's own bones are the pivots."), wheelCentre == 1 ? 1 : 0, WheelCentreNames);
                 if (list.Any(x => x.role == Role.TailRotor))
                 {
                     tailAxisChoice = EditorGUILayout.Popup(new GUIContent("Tail-rotor axle", "The tail fan spins about a DIFFERENT axis than the main rotor (lateral, not vertical). Auto reads it from the disc; if the fan spins wrong, pick X / Y / Z by eye in the preview — this affects ONLY the tail rotor, so the main rotor stays put."), tailAxisChoice, AxisOptions);
@@ -1779,7 +1789,8 @@ public class VehicleLabWindow : EditorWindow
     }
 
     // Sanity report on the current classification — mirrors the rig script's wheel clustering so the numbers
-    // shown here are exactly the bones Vehicleize will build.
+    // shown here are exactly the bones Vehicleize will build (under Wheel centre = Surface centroid the wheel bones
+    // leave these box centres across the axle: the report says so, Generate prints where).
     void VerifySelection()
     {
         var report = new List<(string text, string part)>();
@@ -1819,6 +1830,9 @@ public class VehicleLabWindow : EditorWindow
                                 (stray ? "  ⚠ small anchor — stray shard far from every wheel? (becomes its own bone)" : ""), c.anchor.name));
                 }
                 if (clusters.Count > 12) report.Add(($"    … and {clusters.Count - 12} more", null));
+                // the positions above are the anchors' BOX centres; under Wheel centre = Surface centroid the bone is elsewhere across the axle
+                if (wheelCentre == 1 && !FastPath)
+                    report.Add(("    Wheel centre = Surface centroid: each wheel bone will sit at its parts' surface centroid across the axle, not at the box centre shown above (Generate prints where).", null));
                 // axle-agreement + left/right-mirror are CAR geometry (paired wheels, one shared axle) — WHEELS ONLY.
                 if (clusters.Select(c => AxleIdx(c.anchor)).Distinct().Count() > 1)
                 { report.Add(("  ⚠ wheel anchors disagree on the axle axis — a stray cluster, or set the Axle axis override.", null)); warn = true; }
@@ -1974,7 +1988,7 @@ public class VehicleLabWindow : EditorWindow
         srcFile = ""; outGlb = ""; lastOutGlb = ""; loadedRecipe = ""; recipeReadThisSession = false; savedRecipeJson = "";
         parts.Clear(); boneParts.Clear(); useSourceRig = false;
         frames = 15; degrees = -360f; axisChoice = 0;
-        treadAdvCells = 3; treadCellsPerLink = 4f; tracksStatic = false; treadMode = 0;
+        treadAdvCells = 3; treadCellsPerLink = 4f; tracksStatic = false; treadMode = 0; wheelCentre = 0;
         rockDegrees = 0f; rockFrames = 120; rockAxisChoice = 0; rockHeading = 0f; rockPitchDeg = 2.4f; rockRollCycles = 1; rockPitchCycles = 1; rockPitchPhase = 90f; waveEnabled = false; foldSpin = true; foldWave = false; foldOrient = false; foldParts = true; foldOars = false; foldReduce = false; foldTrails = false; modelRot = Vector3.zero;
         // 0.5.4/0.5.5 fields (review find 2026-09-06: "new model" silently carried a 95% reduce or a tuned
         // stroke into the next model) — reset to the live defaults, same values as a fresh window.
@@ -2109,7 +2123,7 @@ public class VehicleLabWindow : EditorWindow
         srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
         parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
         // orientation + tread isolation + wave rock — the rest of what the bake command consumes
-        tracksStatic = tracksStatic, treadMode = treadMode, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, defaultReducePct = defaultReducePct, shroudReducePct = shroudReducePct, turretReducePct = turretReducePct, gunReducePct = gunReducePct, windowReducePct = windowReducePct, railingReducePct = railingReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, flagFoldOn = flagFoldOn, flagFoldDeg = flagFoldDeg, flagFoldFrames = flagFoldFrames, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = 1f, model2ScaleXYZ = model2Scale, model1Bright = model1Bright, model2Bright = model2Bright, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
+        tracksStatic = tracksStatic, treadMode = treadMode, wheelCentre = wheelCentre, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, defaultReducePct = defaultReducePct, shroudReducePct = shroudReducePct, turretReducePct = turretReducePct, gunReducePct = gunReducePct, windowReducePct = windowReducePct, railingReducePct = railingReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, flagFoldOn = flagFoldOn, flagFoldDeg = flagFoldDeg, flagFoldFrames = flagFoldFrames, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = 1f, model2ScaleXYZ = model2Scale, model1Bright = model1Bright, model2Bright = model2Bright, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
         trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
         rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
         rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
@@ -2205,7 +2219,7 @@ public class VehicleLabWindow : EditorWindow
             // rock and vice-versa — no leak between models). off/zero is the safe neutral for a pre-2026-08-01 recipe;
             // the counted fields guard against a missing-key 0 the way treadAdvCells does.
             generateRoute = BlenderVehicleRigInProcess.NormalizeRoute(r.generateRoute);
-            modelRot = r.modelRot; tracksStatic = r.tracksStatic; treadMode = r.treadMode == 1 ? 1 : 0; spinEnabled = r.spinEnabled; doubleSided = r.doubleSided; fixInsideOut = r.fixInsideOut;
+            modelRot = r.modelRot; tracksStatic = r.tracksStatic; treadMode = r.treadMode == 1 ? 1 : 0; wheelCentre = r.wheelCentre == 1 ? 1 : 0; spinEnabled = r.spinEnabled; doubleSided = r.doubleSided; fixInsideOut = r.fixInsideOut;
             // MEASURED (review finding 10, Unity 2021.3.1f1 batch probe 2026-09-07): JsonUtility.FromJson DOES
             // run field initializers — a key absent from an old recipe keeps the DTO initializer, which is that
             // field's live default by construction. The Has() ternaries that duplicated each default here were
@@ -2630,7 +2644,7 @@ public class VehicleLabWindow : EditorWindow
         // breech, and a split-trail pair that came out un-mirrored — were printed only to the Console, i.e. exactly
         // where a "the rig looks wrong" question does NOT get answered. They are the lines most worth reading.
         string muzzle = string.Join("\n", stdout.Split('\n')
-            .Where(l => l.Contains("VEHICLE MUZZLE") || l.Contains("VEHICLE CRADLE")
+            .Where(l => l.Contains("VEHICLE MUZZLE") || l.Contains("VEHICLE CRADLE") || l.Contains("VEHICLE wheel centre:")   // where Wheel centre = Surface centroid put each bone
                      || l.Contains("*** WARNING") || l.Contains("DEPLOY gun: SKIPPED"))
             .Select(l => l.Trim()));
         // Native availability is reported separately from the selected route; managed runs must not claim C++ kernels.
@@ -2673,7 +2687,7 @@ public class VehicleLabWindow : EditorWindow
     VehicleRigArgs RigArgsFromFields(bool fast, string outGlbPath, string previewFbx, Dictionary<string, string> namesFiles, string partTxFile) => new VehicleRigArgs
     {
         fast = fast, srcFile = srcFile, outGlb = outGlbPath, previewFbx = previewFbx, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
-        treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink, tracksStatic = tracksStatic, treadMode = treadMode, spinEnabled = spinEnabled,
+        treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink, tracksStatic = tracksStatic, treadMode = treadMode, wheelCentre = wheelCentre, spinEnabled = spinEnabled,
         waveEnabled = waveEnabled, rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading, rockPitchDeg = rockPitchDeg,
         rockPitchCycles = rockPitchCycles, rockRollCycles = rockRollCycles, rockPitchPhase = rockPitchPhase, modelRotX = modelRot.x, modelRotY = modelRot.y, modelRotZ = modelRot.z,
         tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames,
