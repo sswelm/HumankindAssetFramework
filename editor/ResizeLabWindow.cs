@@ -45,6 +45,7 @@ public class ResizeLabWindow : EditorWindow
     // against the human-carrying family (Human, mounted fighter/driver, servant, chariot crew, Mount, Chariot).
     static string[] scalableCache; static int scalableCacheGeneration = -1;   // holds for one DefinitionCaches.Generation
     static readonly HashSet<int> HumanProfiles = new HashSet<int> { 1, 2, 4, 6, 9, 10, 12, 13, 16 };
+    static string[] FreshScalablePawnNames() { DefinitionCaches.Invalidate(); return GatherScalablePawnNames(); }   // what the Pick click reads
     static string[] GatherScalablePawnNames()
     {
         if (scalableCache != null && scalableCacheGeneration == DefinitionCaches.Generation) return scalableCache;
@@ -52,7 +53,7 @@ public class ResizeLabWindow : EditorWindow
         foreach (var guid in AssetDatabase.FindAssets(DefinitionCaches.PawnContainers))
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
-            if (!path.EndsWith(".asset")) continue;
+            if (!DefinitionCaches.MayHoldDefinitions(path)) continue;
             foreach (var o in AssetDatabase.LoadAllAssetsAtPath(path))
             {
                 if (o == null || o.GetType().Name != "PresentationPawnDefinition" || string.IsNullOrEmpty(o.name)) continue;
@@ -112,8 +113,8 @@ public class ResizeLabWindow : EditorWindow
                 {
                     int idx = i;   // capture
                     var rect = GUILayoutUtility.GetLastRect();
-                    DefinitionCaches.Invalidate();   // a click reads the databases again (a pawn made this session)
-                    new PawnDropdown(new AdvancedDropdownState(), GatherScalablePawnNames(), n =>
+                    // a click reads the databases again (a pawn made this session)
+                    new PawnDropdown(new AdvancedDropdownState(), FreshScalablePawnNames(), n =>
                     { rules[idx].match = n; dirty = true; Repaint(); }).Show(rect);
                 }
                 float sc = EditorGUILayout.Slider(r.scale, 0.1f, 10f, GUILayout.MinWidth(160));

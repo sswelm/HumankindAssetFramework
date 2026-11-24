@@ -238,8 +238,9 @@ their settings and work together**:
 
 ### Mesh / shading *(ignored in Animated mode)*
 - **Normals** — `KeepModel` (artist's normals) / `Recalculate` (hard edges via the **Smoothing angle** slider) /
-  `Faceted` (fully flat). A new entry starts on `KeepModel` (2026-11-24; `Recalculate` before). Saved entries keep
-  what they were saved with.
+  `Faceted` (fully flat). A new entry starts on `KeepModel` (2026-11-24; `Recalculate` before), also one made in
+  the Animation Lab or by the Retexture and Sound windows. Saved entries keep what they were saved with; a form
+  already open on `<New>` keeps what it shows until **Reset**.
 - **Height-gradient UVs** — override UVs with V = normalized height, so a vertical-gradient albedo maps by height (black
   skirt low, grey hull high). For untextured CAD models that just need a simple gradient skin.
 - **Winding fix (CAD/convex)** — rewind faces outward so single-sided / CAD "sketch" meshes render instead of culling to

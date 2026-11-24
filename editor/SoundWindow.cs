@@ -82,8 +82,7 @@ public class SoundWindow : EditorWindow
             EditorGUILayout.SelectableLabel(string.IsNullOrEmpty(pawn) ? "(none — use Pick)" : pawn, ReadOnlyFieldStyle(), GUILayout.Height(EditorGUIUtility.singleLineHeight));
             if (GUILayout.Button(new GUIContent("Pick", "Browse ALL pawn descriptors in the loaded databases (ENC + mounted vanilla, searchable). Each click reads the databases again, so a pawn made this session is listed."), GUILayout.Width(50)))
             {
-                DefinitionCaches.Invalidate();
-                var cat = LoadPawnCatalog();
+                var cat = FreshPawnCatalog();
                 if (cat.Length == 0) status = "No pawn descriptors found in the loaded databases.";
                 else
                 {
@@ -268,6 +267,7 @@ public class SoundWindow : EditorWindow
     // container assets (name match, then their sub-assets). Kept for one DefinitionCaches.Generation: a saved
     // database edit or a Pick click reads them again.
     static string[] pawnDescCatalog; static int pawnDescCatalogGeneration = -1;
+    static string[] FreshPawnCatalog() { DefinitionCaches.Invalidate(); return LoadPawnCatalog(); }   // what the Pick click reads
     static string[] LoadPawnCatalog()
     {
         if (pawnDescCatalog != null && pawnDescCatalogGeneration == DefinitionCaches.Generation) return pawnDescCatalog;
@@ -278,7 +278,9 @@ public class SoundWindow : EditorWindow
             for (int i = 0; i < guids.Length; i++)
             {
                 if (i % 8 == 0) EditorUtility.DisplayProgressBar("Pawn catalog", "Scanning pawn definitions…", i / (float)guids.Length);
-                foreach (var obj in AssetDatabase.LoadAllAssetsAtPath(AssetDatabase.GUIDToAssetPath(guids[i])))
+                string path = AssetDatabase.GUIDToAssetPath(guids[i]);
+                if (!DefinitionCaches.MayHoldDefinitions(path)) continue;
+                foreach (var obj in AssetDatabase.LoadAllAssetsAtPath(path))
                     if (obj != null && obj.GetType().Name.Contains("PresentationPawn") && !string.IsNullOrEmpty(obj.name))
                         names.Add(obj.name);
             }
@@ -494,7 +496,7 @@ public class SoundWindow : EditorWindow
                 all.Any(m => m.resourceName == resourceName && !string.IsNullOrEmpty(m.pawnDescription) && m.pawnDescription != p);
             var def = all.FirstOrDefault(m => m.pawnDescription == p)
                    ?? (nameTakenByOtherPawn ? null : all.FirstOrDefault(m => m.resourceName == resourceName && !string.IsNullOrEmpty(resourceName)))
-                   ?? new ModelDef();
+                   ?? ModelFactoryWindow.FreshEntry();
             def.pawnDescription = p;
             if (string.IsNullOrEmpty(def.resourceName))
                 def.resourceName = (string.IsNullOrEmpty(resourceName) || nameTakenByOtherPawn) ? "Sound_" + Sanitize(pawn) : resourceName;

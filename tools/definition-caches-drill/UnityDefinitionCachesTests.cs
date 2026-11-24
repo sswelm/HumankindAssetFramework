@@ -23,7 +23,7 @@ public static class UnityDefinitionCachesTests
     const string Dir = "Assets/Databases";
     const string PawnAsset = Dir + "/PresentationPawnDefinition_Era5_Drill.asset";
     const string DistrictAsset = Dir + "/ConstructibleCommonExtensionDefinition_Drill.asset";
-    const string OtherAsset = "Assets/Resources/Tank_Skeleton.asset";
+    const string ExtraAsset = "Assets/Other/UnitPresentation_Extra.asset";
 
     static string[] Private(Type owner, string method) =>
         (string[])owner.GetMethod(method, BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, null);
@@ -31,12 +31,16 @@ public static class UnityDefinitionCachesTests
     static string[] ResizeNames() => Private(typeof(ResizeLabWindow), "GatherScalablePawnNames");
     static string[] SoundNames() => Private(typeof(SoundWindow), "LoadPawnCatalog");
     static string[] DistrictNames() => Private(typeof(DistrictFactoryWindow), "GatherDistrictNames");
+    // What each window's Pick button reads (one call per button).
+    static string[] ResizeClick() => Private(typeof(ResizeLabWindow), "FreshScalablePawnNames");
+    static string[] SoundClick() => Private(typeof(SoundWindow), "FreshPawnCatalog");
+    static string[] DistrictClick() => Private(typeof(DistrictFactoryWindow), "FreshDistrictNames");
 
-    static DefinitionCachesDrill.PresentationPawnDefinition AddPawn(string name, int profile = 0)
+    static DefinitionCachesDrill.PresentationPawnDefinition AddPawn(string name, int profile = 0, string asset = PawnAsset)
     {
         var pawn = ScriptableObject.CreateInstance<DefinitionCachesDrill.PresentationPawnDefinition>();
         pawn.name = name; pawn.AnimationCapabilityProfile = profile;
-        AssetDatabase.AddObjectToAsset(pawn, PawnAsset);
+        AssetDatabase.AddObjectToAsset(pawn, asset);
         return pawn;
     }
 
@@ -76,13 +80,22 @@ public static class UnityDefinitionCachesTests
             int g0 = DefinitionCaches.Generation;
             Check("control: an unsaved addition alone leaves the kept list (the lists ARE kept)", !FactoryNames().Contains(made));
 
-            // ---- the Pick click: Invalidate, then read (the two calls every Pick button makes)
-            DefinitionCaches.Invalidate();
-            Check("Pick click: the Factory lists the unsaved pawn", FactoryNames().Contains(made));
-            DefinitionCaches.Invalidate();
-            Check("Pick click: the Resize Lab lists it", ResizeNames().Contains(made));
-            DefinitionCaches.Invalidate();
-            Check("Pick click: the Sound window lists it", SoundNames().Contains(made));
+            // ---- the Pick click: Invalidate, then read (what every Pick button does; the Factory's is FreshPawnNames,
+            // which the pre-bake check and Validate pack call as well)
+            Check("Pick click / pre-bake check / Validate pack: the Factory's fresh names hold the unsaved pawn", ModelFactoryWindow.FreshPawnNames().Contains(made));
+            Check("Pick click: the Factory's kept list is that fresh one", FactoryNames().Contains(made));
+            // Each other window gets its OWN unsaved pawn, added after every list was read under the current
+            // generation. With one shared pawn the Factory's click had already moved the generation, and the other
+            // two lists scanned again by themselves: their Pick functions passed without their re-read (two plants
+            // of 2026-11-24 went uncaught).
+            Keep();
+            AddPawn("Era5_Common_ResizeClick_01");
+            Check("control: the Resize Lab's kept list lacks its unsaved pawn", !ResizeNames().Contains("Era5_Common_ResizeClick_01"));
+            Check("Pick click: the Resize Lab lists it", ResizeClick().Contains("Era5_Common_ResizeClick_01"));
+            Keep();
+            AddPawn("Era5_Common_SoundClick_01");
+            Check("control: the Sound window's kept list lacks its unsaved pawn", !SoundNames().Contains("Era5_Common_SoundClick_01"));
+            Check("Pick click: the Sound window lists it", SoundClick().Contains("Era5_Common_SoundClick_01"));
             Check("Pick click: the list is kept again afterwards (same array, no second scan)", ReferenceEquals(FactoryNames(), FactoryNames()));
 
             // ---- saving the database: no click, the asset hook alone
@@ -121,17 +134,20 @@ public static class UnityDefinitionCachesTests
             var district2 = ScriptableObject.CreateInstance<DefinitionCachesDrill.ExtensionDistrictDefinition>();
             district2.name = "Extension_Base_TorpedoYard"; AssetDatabase.AddObjectToAsset(district2, DistrictAsset);
             Check("control: an unsaved district alone leaves the kept list", !DistrictNames().Contains("Extension_Base_TorpedoYard"));
+            Check("Pick click: the District Factory lists the unsaved district", DistrictClick().Contains("Extension_Base_TorpedoYard"));
+            var district3 = ScriptableObject.CreateInstance<DefinitionCachesDrill.ExtensionDistrictDefinition>();
+            district3.name = "Extension_Base_Slipway"; AssetDatabase.AddObjectToAsset(district3, DistrictAsset);
+            Check("control: a second unsaved district is not in the kept list", !DistrictNames().Contains("Extension_Base_Slipway"));
             Save();
-            Check("save: the District Factory lists the new district with no click", DistrictNames().Contains("Extension_Base_TorpedoYard"));
+            Check("save: the District Factory lists the new district with no click", DistrictNames().Contains("Extension_Base_Slipway"));
 
-            // ---- an asset that is no definition database (what every bake writes) moves nothing
+            // ---- a file that is no .asset moves nothing (the control for the hook: it does not fire on everything)
             Keep();
             int g2 = DefinitionCaches.Generation;
             var kept = FactoryNames();
-            AssetDatabase.CreateAsset(ScriptableObject.CreateInstance<DefinitionCachesDrill.DrillCollection>(), OtherAsset);
-            Save();
-            Check("other asset: a bake's own .asset leaves the generation", DefinitionCaches.Generation == g2);
-            Check("other asset: and the kept list (same array)", ReferenceEquals(kept, FactoryNames()));
+            File.WriteAllText("Assets/Resources/notes.txt", "not a database"); AssetDatabase.Refresh();
+            Check("other file: an imported .txt leaves the generation", DefinitionCaches.Generation == g2);
+            Check("other file: and the kept list (same array)", ReferenceEquals(kept, FactoryNames()));
 
             // ---- a renamed pawn, and a deleted database
             Keep();
@@ -144,10 +160,33 @@ public static class UnityDefinitionCachesTests
             Check("delete: removing the database moves the generation", DefinitionCaches.Generation != g3);
             Check("delete: the Factory's, the Resize Lab's and the Sound window's lists are empty", FactoryNames().Length == 0 && ResizeNames().Length == 0 && SoundNames().Length == 0);
 
+            // ---- a database whose FILE name lacks the word (review of 2026-11-24): FindAssets also matches the names
+            // of sub-assets, so the scan reads this file; a hook that judged by file name left its lists stale.
+            Directory.CreateDirectory("Assets/Other"); AssetDatabase.Refresh();
+            AssetDatabase.CreateAsset(ScriptableObject.CreateInstance<DefinitionCachesDrill.DrillCollection>(), ExtraAsset);
+            var inner = ScriptableObject.CreateInstance<DefinitionCachesDrill.DrillCollection>();
+            inner.name = "PresentationPawnDefinitionCollection"; AssetDatabase.AddObjectToAsset(inner, ExtraAsset);
+            AddPawn("Extra_First_01", 0, ExtraAsset);
+            AddPawn("Era5_Boat_Case", 7, ExtraAsset);
+            Save(); Keep();
+            Check("unnamed database: the scan reads a database found by a sub-asset's name", FactoryNames().Contains("Extra_First_01"));
+            AddPawn("Extra_Second_01", 0, ExtraAsset);
+            Check("control: its unsaved pawn is not in the kept list", !FactoryNames().Contains("Extra_Second_01"));
+            Save();
+            Check("unnamed database: its saved pawn is listed with no click", FactoryNames().Contains("Extra_Second_01") && ResizeNames().Contains("Extra_Second_01") && SoundNames().Contains("Extra_Second_01"));
+
+            // ---- the boat answer belongs to the exact name asked (the keys were case-insensitive, the scan is not)
+            Check("boat case: a name in the wrong case is no boat", !ModelFactoryWindow.IsBoatPawn("era5_boat_case"));
+            Check("boat case: the right spelling asked afterwards IS a boat", ModelFactoryWindow.IsBoatPawn("Era5_Boat_Case"));
+            AssetDatabase.DeleteAsset(ExtraAsset); AssetDatabase.Refresh();
+            Check("unnamed database: deleted, the lists are empty again", FactoryNames().Length == 0 && SoundNames().Length == 0);
+
             // ---- the Model Factory's new entry starts on Keep Model (2026-11-24); an entry stored without the field
             // still reads as Recalculate, which is what it was baked with.
-            var fresh = (ModelDef)typeof(ModelFactoryWindow).GetMethod("FreshEntry", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, null);
-            Check("new entry: the Factory's new entry (and its Reset) starts on Keep Model", fresh.normalsMode == (int)NormalsMode.KeepModel);
+            var fresh = ModelFactoryWindow.FreshEntry();
+            Check("new entry: the Factory's new entry (and its Reset) starts on Keep Model", fresh.normalsMode == (int)NormalsMode.KeepModel && !fresh.animated);
+            var freshAnimated = ModelFactoryWindow.FreshEntry(animated: true);
+            Check("new entry: the Animation Lab's new entry is animated and on Keep Model", freshAnimated.normalsMode == (int)NormalsMode.KeepModel && freshAnimated.animated);
             var parseArgs = new object[] { "{\"models\":[{\"resourceName\":\"Old\",\"pawnDescription\":\"Era5_Common_Riflemen_01\"},{\"resourceName\":\"Flat\",\"normalsMode\":2}]}", "drill.json", null };
             object file = typeof(ModelRegistry).GetMethod("ParseRegistry", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, parseArgs);
             var read = (System.Collections.Generic.List<ModelDef>)file.GetType().GetField("models").GetValue(file);
@@ -156,7 +195,7 @@ public static class UnityDefinitionCachesTests
             Check("new entry: a stored value is kept", read[1].normalsMode == (int)NormalsMode.Faceted);
 
             // ---- what one Pick click costs: a re-read of databases that are already loaded. A measurement for the
-            // report, not a check. The real project holds 1,387 pawn definitions in 26 databases (2026-11-24).
+            // report, not a check. The real project holds 1,361 pawn definitions in 26 databases (2026-11-24).
             for (int c = 0; c < 26; c++)
             {
                 string path = Dir + "/PresentationPawnDefinition_Timing" + c + ".asset";

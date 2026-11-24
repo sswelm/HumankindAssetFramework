@@ -227,8 +227,7 @@ public class DistrictFactoryWindow : EditorWindow
                 if (GUILayout.Button(new GUIContent("Pick", districts.Length == 0 ? "No district definitions found in the project databases — type the name" : null), GUILayout.Width(70)))
                 {
                     var r = GUILayoutUtility.GetLastRect();
-                    DefinitionCaches.Invalidate();   // a click reads the databases again (a district made this session)
-                    districts = GatherDistrictNames();
+                    districts = FreshDistrictNames();   // a click reads the databases again (a district made this session)
                     new StringDropdown(new AdvancedDropdownState(), districts, districts, "Districts", n =>
                     {
                         cur.district = n;
@@ -1146,6 +1145,7 @@ public class DistrictFactoryWindow : EditorWindow
     // definitions live as sub-assets of the Constructible*ExtensionDefinition database assets; their concrete types all
     // end in "DistrictDefinition" (ExtensionDistrictDefinition, ArtificialDepositDistrictDefinition, Wondrous…).
     static string[] districtCache; static int districtCacheGeneration = -1;   // holds for one DefinitionCaches.Generation
+    static string[] FreshDistrictNames() { DefinitionCaches.Invalidate(); return GatherDistrictNames(); }   // what the Pick click reads
     static string[] GatherDistrictNames()
     {
         if (districtCache != null && districtCacheGeneration == DefinitionCaches.Generation) return districtCache;
@@ -1153,7 +1153,7 @@ public class DistrictFactoryWindow : EditorWindow
         foreach (var guid in AssetDatabase.FindAssets(DefinitionCaches.DistrictContainers))
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
-            if (!path.EndsWith(".asset")) continue;
+            if (!DefinitionCaches.MayHoldDefinitions(path)) continue;
             foreach (var o in AssetDatabase.LoadAllAssetsAtPath(path))
                 if (o != null && o.GetType().Name.EndsWith("DistrictDefinition") && !string.IsNullOrEmpty(o.name))
                     names.Add(o.name);

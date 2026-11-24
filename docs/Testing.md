@@ -3516,17 +3516,20 @@ the reset and the fixed +/-999 bounds. This checks the window's reset methods, n
 **Definition lists after a database edit (2026-11-24):** `bash tools/definition_caches_unity_drill.sh` runs the real
 list readers of the Model Factory, the Resize Lab, the Sound window and the District Factory in a temporary Unity
 project, against stand-in definition databases (the windows find a definition by its type name). It adds a pawn
-without saving, saves one, sets a pawn's profile to Boat and to a human profile, renames a pawn, adds a district,
-writes an asset that is no database, and deletes a database. After each step every list must show the change with no
-restart: after a Pick click for the unsaved pawn, and with no click once the database is saved. Control rows show
-that the lists are kept between changes; without them a reader that kept nothing would pass. It also holds the Model
-Factory's new entry on Keep Model and a stored entry without `normalsMode` on Recalculate. All 36 checks pass.
-Planted defects, each run through the drill: the asset hook off, each of the four lists kept for the session (the
-reported defect is the Model Factory's), the boat answer kept, the district word dropped from the path rule, every
-`.asset` counted as a database, a Pick click that does nothing, the new entry back on Recalculate, and `ModelDef`'s
-own default changed to Keep Model. Each fails the rows it should. The first plant also found a row that passed for
-the wrong reason (a list last read a generation earlier scanned again by itself); every list is now read before each
-change. The drill is not part of the push gate. It does not click the Pick button: it makes the button's two calls.
+without saving, saves one, sets a pawn's profile to Boat and to a human profile, renames a pawn, adds districts,
+imports a file that is no `.asset`, deletes a database, and builds a database whose file name lacks the word the
+scans search for (they find it by a sub-asset's name). The unsaved pawn and district must be listed by the function
+each Pick button reads through; a saved change must be listed with no click. Control rows show that the lists are
+kept between changes; without them a reader that kept nothing would pass. It also holds the boat answer to the exact
+name asked, a new entry (plain and animated) on Keep Model, and a stored entry without `normalsMode` on Recalculate.
+All 47 checks pass. Sixteen planted defects, each run through the drill, each fail rows:
+the asset hook off; the generation never moving; the hook judging by file name; the hook counting every path; each
+of the four lists kept for the session (the reported defect is the Model Factory's); the boat answer kept; the boat
+keys ignoring case; each of the four Pick functions without its re-read; the new entry back on Recalculate; and
+`ModelDef`'s own default changed to Keep Model. An earlier plant found a row that passed for the wrong reason (a
+list last read a generation earlier scanned again by itself), and a later pass let two plants through for the same reason (the Resize Lab's and the Sound window's Pick functions without their re-read); every list is now read before each change, and those eight plants were run again. The drill
+is not part of the push gate. It does not click a Pick button, and it does not prove that the button, the pre-bake
+check and Validate pack call the function it tests; those call sites are one line each.
 
 PR #212 review guards: missing, blank and unrecognized backend preferences use the C# factory default, while valid
 recipe/editor choices keep their precedence. The wrapper's timing labels describe its actual stage boundaries (rig,
