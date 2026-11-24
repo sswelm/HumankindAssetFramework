@@ -4,7 +4,7 @@ HAF is verified in **three tiers**, each a machine, each at the level where its 
 
 | Tier | Runs | Guards |
 |---|---|---|
-| **Unit tests** — **2,515 as of 2026-11-05** (`dotnet test` prints the live number; this one drifts) | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
+| **Unit tests** — **2,923 as of 2026-11-23** (`dotnet test` prints the live number; this one drifts) | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
 | **Headless game checks** | `tools/check-catalog.sh` in the push gate; `tools/check-bindings.sh` on demand / after a game update | **two halves of one claim**: `check-catalog.sh` proves the catalog **covers the code** (every by-name literal at a reflection site is catalogued or allowlisted with a reason), `bindcheck` proves it **resolves** against the real DLLs; `typeprobe --find` / `--exact` locate a seam or a member's owner before a binding is written |
 | **In-game smoke test** — `[load]` automatic, `[full]` on the F8 button | every load (a few ms, once), and on request | the injecting half, read from the **engine**: bindings, registry, roles, assets, sounds, files, GPU budget, district tiles and textures, patched seams — and, on the button, every live pawn on *our* skeleton, pose-hook liveness, the sub-pawn walk vs a scene scan, the write-back self-test |
 
@@ -13,6 +13,26 @@ HAF is verified in **three tiers**, each a machine, each at the level where its 
 > [Shared-Schema.md](Shared-Schema.md) already fences off for the field count, caught here by a review rather than by a
 > guard. Re-check with `dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release` and read the `Total:`.
 > The number counts expanded `[Theory]` cases, so it moves faster than the count of test *methods*.
+
+**The unit suite runs under one culture on every machine (2026-11-23).** `Tests/TestBootstrap.cs` sets `nl-NL` as the
+culture of every test thread before the first test: a decimal comma, and a `.` that groups thousands, so a parse or a
+format that lost its `InvariantCulture` reads `1.5` as 15 or not at all, and a test sees it. Before this date the suite
+took the machine's culture: the author's machine is Dutch and CI's runner is en-US, where such a defect is right by
+accident. Setting the environment variable `HAF_TEST_CULTURE` to a culture name runs the suite under that culture
+(`tr-TR` for the dotless i, `en-US` to see what a dot-decimal machine hides). The name must be one the runtime lists,
+spelled as it lists it: Windows makes up a dot-decimal culture for any well-formed tag (`xx-YY`, `en-UK`), so any other
+name fails every test that touches the test assembly's code; the sentence that says why is in the output at
+`dotnet test`'s default verbosity (under `-v q` only the failures show). The push gate removes the variable, in any
+spelling of its name, before its own run of the suite.
+`Tests/TestCultureTests.cs` holds that the forced culture, the instance itself and not only its name, is in force on
+the test thread and on worker threads, and gives every float a pack can set (the shared schema's, the plugin-only
+`rotorSpinSpeed`, and `position`) a fraction that must read the same through the regex fallback of `ParseModels` as
+through the JSON parser. Not held by any test: the `muzzleOffset` and `handPropAngles` strings, which are parsed
+inside the injection code; a number in exponent form in the fallback (a defect, in the
+[Review-Backlog](Review-Backlog.md)); what the code formats (a config value the F8 window writes back, a cache key,
+warnings, reports and log lines); and culture-sensitive casing (the default culture is not Turkish).
+`Tests/test_culture_override.py` checks the default and named overrides by reading VSTest's TRX result for the
+test thread's active culture. A made-up name fails the run and names the refused value.
 
 The unit suite is a deliberate, bounded suite, not a coverage target: it guards the functions where bugs have actually
 hidden, and stops there on purpose. What it cannot reach — the ~18k lines that reflect into a running game — is not

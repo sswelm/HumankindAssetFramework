@@ -1814,6 +1814,15 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   replaces `MoveTechnologyInQueue` with a list operation. A hand port of the game's move, fuzzed over 40,000 random
   queues with several parents per technology, always ended and kept parents in front — a port, not the method. The
   drill could run the real method with only the `SetSynchronizationDirty` call stripped, as it does for the removal.
+- **The regex fallback of `ParseModels` does not read a number in exponent form (2026-11-23, measured in the review of
+  PR #313; NOT fixed).** The fallback runs when `pack.json` will not parse as JSON. Its float patterns are
+  `-?[\d.eE+]+` (no `-` inside, so `1.5e-2`, `1e-05` and `9.999999747378752e-6` stop at the `e`: on 23 dials the value
+  comes back as the default, and a number of `position` as 0) and, on eleven dials (`moveTilt`, `turnRate`, `turnBank`,
+  the `gunElev*` and `hug*` dials, `combatZ`, `rotorSpinSpeed`), `-?[0-9.]+` (no exponent at all: `1.5e+2` and `1.5e-2`
+  both read 1.5, and `9.999999747378752e-6` reads 10, a million times too large). Plain decimals agree with the JSON
+  parser on every dial (the test of that PR). A writer that spells a float with an exponent, in a pack that also
+  needs the fallback, gets a default or a wrong value without a word. Fix: one pattern for every float,
+  `-?[0-9.]+(?:[eE][+-]?[0-9]+)?`, and exponent spellings in `TestCultureTests`' fraction test.
 - **Five hook behaviours the game drill does not hold (2026-11-23, planted in the review of PR #312).** Each plant in
   `Patches/TechRequireAllPatch.cs` passed the unit suite and the drill: (1) the config switch inverted (:71; the drill
   never binds `Plugin.TechRequireAllOn`, so a feature that is off everywhere passes); (2) queueing a listed technology

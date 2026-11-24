@@ -10,6 +10,42 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **The unit suite runs under a comma-decimal culture on every machine (2026-11-23).** From the critical review of
+  that day: the suite took the machine's culture, so a dropped `InvariantCulture` failed on the author's Dutch machine
+  and passed on CI's en-US runner.
+  - **Measured by the review:** of 15 production files whose `InvariantCulture` → `CurrentCulture` plant failed the
+    suite under nl-NL, 12 passed it under en-US.
+  - **The change:** `Tests/TestBootstrap.cs` (the module initializer that already seeds `Plugin.Log`) sets `nl-NL` as
+    the default culture of every thread in the test domain. The environment variable `HAF_TEST_CULTURE` runs the
+    suite under another culture. Its name must be one the runtime lists, as written: Windows makes up a dot-decimal
+    culture for any well-formed tag, and under `xx-YY` or `en-UK` the first version of this change ran the whole
+    suite green (the PR's review). Any other name now fails the run, and the output says why at `dotnet test`'s
+    default verbosity. The push gate removes the variable, in any spelling of its name (PowerShell's
+    `$env:haf_test_culture` reaches bash in lower case), before its own run of the suite.
+  - **From outside (`Tests/test_culture_override.py`, in the gate and in CI):** a run of `dotnet test` with a listed
+    name passes under it, and with `en-UK`, `xx-YY` or `nl_NL` fails and prints the sentence. A module initializer
+    that swallowed the refusal passed all 2,923 tests (the PR's second review); no test inside the assembly can
+    see that.
+  - **New tests (`Tests/TestCultureTests.cs`, 15 cases; the suite is 2,923):** the forced culture, the instance and
+    not only its name, is in force on the test thread, a new thread, a thread-pool worker and a parallel loop; the
+    default is comma-decimal; an unlisted or misspelled name is refused; and every float a pack can set (the shared
+    schema's, the plugin-only `rotorSpinSpeed`, and `position`) reads a fraction the same through the regex fallback
+    of `ParseModels` as through the JSON parser. Until now no test gave the fallback a fraction.
+  - **Planted:** `CurrentCulture` in the fallback's `scale`, `turnRate`, `rotorSpinSpeed` and `position` reads: each
+    fails the suite under the default culture and passes under `HAF_TEST_CULTURE=en-US` (what CI saw before). With
+    the bootstrap's culture line removed, the two thread tests fail on the author's Dutch machine too (the first
+    version compared names, and both cultures are called nl-NL there). With the listed-name check removed, the five
+    refusal cases fail.
+  - **The whole suite passes** under nl-NL (the default), en-US and tr-TR, and in the PR's CI. CI now prints the
+    runner's own culture before the tests, so that a pass on a dot-decimal machine is in the log.
+  - **Found by the review, not fixed here (a runtime defect, in the Review-Backlog):** the regex fallback does not
+    read a number in exponent form whole. On 23 float dials `1.5e-2` comes back as the default; on the other
+    eleven it reads 1.5, as `1.5e+2` does.
+  - **Not covered:** the `muzzleOffset` and `handPropAngles` strings (parsed inside the injection code, not in a
+    function a test can call); what the code FORMATS (five `InvariantCulture` plants in formats passed the suite:
+    the roughness value the F8 window writes back to the config, a cache key of the `.max` reader, a validator
+    warning, a report's size and a log line); and culture-sensitive casing: the default culture is not Turkish.
+
 - **The push gate runs the TechRequireAll game drill (2026-11-23).** From the critical review of that day: the unit
   suite holds the pure rules (`TechRequireAllRules`), and the hook bodies in `Patches/TechRequireAllPatch.cs` (the ALL
   rule in the state update, the locked enqueue, the cascading removal's guard) were run by

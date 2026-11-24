@@ -150,11 +150,16 @@ printf 'refs/heads/test abc refs/heads/test def\\n' | bash "''' + hook + '''"
         stubs = '''
 gate_lock() { :; }; gate_cancel_watch() { :; }; gate_unlock() { :; }
 note() { :; }; run_lane_go() { :; }; run_bg_wait() { :; }; verdict() { :; }
-run() { echo "STEP $*"; }; run_bg() { run "$@"; }; run_lane() { echo "LANE $1"; run "$@"; }
+run() { echo "STEP $*"; case "$1" in "plugin unit tests"*) echo "CULTURE_VARS=[$(compgen -e | grep -ix HAF_TEST_CULTURE | tr '\\n' ' ')]";; esac; }
+run_bg() { run "$@"; }; run_lane() { echo "LANE $1"; run "$@"; }
 '''
         for mode in ("push", "parity", "all"):
             self.env["HAF_GATE"] = mode
             self.env["HAF_ORACLE"] = "live"
+            # as PowerShell hands it over (lower case) in one mode, as bash writes it in the others
+            for name in ("HAF_TEST_CULTURE", "haf_test_culture"):
+                self.env.pop(name, None)
+            self.env["haf_test_culture" if mode == "push" else "HAF_TEST_CULTURE"] = "en-US"
             result = self.run_shell(self.helpers() + stubs + steps)
             self.assertEqual(result.returncode, 0, result.stderr)
             for label in ("plugin build", "plugin unit tests", "native kernels drill", "TechRequireAll game drill", "exit status"):
@@ -163,6 +168,14 @@ run() { echo "STEP $*"; }; run_bg() { run "$@"; }; run_lane() { echo "LANE $1"; 
                           "mesh layout drill", "prep drill", "deploy drill", "Workshop compaction drill",
                           "rig_anim drill", "vehicle_rig drill", "blender oracle tests"):
                 self.assertEqual("STEP " + label in result.stdout, mode != "push", result.stdout)
+            # The unit tests run under the suite's own culture, whatever the pushing shell exports and however it
+            # spells the name: by the time the step is registered the variable is gone.
+            if mode != "parity":
+                self.assertIn("CULTURE_VARS=[]", result.stdout)
+                tests = [line for line in result.stdout.splitlines() if line.startswith("STEP plugin unit tests")]
+                self.assertEqual(len(tests), 1, result.stdout)
+                # exactly this command: `dotnet test -e HAF_TEST_CULTURE=en-US` would hand the variable back
+                self.assertRegex(tests[0], r"^STEP plugin unit tests \(dotnet test\) dotnet test \S+/Tests/HumankindAssetFramework\.Tests\.csproj -c Release --nologo -v q$")
             # The game drill builds the plugin itself, so it is queued LAST on the lane: started beside the drills it
             # built the project at the same moment as the buffer hook drill (the review of PR #312).
             if mode != "parity":

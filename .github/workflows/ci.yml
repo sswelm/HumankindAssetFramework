@@ -25,8 +25,17 @@ jobs:
         run: pwsh tools/fetch-refs.ps1
       - name: Build plugin
         run: dotnet build HumankindAssetFramework.csproj -c Release --nologo
+      # The suite forces its own culture (Tests/TestBootstrap.cs: nl-NL, a decimal comma). This line puts the RUNNER's
+      # culture in the log, so "the suite passed on a dot-decimal machine" is a recorded fact and not an assumption
+      # about the image.
+      - name: Runner culture (for the record)
+        run: Write-Host "runner culture $([cultureinfo]::CurrentCulture.Name), decimal separator '$([cultureinfo]::CurrentCulture.NumberFormat.NumberDecimalSeparator)'"
       - name: Run tests
         run: dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release --nologo
+      # The override seen from outside, on the assembly the step above built: a listed name is honoured, a made-up one
+      # fails the run and says why.
+      - name: Test culture override tests
+        run: python Tests/test_culture_override.py
       - name: GPU buffer hook drill (real Harmony adapters and configuration)
         shell: bash
         run: bash tools/buffer_hook_drill.sh
