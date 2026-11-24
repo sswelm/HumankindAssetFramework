@@ -401,6 +401,30 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void Baseline_slivers_do_not_count_as_area_lost_to_the_dial()
+    {
+        var sliver = new Part
+        {
+            Name = "Sliver",
+            Positions = new[] { 0f, 0f, 100f, 0.00005f, 0f, 100f, 0f, 1f, 100f },
+            Indices = new[] { 0, 1, 2 }
+        };
+        byte[] src = BuildGlb(Quad("Plate", 0, 0.0002f, 0, 1, 0), sliver);
+        var zero = GlbDisconnectedParts.FuseNodes(src, new[] { 0, 1 }, 0.0);
+        // Test both sides of the distance floor. Neither weld changes the baseline geometry.
+        foreach (double dial in new[] { 5e-7, 1.1e-6 })
+        {
+            var r = GlbDisconnectedParts.FuseNodes(src, new[] { 0, 1 }, dial);
+            Assert.Equal(zero.Bytes, r.Bytes);
+            Assert.False(r.WeldDamaged);
+            Assert.Equal(zero.SurfaceAfter, r.SurfaceBefore);
+            Assert.Equal(r.SurfaceBefore, r.SurfaceAfter);
+            Assert.Equal(2, r.FacesMeasured);
+            Assert.Equal(1, r.PartsMeasured);
+        }
+    }
+
+    [Fact]
     public void The_weld_measurement_reaches_the_window_through_FuseGroups_one_distance_per_group()
     {
         // the window calls FuseGroups. Two groups at one dial (0.02): the tube is 100 long and welds within 2 (flattened);

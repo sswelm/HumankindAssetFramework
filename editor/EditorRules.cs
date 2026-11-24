@@ -1407,15 +1407,15 @@ public static class WorkshopRules
     /// The first lines of the Fuser's status when a non-zero weld took the detail out of groups (2026-11-24, RSS
     /// Centurion: the dial stood at 2.288‰ under the preview, three groups came out as shards or not at all, and the
     /// only trace was a "collapsed" count inside a 29 MB report). Null when no group was damaged. One entry per
-    /// damaged group: its letter, the faces flattened to nothing, its faces, its surface before and after the weld,
-    /// the parts mostly gone and the parts it fused.
+    /// damaged group: its letter, the faces flattened to nothing, and the face and part counts with area at dial 0.
+    /// The surface and part losses are measured against the dial-0 fuse.
     /// </summary>
     public static string WeldDamageSummary(double weldPermille, IList<(string letter, int flattened, int faces, double before, double after, int partsGone, int parts)> damaged)
     {
         if (damaged == null || damaged.Count == 0) return null;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         var sb = new System.Text.StringBuilder();
-        sb.Append("⚠ THE WELD FLATTENED FACES IN ").Append(damaged.Count).Append(damaged.Count == 1 ? " GROUP" : " GROUPS").Append(": the weld dial is at ")
+        sb.Append("⚠ WELD DAMAGE IN ").Append(damaged.Count).Append(damaged.Count == 1 ? " GROUP" : " GROUPS").Append(": the weld dial is at ")
           .Append(WeldText(weldPermille)).Append("‰, not 0. Unless you raised it to close gaps, set \"Fuse — weld seams closer than\" (below the preview) to 0 and Fuse again.\n");
         // The worst first, and six at most: the Centurion had twenty, and the status box is for the one thing to do next
         // (the report file carries every group's own warning line). Worst = the smaller of the surface kept and the faces
