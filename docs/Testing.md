@@ -31,7 +31,8 @@ through the JSON parser. Not held by any test: the `muzzleOffset` and `handPropA
 inside the injection code; a number in exponent form in the fallback (a defect, in the
 [Review-Backlog](Review-Backlog.md)); what the code formats (a config value the F8 window writes back, a cache key,
 warnings, reports and log lines); and culture-sensitive casing (the default culture is not Turkish).
-`Tests/test_culture_override.py` holds the override from outside the suite: a made-up name fails the run.
+`Tests/test_culture_override.py` checks the default and named overrides by reading VSTest's TRX result for the
+test thread's active culture. A made-up name fails the run and names the refused value.
 
 The unit suite is a deliberate, bounded suite, not a coverage target: it guards the functions where bugs have actually
 hidden, and stops there on purpose. What it cannot reach — the ~18k lines that reflect into a running game — is not

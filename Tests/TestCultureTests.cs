@@ -63,6 +63,7 @@ namespace HumankindAssetFramework.Tests
         {
             string asked = System.Environment.GetEnvironmentVariable("HAF_TEST_CULTURE");
             Assert.Equal(string.IsNullOrWhiteSpace(asked) ? TestBootstrap.DefaultCultureName : asked.Trim(), Expected.Name);
+            Assert.Same(Expected, CultureInfo.CurrentCulture);
         }
 
         // Windows answers any well-formed tag with a made-up culture ("Unknown Locale", a decimal point): under such a
