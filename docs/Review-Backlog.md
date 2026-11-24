@@ -1824,13 +1824,49 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   dials the value came back as the default, and a number of `position` as 0) and, on eleven dials (`moveTilt`,
   `turnRate`, `turnBank`, the `gunElev*` and `hug*` dials, `combatZ`, `rotorSpinSpeed`), `-?[0-9.]+` (no exponent at
   all: `1.5e+2` and `1.5e-2` both read 1.5, and `9.999999747378752e-6` read 10, a million times too large).
-- **The model fallback loses every entry after one with a missing closing quote or brace (2026-11-24, measured on
-  the district reader, which had the same limit for a day; NOT fixed for models).** `ParseModels`' fallback finds one
-  object per model by counting braces outside strings (`UniversalInject.RegistryEntryChunks`), since 2026-08-23. An
-  unclosed string or a missing `}` in one model swallows the models after it into that one (executed: 1 of 3
-  models recovered), and a damaged `"models": [` yields none (0 of 3). The district reader got a second way in for that case (`DistrictEntryTexts`: from each
-  `"district"` key to the next); a model has no key that is always written first and never repeated in `overrides`,
-  so the same trick needs a design of its own.
+- **The model fallback loses every entry after one with a missing closing quote or brace (2026-11-24) - FIXED the
+  same day** (`UniversalInject.RegistryEntryTexts`, shared with the district fallback; CHANGELOG, "A damaged
+  pack.json keeps the models after the damage"). Original: `ParseModels`' fallback finds one object per model by
+  counting braces outside strings (`UniversalInject.RegistryEntryChunks`), since 2026-08-23. An unclosed string or a
+  missing `}` in one model swallowed the models after it into that one (on the reference pack 1,275 of 2,500 models
+  read right over 50 damaged copies), and a `"models" [` without its colon yielded none. The key that tells a model
+  from the objects around it is `resourceName`: the docs require it, the Factory writes it first (50 of 50 in the
+  reference pack), and an `overrides` object never carries it.
+- **What the recovery around a name does not do (2026-11-24; NOT fixed).** Measured or constructed in its two
+  reviews:
+  (1) **A model without a `resourceName`** is not found in a damaged structure (with the braces intact it is kept,
+  as the JSON path keeps it). Its text stays out of the model above when that model closed before it; when the
+  model above lost its closing brace too, nothing separates them and the model above reads the keys it did not
+  write from the nameless one.
+  (2) **A model whose own `"resourceName"` key is damaged** (a quote of the key lost): the count coincides, the
+  walk's swallowed object is read, and the result is the NEXT model's name with this model's pawn, skel and atlas -
+  before and after this change (reference pack, model 48: "Zeppelin" with the volley gun's values).
+  (3) **A brace typed as a bracket** (a `{` typed `[`, a `}` typed `]`): 2 of 4,031 one-character damages of two
+  test packs read worse than by the braces alone.
+  (4) **A stray `}` in the only or the last entry:** the count coincides (one object, one name), the brace walk is
+  used, and the keys behind the stray brace fall to their defaults, as before.
+  (5) **Two damages.** A model without its closing brace before one whose `skel` lost its `]`: the second ends at
+  the next model (nothing foreign is read) and the models after it are lost. A real array end followed by an
+  object (`], { "resourceName": ... } ]`, a lost key between two arrays): that object is read as a model. A model
+  without its closing brace and a tuning table that lost its `[`: the model reads the table's `scale`. On the live
+  district registry 32 of 5,819 double damages read worse than before.
+  (6) An unpaired `[` anywhere before a model's brace (a string, a lost `]`) makes the count treat the models
+  behind it as that array's objects: the brace walk is kept, which is right when the braces are sound.
+  (7) Two of 11,864 generated documents with sound braces still take the recovery: an array of objects inside a
+  model, one of them carrying the name key, with an unpaired `]` in a string before it.
+  In the reference pack no model string holds a brace, and the 29 that hold brackets hold a balanced pair
+  (`Spin[0..0]`).
+- **A registry without its array recovers nothing, and says so (2026-11-24; a decision, not a defect).**
+  `"Models"`, a bare array, `"models_off"`, `"models": {` or `null` loads no models when the pack parses, so it loads
+  none when the pack is damaged; the same for `"districts"`. A warning counts the name keys and asks whether the
+  array's key is misspelled. For districts this takes back a recovery the fallback had: on the live registry 17 of
+  19 one-character damages to the array's own key, and 70 of 87 double ones, now load no district. If a misspelled array key should ever be forgiven,
+  forgive it on the JSON path first, where the file can be read whole.
+- **The native kernels drill reads recipe sources a user may be rewriting (2026-11-24, found by a failed push; NOT
+  fixed).** `rss_centurion_split_fused.glb` was fused again in the Workshop while the gate's drill ran; its managed
+  and native passes read two versions and the step failed with "1 of 116 probe/prep outputs hash differently". The
+  other 115 matched and the same drill passed on the two pushes before it. The step should notice a source whose
+  size or time changed during the run and name it as changed, not as a kernel mismatch.
 - **Neither path clamps a float dial (2026-11-23, read in the review of PR #315; NOT fixed).** A value the registry
   gives is used as given. Three consumers that an extreme value reaches: a unit-scale rule of `1e-30` (the guard is
   only `> 0`) into the shared mesh buffer (`UniversalInject.ScaleEra.cs:346-364`); an entry `scale` of `1e-30` into

@@ -10,6 +10,78 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **A damaged pack.json keeps the models after the damage (2026-11-24).** Recorded as not fixed by PR #315, asked
+  for by the user the same day.
+  - **The defect:** when a pack does not parse, `ParseModels` reads one object per model, found by counting braces
+    outside strings (since 2026-08-23). One closing quote or brace missing in one model swallowed every model after
+    it into that one, and a `"models" [` that lost its colon left nothing to count. A hand-edited pack with one lost
+    quote kept the models above the edit and lost every unit below it.
+  - **Measured on the reference pack (51 models), each model damaged in turn, 205 damaged copies:**
+
+    | Damage | Copies | Models read right, before | Now |
+    |---|---|---|---|
+    | a model's closing brace lost | 51 | 1,326 of 2,601 | 2,601 |
+    | a model's opening brace lost | 51 | 1,275 of 2,601, and 102 entries that are no model | 2,601, none |
+    | the closing quote of a model's `pawnDescription` lost | 51 | 1,326 of 2,601 | 2,601 |
+    | the closing quote of a model's last string lost | 51 | 1,326 of 2,601 | 2,601 |
+    | `"models": [` without its colon | 1 | 0 of 51 | 51 |
+
+    "Right" is all 120 values of the model equal to the same model read from a copy whose structure is intact (the
+    one field the lost quote damages left out). The undamaged pack, and a copy with only a doubled comma, read the
+    same before and after, value for value.
+  - **The fix (`UniversalInject.RegistryEntryTexts`, shared with the district fallback):** the brace walk stays the
+    first choice and is not changed. It is checked by a count: the array's text is searched for `"resourceName"`
+    keys, the keys are sorted into the objects they stand in, and the walk must hand back at least as many objects
+    carrying one. When it hands back fewer, each model is the object AROUND its key - back to the brace that
+    encloses it, forward to the next model or the array's end - found without regard to strings, since they are
+    what is damaged. A warning names the count. A document that PARSES keeps the brace walk alone.
+  - **What the recovery must leave alone** took two more attempts, both stopped by review before a push:
+    - The first version ended the walk at any `]` that closed nothing, so a model whose `skel` lost its `[` cost
+      every model after it (1,225 of 2,450 other models read right on the pack as it then was, against 2,450);
+      and it took a second `"resourceName"` in one model for a second model (475 of 11,864 generated documents with
+      sound braces went through the recovery, which ignores strings).
+    - The second trusted the `]` at which the walk stopped whenever it stood right behind a closed entry. A district
+      holds a `parts` array of objects; after one stray `}` the walk closes the district early and meets the `]` of
+      `parts` exactly so. 250 of 3,630 one-character damages of the live district registry lost every later
+      district.
+    - Now the walk is the old one, byte for byte on 39,945 generated documents, and its `]` is taken for the
+      array's only when no entry stands behind it. Two of the 11,864 generated model documents with sound braces
+      still take the recovery, and none of 7,880 district ones. Of 7,757 damaged copies of the reference pack (50
+      kinds of damage on each model, random deletions and insertions of one and two characters, cuts) none gives
+      back fewer right models and 4,716 give back more. Of 4,031 one-character damages of two test packs the new
+      reader is right wherever the old one was (1,724), better in 1,039 and worse in 2. Of 3,630 one-character
+      damages of the live district registry outside the array's own key (see below) none gives back fewer right
+      districts, and 32 of 5,819 double damages do.
+  - **Also fixed:** the last model of a pack without its closing brace ran past the array to the end of the file,
+    and a key it did not write was read from the arrays after it (a model without `scale` took the first
+    `unitScales` rule's). It ends at the array's `]`.
+  - **No other object's values.** Where the recovery cannot tell a model's own array of objects from the next model
+    behind a `skel` that lost its `]`, the model ends there: what it did not write stays at its default instead of
+    taking the next model's skel and scale.
+  - **Nothing without the array, and it says so.** A pack whose models array is renamed, absent or not an array
+    (`"Models"`, `"models_off"`, a bare array, `"models": {`, `null`) loads no models when it parses. It loads none
+    when it is damaged either, and a warning gives the count of `resourceName` keys and asks whether the key is
+    misspelled. Reading models from wherever a name stands would bring a parked array to life on the day a comma
+    went missing.
+  - **The district fallback uses the same function,** in place of the version it got earlier this day (PR #315),
+    which read from each `"district"` key to the next. Three things change for it. Keys a hand wrote BEFORE the
+    name stay with their district (they went to the district above). An object after the array that carries a
+    `"district"` key is no district (it was one: an empty `districts` array beside a parked one loaded the parked
+    districts). And a registry with no `"districts"` array recovers nothing and says why, where the earlier version
+    read districts out of such a file: 17 of the one-character damages of the live registry, and 70 of the double
+    ones, are damages to the array's own key and now load no district. The live registry, its backup and the corrupt
+    backup of 2026-08-20 read the same.
+  - **Tests (`Tests/ModelFallbackStructureTests.cs`, 62 cases, and 13 more in
+    `Tests/DistrictRegistryParseTests.cs`; the suite is 3,096):** damages after which every model must come back
+    with its own pawn, scale, guids and position - seventeen to a three-model pack shaped like the Factory's, each
+    held to the way it is read (braces or recovery) - and files the recovery must leave alone: an unpaired bracket
+    in a model, five kinds of second name key in one model, brackets inside strings, arrays beside the models
+    array, a district with `parts`, and ten documents without a models array. 45 defects planted in the new
+    code are all caught.
+  - **Not handled:** a model WITHOUT a `resourceName` is not found in a damaged structure, and when the model above
+    it lost its closing brace as well, that model reads the keys it did not write from it. A model whose own
+    `"resourceName"` key is damaged is read under the next model's name with its own values, as before. A brace
+    typed as a bracket. Some double damages (32 of 5,819 on the district registry). See [Review-Backlog](docs/Review-Backlog.md).
 - **The regex readers take a number however it is spelled, and the fallback's `idleAltInterval` default is the
   schema's (2026-11-23).** Found by the review of the culture PR, whose fraction test passes because a plain decimal
   was always read right.
@@ -35,14 +107,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     named objects than names in the text) and reads each district from its `"district"` key to the next one: all
     three come back, each with its own values. Six such damages are held by
     `Tests/DistrictRegistryParseTests.cs`; four plants in the new code are caught. On the live registry, its backup
-    and the corrupt backup of 2026-08-20 the three versions of the reader give the same result.
+    and the corrupt backup of 2026-08-20 the three versions of the reader give the same result. (Replaced the same
+    day by the reader shared with the model fallback - the entry above - which also takes back the recovery from a
+    registry that has no `"districts"` array.)
   - **A second fix in the same lines:** a pack that needed the fallback and left `idleAltInterval` out got 0 (the
     idle-alt one-shots off) where the JSON path gives the schema's 25. Reviews carried it from 2026-10-12 on; the Review-Backlog had
     marked it fixed on the strength of the JSON path alone. A quoted `"0"` still reads 0.
   - **The first version of this fix was wrong, and the review caught it:** it refused any token that was not wholly
     a number. `+1.5` and `0.5f`, which the old patterns read, came back as defaults, and in the district reader an
     unread height shifted every later district's height by one. It was never merged.
-  - **Tests (`Tests/RegexFallbackNumberTests.cs`, 59 cases; the suite is 2,993):** every float a pack can set, and
+  - **Tests (`Tests/RegexFallbackNumberTests.cs`, 59 cases; the suite is 3,021 with PR #314 merged in):** every float a pack can set, and
     `position`, in fourteen spellings against the runtime's own parse and the JSON parser; six spellings that are not
     JSON; four things that are not numbers; quoted numbers on both paths; `idleAltInterval` with a value that is not
     a number; a parseable document that still takes the fallback; every float dial left out; the district fallback,

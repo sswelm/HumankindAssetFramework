@@ -4,7 +4,7 @@ HAF is verified in **three tiers**, each a machine, each at the level where its 
 
 | Tier | Runs | Guards |
 |---|---|---|
-| **Unit tests** — **2,993 as of 2026-11-24** (`dotnet test` prints the live number; this one drifts) | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
+| **Unit tests** — **3,096 as of 2026-11-24** (`dotnet test` prints the live number; this one drifts) | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
 | **Headless game checks** | `tools/check-catalog.sh` in the push gate; `tools/check-bindings.sh` on demand / after a game update | **two halves of one claim**: `check-catalog.sh` proves the catalog **covers the code** (every by-name literal at a reflection site is catalogued or allowlisted with a reason), `bindcheck` proves it **resolves** against the real DLLs; `typeprobe --find` / `--exact` locate a seam or a member's owner before a binding is written |
 | **In-game smoke test** — `[load]` automatic, `[full]` on the F8 button | every load (a few ms, once), and on request | the injecting half, read from the **engine**: bindings, registry, roles, assets, sounds, files, GPU budget, district tiles and textures, patched seams — and, on the button, every live pawn on *our* skeleton, pose-hook liveness, the sub-pawn walk vs a scene scan, the write-back self-test |
 
@@ -38,9 +38,20 @@ runtime's own parse do, and the district fallback's flat height and a unit-scale
 spellings that are not JSON (`+1.5`, `0.5f`)
 read as the number they start with; a quoted number reads on both paths; and a dial left out of an entry defaults
 the same through the fallback as through the parser. District recovery tests cover omitted and unreadable fields,
-a truncated final entry, lookalike objects outside the `districts` array, and six damages to the array's own
-structure (a missing closing quote or brace, a damaged or missing wrapper) after which every district must still
-come back with its own values.
+a truncated final entry, lookalike objects outside the `districts` array, and seven damages to the array's own
+structure (a missing closing quote or brace, a missing opening brace, an array that lost its colon, a stray `]`
+between two districts, a name written last) after which every district must still come back with its own values;
+a district with a `parts` array of objects and one stray brace must cost no later district; a registry with no
+`districts` array must recover nothing and say why.
+The model fallback has the same protection (`Tests/ModelFallbackStructureTests.cs`), in two halves that matter
+equally. Damages after which every model must come back: seventeen to the structure of a three-model pack, each
+held to the way it is read (the brace walk, or the recovery around each `resourceName`). And files the recovery
+must leave alone, because it ignores strings and the walk does not: an unpaired bracket in a model, a second
+`resourceName` in one model (nested object, array of objects, comment, written twice, as a value), brackets inside
+strings, arrays beside the models array, and ten documents without a models array. Measured on the reference pack
+with each of its 51 models damaged in turn (205 copies): every model right in every copy, where the braces alone
+read about half of them. Two earlier versions of the recovery failed the second half, each stopped by a review
+that ran it; see the CHANGELOG entry.
 The recovery's string, boolean and numeric fields also matched the JSON reader on the live registry, its valid backup,
 and the 2026-08-20 backup after repairing its missing comma for the comparison.
 
