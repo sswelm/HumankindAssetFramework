@@ -243,22 +243,22 @@ public class WorkshopRulesTests
     }
 
     [Fact]
-    public void Mirrored_parts_turned_inward_lead_the_fuse_status_largest_group_first()
+    public void Mirrored_parts_still_reversed_lead_the_fuse_status_most_faces_first()
     {
         Assert.Null(WorkshopRules.MirroredCheckSummary(null));
-        Assert.Null(WorkshopRules.MirroredCheckSummary(new List<(string, int)>()));
+        Assert.Null(WorkshopRules.MirroredCheckSummary(new List<(string, int, int)>()));
 
-        var one = WorkshopRules.MirroredCheckSummary(new List<(string, int)> { ("A", 1) }).Split('\n');
-        Assert.StartsWith("⚠ MIRRORED PARTS FACE INWARD IN 1 GROUP (1 part): this file stores its mirrored parts already facing outward", one[0]);
+        var one = WorkshopRules.MirroredCheckSummary(new List<(string, int, int)> { ("A", 1, 1) }).Split('\n');
+        Assert.StartsWith("⚠ MIRRORED PARTS STILL REVERSED IN 1 GROUP (1 face, 1 part): this file stores its mirrored parts already facing outward", one[0]);
         Assert.EndsWith("Tick \"Check mirrored parts\" and Fuse again.", one[0]);
         Assert.Equal("   ⊕A×1", one[1]); Assert.Equal("", one[2]); Assert.Equal(3, one.Length);
 
-        // the RSS Centurion with the box off: the eighteen groups and the parts the box un-reversed in each (846)
-        var ship = new List<(string, int)> { ("A", 9), ("B", 13), ("C", 81), ("D", 68), ("E", 8), ("F", 2), ("G", 8), ("I", 18), ("J", 14), ("K", 6), ("N", 9), ("Q", 41),
-                                             ("R", 280), ("S", 122), ("U", 60), ("V", 35), ("W", 48), ("X", 24) };
-        var lines = WorkshopRules.MirroredCheckSummary(ship).Split('\n');
-        Assert.StartsWith("⚠ MIRRORED PARTS FACE INWARD IN 18 GROUPS (846 parts):", lines[0]);
-        Assert.Equal("   ⊕R×280  ⊕S×122  ⊕C×81  ⊕D×68  ⊕U×60  ⊕W×48  ⊕Q×41  ⊕V×35  ⊕X×24  ⊕I×18  ⊕J×14  ⊕B×13  … and 6 more", lines[1]);
+        // fourteen groups: the twelve with the most faces are named, most first, equal counts by letter; two are counted
+        var many = new List<(string, int, int)>();
+        for (int i = 0; i < 14; i++) many.Add((((char)('A' + i)).ToString(), 1, 100 * (i / 2 + 1)));   // A,B 100; C,D 200; ... M,N 700
+        var lines = WorkshopRules.MirroredCheckSummary(many).Split('\n');
+        Assert.StartsWith("⚠ MIRRORED PARTS STILL REVERSED IN 14 GROUPS (5,600 faces, 14 parts):", lines[0]);
+        Assert.Equal("   ⊕M×700  ⊕N×700  ⊕K×600  ⊕L×600  ⊕I×500  ⊕J×500  ⊕G×400  ⊕H×400  ⊕E×300  ⊕F×300  ⊕C×200  ⊕D×200  … and 2 more", lines[1]);
     }
 
     [Fact]

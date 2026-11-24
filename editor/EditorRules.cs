@@ -1439,20 +1439,22 @@ public static class WorkshopRules
     /// The lines of the Fuser's status that say "tick Check mirrored parts" (2026-11-24, RSS Centurion: the casemate
     /// walls were solid in the Fuser's preview, which draws the source as stored, and see-through in the Vehicle Lab;
     /// the fuse had said so in the console and in the report, for two groups of the eighteen concerned). Null when no
-    /// group needs it. One entry per group: its letter and the parts the glTF reversal turned inward.
+    /// group needs it. One entry per group: its letter, and the mirrored parts and faces STILL reversed in what the fuse
+    /// wrote - not the parts it reversed, many of which its winding passes turn back by themselves (review of the first
+    /// cut: two closed boxes were announced as see-through in an output the box would not have changed by a byte).
     /// </summary>
-    public static string MirroredCheckSummary(IList<(string letter, int parts)> groups)
+    public static string MirroredCheckSummary(IList<(string letter, int parts, int faces)> groups)
     {
         if (groups == null || groups.Count == 0) return null;
         var inv = System.Globalization.CultureInfo.InvariantCulture;
-        int total = groups.Sum(g => g.parts);
+        int parts = groups.Sum(g => g.parts), faces = groups.Sum(g => g.faces);
         var sb = new System.Text.StringBuilder();
-        sb.Append("⚠ MIRRORED PARTS FACE INWARD IN ").Append(groups.Count).Append(groups.Count == 1 ? " GROUP" : " GROUPS").Append(" (")
-          .Append(total.ToString("N0", inv)).Append(total == 1 ? " part" : " parts")
-          .Append("): this file stores its mirrored parts already facing outward, and the fuse reversed them as glTF asks. They are see-through in the Vehicle Lab and in game; ")
-          .Append("the preview here draws the source and looks right. Tick \"Check mirrored parts\" and Fuse again.\n   ");
+        sb.Append("⚠ MIRRORED PARTS STILL REVERSED IN ").Append(groups.Count).Append(groups.Count == 1 ? " GROUP" : " GROUPS").Append(" (")
+          .Append(faces.ToString("N0", inv)).Append(faces == 1 ? " face" : " faces").Append(", ").Append(parts.ToString("N0", inv)).Append(parts == 1 ? " part" : " parts")
+          .Append("): this file stores its mirrored parts already facing outward, the fuse reversed them as glTF asks, and these were not turned back. They face inward: see-through in the Vehicle Lab and in game, ")
+          .Append("while the preview here draws the source and looks right. Tick \"Check mirrored parts\" and Fuse again.\n   ");
         const int shown = 12;
-        sb.Append(string.Join("  ", groups.OrderByDescending(g => g.parts).ThenBy(g => g.letter, StringComparer.Ordinal).Take(shown).Select(g => "⊕" + g.letter + "×" + g.parts.ToString(inv))));
+        sb.Append(string.Join("  ", groups.OrderByDescending(g => g.faces).ThenBy(g => g.letter, StringComparer.Ordinal).Take(shown).Select(g => "⊕" + g.letter + "×" + g.faces.ToString(inv))));
         if (groups.Count > shown) sb.Append("  … and ").Append(groups.Count - shown).Append(" more");
         return sb.Append('\n').ToString();
     }
