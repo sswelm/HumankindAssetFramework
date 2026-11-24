@@ -77,10 +77,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   - **In the user's Vehicle Lab (2026-11-23, the PR branch):** Wheel centre set to Surface centroid on the Hunley,
     Generate on the C# route - the status box showed `VEHICLE wheel centre: Wheel_00 at its surface centroid
     (0.005,6.006,0.312), 0.071 from the box centre` and the user's verdict on the preview was "yes it worked".
-  - **Not checked:** nothing was looked at in the game. The window's side of the setting (popup to Generate to the
-    tag) worked in that one run but is executed by no test: no saved recipe carries `wheelCentre`, and a
-    planted removal of the field from the window's argument filling passed every check. Rotors, the gun and the
-    turret keep their box-based pivots. On a tracked vehicle the two routes agree, but whether a tread still LOOKS
+  - **Saved recipe check.** The Hunley's recipe with `wheelCentre: 1` was loaded and generated through the Vehicle
+    Lab in batch-mode Unity. The C# route exported successfully and the status box reported the expected pivot.
+  - **Not checked:** nothing was looked at in the game. Rotors, the gun and the turret keep their box-based pivots.
+    On a tracked vehicle the two routes agree, but whether a tread still LOOKS
     right is not measured: its path is fitted to the wheels' boxes while its wrap bones follow the moved wheel bones.
     With spin disabled the control is greyed with the rest of the section but the tag is still sent (the bone's
     place does not depend on the spin).

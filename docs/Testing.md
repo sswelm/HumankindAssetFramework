@@ -3062,10 +3062,9 @@ wheel; all four wheels of the pitched belts) each carry an off-centre shard so t
 links). The drill requires all eight equal through the export and the C#'s own note of the branch. It states parity only -
 that the port repeats the script. That the bone lands ON the shaft is held by `Tests/VehicleRigWheelCentreTests.cs` (the C#
 stages on a screw of 2, 3, 4, 5 and 7 blades); `WheelCentreTests` in `Tests/test_vehicle_rig_math.py` holds the script's
-helper (its centroid) and, by source text only, the lines that lay the bone - the script's own bone block is executed by the
-drill alone. NOT held by any test (seen working once, by the user in the Lab on the Hunley, 2026-11-23): the window's side of the setting (popup to Generate to the tag) - no saved recipe carries
-`wheelCentre`, the Unity Generate drill's fixture list has no wheel-centre key, and the Tests project does not compile the
-window; a planted removal of the field from `RigArgsFromFields` passed every check.
+helper (its centroid). The Blender drill executes the bone block. A separate batch-mode Unity check loaded the saved
+Hunley recipe with `wheelCentre: 1` through `VehicleLabWindow.GenerateHeadless`. The window and recipe reader produced
+the same arguments, and the C# export reported (0.005, 6.006, 0.312) in the status box.
 
 The concave-face cases use an L-shaped polygon with an area centroid of (1.5, 0, 1) in the wheel's plane. Both
 winding orders give that centroid. The original triangle fan gave (1.75, 0, 1.167) by counting area in the notch.
