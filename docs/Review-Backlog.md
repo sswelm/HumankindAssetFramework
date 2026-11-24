@@ -1863,9 +1863,10 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   1 of 5,819 double damages reads worse than the reader of PR #315.
   (7) **Brackets and braces inside strings.** An unpaired `]` inside a string value, before an entry that lost its
   opening brace, ends the counted array there: the entries behind it are lost, and nothing says so. The text
-  `}, {` inside a string value ends that entry in the recovery. A quote lost in the LAST entry still reads the
-  arrays behind it (a model without `scale` takes the tuning table's), as before. In the reference pack no model
-  string holds a brace, and the 29 that hold brackets hold a balanced pair (`Spin[0..0]`).
+  `}, {` inside a string value ends that entry in the recovery. An ambiguous end to a damaged array can still
+  mix fields across objects. The review of PR #319 covered a lost quote in the last model with a sibling tuning
+  table after the array's identifiable closing bracket. In the reference pack, 29 model strings contain balanced
+  bracket pairs (`Spin[0..0]`).
   (8) **Remarks.** A remark between two models that quotes a name AND further keys
   (`# "resourceName": "Old", "pawnDescription": "..."`) is read as a model. A remark inside a model, above its
   name, gives the model the remark's name; that is the field reader's first match, as before.

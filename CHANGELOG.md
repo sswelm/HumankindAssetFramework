@@ -34,7 +34,11 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     keys, the keys are sorted into the objects they stand in, and the walk must hand back at least as many objects
     carrying one. When it hands back fewer, each model is the object AROUND its key - back to the brace that
     encloses it, forward to the next model or the array's end - found without regard to strings, since they are
-    what is damaged. A warning names the count. A document that PARSES keeps the brace walk alone.
+    what is damaged. A warning names the count. Field recovery in a document that parses uses the model objects
+    already selected by Newtonsoft.
+  - **Array boundaries (review of PR #319):** structural recovery selects the root registry array even when
+    metadata or a comment uses the same name. A closing bracket followed by a sibling property can also bound
+    the last entry after a lost quote, keeping fields from the tuning table out of the recovered model.
   - **What the recovery must leave alone** took four versions. Two were stopped by review before a push, the third
     was pushed (PR #319, commit 910bae4e) and reviewed again:
     - The first ended the walk at any `]` that closed nothing, so a model whose `skel` lost its `[` cost every model
@@ -126,8 +130,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     `resourceName` is not found in a damaged structure; three adjacent lines deleted at a model's end (the next
     model reads like an element of a mixed array); a bracket typed for a brace (123 give back one right model fewer (the damaged model itself) and 1,289 more, of 4,404 on the reference pack; 19 of 120 on the
     district registry, the pushed version 51); a remark that carries further keys or stands inside a model above
-    its name; a quote lost in the last model, which still reads the arrays behind it; a file without line ends
-    that lost two quotes in one district.
+    its name; a file without line ends that lost two quotes in one district.
 - **Model Fuser: a weld that flattens parts says so (2026-11-24).** Reported by the user on the RSS Centurion, a
   pre-dreadnought of 2,164 parts in 23 fuse groups: "something weird is going on with Group U after fusing, where it
   gets all messed up", then "group K is missing", then "the chains are also missing".

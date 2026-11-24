@@ -58,6 +58,64 @@ namespace HumankindAssetFramework.Tests
 
         static void DoesNotParse(string doc) => Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
 
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void AnArrayInsideMetadataCannotReplaceTheRootModelsArray(bool damaged)
+        {
+            string modelText = damaged ? B : B.Insert(B.Length - 1, @", ""scale"": ""bad"" ");
+            string doc = @"{ ""metadata"": { ""models"": [ " + Parked + @" ] }, "
+                + Models + modelText + @" ], ""bad"": " + (damaged ? "}" : "0 }");
+            if (damaged) DoesNotParse(doc);
+            var model = Assert.Single(UniversalInject.ParseModels(doc));
+            Assert.Equal("B", model.resourceName);
+            Assert.Equal("PB", model.pawnDescription);
+        }
+
+        [Fact]
+        public void AModelsArrayInsideMetadataDoesNotBecomeTheRegistry()
+        {
+            string doc = @"{ ""metadata"": { ""models"": [ " + Parked + @" ] }, ""bad"": }";
+            DoesNotParse(doc);
+            Assert.Empty(UniversalInject.ParseModels(doc));
+        }
+
+        [Fact]
+        public void ADecoyWithAColonCannotReplaceTheRootArrayWithAMissingColon()
+        {
+            string doc = @"{ ""models"" [ " + B + @" ], ""metadata"": { ""models"": [ " + Parked + " ] } }";
+            DoesNotParse(doc);
+            Assert.Equal("B", Assert.Single(UniversalInject.ParseModels(doc)).resourceName);
+        }
+
+        [Fact]
+        public void AModelsArrayInACommentCannotReplaceTheRootArray()
+        {
+            string doc = @"{ /* ""models"": [ " + Parked + " ] */ " + Models + B + @" ], ""bad"": }";
+            DoesNotParse(doc);
+            Assert.Equal("B", Assert.Single(UniversalInject.ParseModels(doc)).resourceName);
+        }
+
+        [Fact]
+        public void ParsingAndFieldRecoveryUseTheSameRootArrayWhenTheKeyIsRepeated()
+        {
+            string brokenModel = B.Insert(B.Length - 1, @", ""scale"": ""bad"" ");
+            string doc = "{ " + Models + Parked + " ], " + Models + brokenModel + " ] }";
+            Assert.Equal("B", Assert.Single(UniversalInject.ParseModels(doc)).resourceName);
+        }
+
+        [Fact]
+        public void AQuoteLostInTheLastModelDoesNotReadTheTuningTable()
+        {
+            string doc = Head + Models + A + ", "
+                + B.Insert(B.Length - 1, @", ""soundFile"": ""b.wav ") + Tail;
+            DoesNotParse(doc);
+            var models = UniversalInject.ParseModels(doc);
+            Assert.Equal(new[] { "A", "B" }, models.Select(m => m.resourceName));
+            Assert.Equal("PB", models[1].pawnDescription);
+            Assert.Equal(1f, models[1].scale);
+        }
+
         // Which way a document takes: null = by its braces, otherwise what the count found.
         static string Damage(string doc)
         {
@@ -519,7 +577,7 @@ namespace HumankindAssetFramework.Tests
         }
 
         // A DOCUMENT THAT PARSES and still reaches the fallback (every model fails the object parse: a scale that is no
-        // number) is read by its braces, whatever the count says. This one the count would send through the recovery
+        // number) still uses the objects Newtonsoft selected, whatever the count says. This one the count would send through the recovery
         // (a brace in a string inside an array of objects, then a named object: 2 names, 1 object by braces) - held,
         // or the test proves nothing, as its first version did - and the recovery would make a model of "p" and lose
         // the nameless one.

@@ -41,6 +41,20 @@ namespace HumankindAssetFramework.Tests
 
         // ---- THE PARITY ORACLE: the fallback must recover what the object parse extracts ----
 
+        [Fact]
+        public void ACommentAndNestedMetadataCannotSupplyTheDistrictRegistry()
+        {
+            const string doc = @"{
+                /* ""districts"": [{ ""district"": ""Comment"" }] */
+                ""metadata"": { ""districts"": [{ ""district"": ""Parked"" }] },
+                ""districts"": [{ ""district"": ""Active"", ""groundMaterial"": ""Prairie"" }],
+                ""bad"": }";
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var district = Assert.Single(DistrictInject.ParseDistrictsRaw(doc));
+            Assert.Equal("Active", district.district);
+            Assert.Equal("Prairie", district.groundMaterial);
+        }
+
         // Both extractors should agree on the values from a well-formed document.
         [Fact]
         public void RegexRecovery_MatchesTheObjectParse_FieldForField()

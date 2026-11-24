@@ -711,16 +711,84 @@ namespace HumankindAssetFramework
             return keys;
         }
 
-        // Split a registry array into entry objects for the regex fallbacks. Count braces outside strings so quoted
-        // braces and nested objects stay inside their own entry. Entries from sibling arrays cannot contribute fields.
-        internal static List<string> RegistryEntryChunks(string text, string arrayName)
+        // Find the first root-level registry array. A same-named property in metadata or a comment is outside
+        // the registry. Stop at its opening bracket, before damaged entry text can spoil the nesting count.
+        static int RegistryArrayStart(string text, string arrayName, out bool hasColon)
         {
-            var outp = new List<string>();
-            foreach (var span in RegistryEntrySpans(text, arrayName, out _, out _, out _)) outp.Add(text.Substring(span.Key, span.Value));
-            return outp;
+            hasColon = false;
+            int root = SkipRegistryTrivia(text, text.Length > 0 && text[0] == '\uFEFF' ? 1 : 0);
+            if (root == text.Length || text[root] != '{') return -1;
+
+            int depth = 1;
+            char previous = '{';
+            for (int i = SkipRegistryTrivia(text, root + 1); i < text.Length; i = SkipRegistryTrivia(text, i + 1))
+            {
+                char c = text[i];
+                if (c == '"')
+                {
+                    int key = i + 1;
+                    i = RegistryStringEnd(text, i);
+                    if (depth == 1 && previous != ':' && i - key == arrayName.Length
+                        && string.CompareOrdinal(text, key, arrayName, 0, arrayName.Length) == 0)
+                    {
+                        int next = SkipRegistryTrivia(text, i + 1);
+                        bool colon = next < text.Length && text[next] == ':';
+                        if (colon) next = SkipRegistryTrivia(text, next + 1);
+                        if (next < text.Length && text[next] == '[') { hasColon = colon; return next + 1; }
+                    }
+                }
+                else if (c == '{' || c == '[') depth++;
+                else if ((c == '}' || c == ']') && --depth == 0) break;
+                previous = c;
+            }
+            return -1;
         }
 
-        // The walk behind RegistryEntryChunks: each entry as (start, length). `closedAt` is where the walk saw the `]`
+        static int RegistryStringEnd(string text, int openingQuote)
+        {
+            for (int i = openingQuote + 1; i < text.Length; i++)
+            {
+                if (text[i] == '"') return i;
+                if (text[i] == '\\') i++;
+            }
+            return text.Length;
+        }
+
+        static int SkipRegistryTrivia(string text, int start)
+        {
+            int i = start;
+            while (i < text.Length)
+            {
+                if (char.IsWhiteSpace(text[i])) { i++; continue; }
+                if (text[i] == '#' || (text[i] == '/' && i + 1 < text.Length && text[i + 1] == '/'))
+                {
+                    while (i < text.Length && text[i] != '\r' && text[i] != '\n') i++;
+                    continue;
+                }
+                if (text[i] == '/' && i + 1 < text.Length && text[i + 1] == '*')
+                {
+                    int end = text.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                    i = end < 0 ? text.Length : end + 2;
+                    continue;
+                }
+                break;
+            }
+            return Math.Min(i, text.Length);
+        }
+
+        // A tentative end from the damaged-text scan is enough to clip a brace span when a sibling property
+        // follows it. A lone bracket could be an ordinary character in a string in a truncated file.
+        static bool RegistryPropertyFollows(string text, int arrayEnd)
+        {
+            int comma = SkipRegistryTrivia(text, arrayEnd + 1);
+            if (comma >= text.Length || text[comma] != ',') return false;
+            int key = SkipRegistryTrivia(text, comma + 1);
+            if (key >= text.Length || text[key] != '"') return false;
+            int colon = SkipRegistryTrivia(text, RegistryStringEnd(text, key) + 1);
+            return colon < text.Length && text[colon] == ':';
+        }
+
+        // Walk the selected array: each entry as (start, length). `closedAt` is where the walk saw the `]`
         // that closes the array, or -1: it never did, so the array's `]` - if the text has one - lies INSIDE the last
         // entry, which lost its closing brace and was closed by a later one (the document's own) or by nothing. (Or
         // the text has none: a file cut short behind its last entry. A stray `]` in that entry is then taken for the
@@ -733,15 +801,14 @@ namespace HumankindAssetFramework
         // nothing (two quotes lost in one district of the live registry hid the `[` of its parts, and the `]` of an
         // inner array stood there as the registry's own: 64 of 5,819 double damages lost the district after it).
         // Noting these changes nothing about the entries the walk hands back.
-        static List<KeyValuePair<int, int>> RegistryEntrySpans(string text, string arrayName, out int closedAt, out int unpairedCloseInLast, out bool closePaired)
+        static List<KeyValuePair<int, int>> RegistryEntrySpans(string text, int from, out int closedAt, out int unpairedCloseInLast, out bool closePaired)
         {
             var outp = new List<KeyValuePair<int, int>>();
             closedAt = -1; unpairedCloseInLast = -1; closePaired = false;
             int open = 0;   // `[` since the array's own, outside strings, not closed again
             bool stringOverLines = false;
-            var key = Regex.Match(text ?? "", "\"" + Regex.Escape(arrayName) + "\"\\s*:\\s*\\[");
-            if (!key.Success) return outp;
-            int i = key.Index + key.Length, depth = 0, start = -1, brackets = 0, unpaired = -1;
+            if (from < 0) return outp;
+            int i = from, depth = 0, start = -1, brackets = 0, unpaired = -1;
             bool inStr = false, esc = false;
             for (; i < text.Length; i++)
             {
@@ -828,12 +895,10 @@ namespace HumankindAssetFramework
             string nameKeyPattern = soundKey + "|\"" + name + "\\s*:|(?<![\\w\"])" + name + "\"\\s*:";
             // for the count the caller reports: `"district": [` is the array's key misspelled, not a district's name
             string nameOfAnEntry = soundKey + "(?!\\s*\\[)";
-            // (the colon and the white space after it as ONE optional group: `\s*:?\s*` tried every split of a run of
-            // white space that no `[` follows - 5 s on 20,000 spaces)
-            var array = Regex.Match(text, "\"" + Regex.Escape(arrayName) + "\"\\s*(?::\\s*)?\\[");
-            if (!array.Success) { namesWithoutArray = Regex.Matches(text, nameOfAnEntry).Count; return result; }
+            int from = RegistryArrayStart(text, arrayName, out bool hasColon);
+            if (from < 0) { namesWithoutArray = Regex.Matches(text, nameOfAnEntry).Count; return result; }
             int soundKeyLength = nameKey.Length + 2;
-            var spans = RegistryEntrySpans(text, arrayName, out int closedAt, out int unpairedCloseInLast, out bool closePaired);
+            var spans = RegistryEntrySpans(text, hasColon ? from : -1, out int closedAt, out int unpairedCloseInLast, out bool closePaired);
 
             // WHERE THE ARRAY ENDS.
             // The walk's answer, when two things hold. It saw the array close right behind an entry it had closed
@@ -849,7 +914,7 @@ namespace HumankindAssetFramework
             // own opening, unless an object stands right behind it (`] {`, `], {`: nothing but another entry can
             // follow there, so that `]` is a stray one and the array goes on). The walk has no answer when a quote or
             // a closing brace is lost.
-            int from = array.Index + array.Length, to = -1;
+            int to = -1;
             if (closedAt >= 0)
             {
                 int afterLast = spans.Count > 0 ? spans[spans.Count - 1].Key + spans[spans.Count - 1].Value : from;
@@ -969,7 +1034,11 @@ namespace HumankindAssetFramework
                 for (int s = 0; s < spans.Count; s++)
                 {
                     int start = spans[s].Key, length = spans[s].Value;
-                    if (closedAt < 0 && s == spans.Count - 1 && unpairedCloseInLast >= 0) length = unpairedCloseInLast - start;
+                    if (closedAt < 0 && s == spans.Count - 1)
+                    {
+                        if (unpairedCloseInLast >= 0) length = unpairedCloseInLast - start;
+                        else if (to > start && to < start + length && RegistryPropertyFollows(text, to)) length = to - start;
+                    }
                     result.Add(text.Substring(start, length));
                 }
                 return result;
@@ -1187,14 +1256,15 @@ namespace HumankindAssetFramework
         internal static List<ModelEntry> ParseModels(string doc)
         {
             var entries = new List<ModelEntry>();
-            bool parsed = true;   // the document is JSON: its braces can be trusted
+            JArray parsedModels = null;
                 // PRIMARY: Newtonsoft (the game's own copy) parses each model as an OBJECT, so fields stay with their
                 // model — robust to a missing/reordered field on any single model, unlike the index-aligned regex below.
                 // UnityEngine.JsonUtility silently returns empty in the game's Mono runtime (works only in the editor),
                 // so it's not usable here; Newtonsoft works in-process. Regex is kept as a last-resort fallback.
                 try
                 {
-                    var models = JObject.Parse(doc)["models"] as JArray;
+                    parsedModels = JObject.Parse(doc)["models"] as JArray;
+                    var models = parsedModels;
                     if (models != null && models.Count > 0)
                     {
                         int A(JToken arr, int k) => (arr is JArray a && k < a.Count) ? (int)a[k] : 0;
@@ -1271,8 +1341,9 @@ namespace HumankindAssetFramework
                         // return an empty list — isolation must not swallow a document the regex could still recover.
                         Plugin.Log.LogWarning($"[Uni] all {models.Count} registry model(s) failed the object parse; using regex fallback");
                     }
+                    else return entries;
                 }
-                catch (Exception ex) { Plugin.Log.LogWarning("[Uni] Newtonsoft parse failed (" + ex.Message + "); using regex fallback"); entries.Clear(); parsed = false; }
+                catch (Exception ex) { Plugin.Log.LogWarning("[Uni] Newtonsoft parse failed (" + ex.Message + "); using regex fallback"); entries.Clear(); }
 
                 // FALLBACK: field-by-field regex, PER MODEL OBJECT (2026-08-23). It used to match each field across the
                 // WHOLE document and pair them BY INDEX, which was wrong in three ways that all fire on real packs:
@@ -1286,14 +1357,13 @@ namespace HumankindAssetFramework
                 // an entry didn't write simply isn't in its chunk, so it falls to the same default the object path uses.
                 // This path runs exactly when the document is already damaged, which is when being right matters most.
                 const string i4 = @"\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]";
-                // WHICH TEXT IS ONE MODEL (2026-11-24). A document that PARSED and still came here (every entry failed
-                // the object parse) has braces that can be trusted: one object per model, nothing else. A document
-                // that did not parse may have lost a quote or a brace, and then one object per model lost every model
-                // after the damaged one (RegistryEntryTexts). The second way is kept from the first kind of document
-                // as a second lock: its braces are sound, so the walk is the whole answer and nothing the count
-                // could get wrong can reach it.
+                // Keep the objects already selected by Newtonsoft when only model conversion failed. Re-scanning
+                // the document could pick another array with the same name. Recover the structure only when JSON
+                // parsing itself failed and no object list is available.
                 string structureDamage = null; int namesWithoutArray = 0, secondNames = 0;
-                var modelTexts = parsed ? RegistryEntryChunks(doc, "models") : RegistryEntryTexts(doc, "models", "resourceName", out structureDamage, out namesWithoutArray, out secondNames);
+                var modelTexts = parsedModels != null
+                    ? parsedModels.OfType<JObject>().Select(model => model.ToString(Newtonsoft.Json.Formatting.None))
+                    : RegistryEntryTexts(doc, "models", "resourceName", out structureDamage, out namesWithoutArray, out secondNames);
                 if (structureDamage != null)
                     Plugin.Log.LogWarning("[Uni] the structure of the models array is damaged too (" + structureDamage
                         + "): reading each model from the object around its \"resourceName\". A model without that key is not recovered. Fix the JSON syntax to be safe.");
