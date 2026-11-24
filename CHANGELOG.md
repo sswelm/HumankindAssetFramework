@@ -4609,6 +4609,32 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Authoring tools
 
+- **A definition made in the editor is in the Pick lists at once, and a new Model Factory entry starts on Keep
+  Model (2026-11-24).** Reported from the Model Factory: a pawn definition made that session
+  (`Era5_Common_SemiSubmersibleTorpedoBoats_01`, added to `PresentationPawnDefinition_Era5_ENC.asset`) was in the
+  Pawn description **Pick** list only after Unity was restarted.
+  - **The defect:** the list was read from the databases once and kept in a static field for the whole editor
+    session. Four more kept reads had the same life: the Resize Lab's pawn list, the Sound window's pawn list, the
+    District Factory's district list, and the per-pawn "is this a boat" answer (the preview's water and the Animation
+    Lab's ground plane read it). The boat answer was wrong in a second way: a new pawn starts on the default profile
+    and is set to Boat afterwards, and the first answer stayed. The pre-bake check and **Validate pack** read the
+    same pawn list, so a new pawn drew the warning "matches no known unit descriptor" until the restart.
+  - **The fix:** a kept read is valid for one generation (`editor/DefinitionCaches.cs`). The generation moves when
+    Unity imports, deletes or moves a definition database (saving an edited database is an import), and on every
+    Pick click, so a definition that is added but not saved yet is listed too. The Formation Override window was
+    never affected: it reads its unit list on every repaint.
+  - **Cost:** the asset hook implements only `OnPostprocessAllAssets`. Adding it to a scratch project reimported
+    nothing (0 of 2 assets; a control hook with `OnPreprocessTexture` reimported the texture). One Pick click's
+    re-read took 12 to 19 ms on 1,404 stand-in definitions in 26 databases, the size of the ENC project's pawn
+    databases; it was not timed on the real project.
+  - **Keep Model:** a new entry and **Reset** start with Normals on `KeepModel`; it was `Recalculate`. Only the
+    Factory's new-entry seam changed. A registry entry stored without `normalsMode` still reads `Recalculate`, the
+    setting it was baked with, and saved entries keep their value. The District Factory still starts on
+    Recalculate.
+  - **Held by:** `bash tools/definition_caches_unity_drill.sh` (the real readers in a temporary Unity project, see
+    [Testing](docs/Testing.md)) and `Tests/DefinitionCachesTests.cs` for the path rule. Not driven: the click on the
+    Pick button itself; the drill makes the two calls the button makes.
+
 - **FUSION KEEPS EXPOSED VERTICAL JOINS FACING OUTWARD (2026-10-04).** The Protected Cruiser's starboard wall
   beside the stairs retained all its triangles but the parity pass reversed 21 faces of `Material2_2006_Part_004`
   in group H. The existing join safeguard only checked fronts visible from above. The parity minority now also

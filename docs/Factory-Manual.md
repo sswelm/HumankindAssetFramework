@@ -191,6 +191,8 @@ Delete is off — an unreadable registry's entries would all look ownerless.
 ### Resource name / Pawn description / Model file
 - **Resource name** — unique id; names all the baked assets (`<name>_Skeleton`, `<name>_Atlas`, …).
 - **Pawn description** — the target unit. **Pick** opens a searchable list of every `PresentationPawnDefinition`.
+  Each click reads the project's databases again, so a pawn definition you made a minute ago is in the list; no
+  restart is needed (2026-11-24).
 - **Model file** — `.glb/.gltf/.obj/.fbx/.blend`. **Leave empty when re-baking** an existing resource to reuse the
   already-imported model with new settings (fast iteration).
 
@@ -236,7 +238,8 @@ their settings and work together**:
 
 ### Mesh / shading *(ignored in Animated mode)*
 - **Normals** — `KeepModel` (artist's normals) / `Recalculate` (hard edges via the **Smoothing angle** slider) /
-  `Faceted` (fully flat).
+  `Faceted` (fully flat). A new entry starts on `KeepModel` (2026-11-24; `Recalculate` before). Saved entries keep
+  what they were saved with.
 - **Height-gradient UVs** — override UVs with V = normalized height, so a vertical-gradient albedo maps by height (black
   skirt low, grey hull high). For untextured CAD models that just need a simple gradient skin.
 - **Winding fix (CAD/convex)** — rewind faces outward so single-sided / CAD "sketch" meshes render instead of culling to
@@ -836,8 +839,8 @@ inherited donor sound**, **Idle growl** (file, volume, interval, one-voice radiu
 **Battle start war cry** (each: file, volume, start offset), **Movement**
 (start/travel/stop), and **Wwise engine event** (with the searchable event **Pick** dropdowns and the one-click
 **Use donor engine sound** button — §13). The Pawn-description field has its own **Pick** (2026-07-25): a searchable
-dropdown over EVERY pawn descriptor in the loaded databases — ENC and mounted vanilla alike (first open scans the
-assets once per session) — and picking loads that pawn's existing audio config. Pick a pawn (or **Edit** one from the
+dropdown over EVERY pawn descriptor in the loaded databases — ENC and mounted vanilla alike (each click reads the
+databases again, so a pawn made this session is listed) — and picking loads that pawn's existing audio config. Pick a pawn (or **Edit** one from the
 "Units with audio" list, which fills
 the window's remaining height) and every knob round-trips; each WAV row has a ▶ preview. **Folded headers summarize
 their configuration** (2026-07-25): while a section is collapsed, its configured WAV/event shows right-aligned in

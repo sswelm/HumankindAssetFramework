@@ -43,13 +43,13 @@ public class ResizeLabWindow : EditorWindow
     // definitions — the runtime skips them anyway, but offering them invites the disappointment the exclusion
     // exists to prevent. Same structural check as the plugin: PresentationPawnDefinition.AnimationCapabilityProfile
     // against the human-carrying family (Human, mounted fighter/driver, servant, chariot crew, Mount, Chariot).
-    static string[] scalableCache;
+    static string[] scalableCache; static int scalableCacheGeneration = -1;   // holds for one DefinitionCaches.Generation
     static readonly HashSet<int> HumanProfiles = new HashSet<int> { 1, 2, 4, 6, 9, 10, 12, 13, 16 };
     static string[] GatherScalablePawnNames()
     {
-        if (scalableCache != null) return scalableCache;
+        if (scalableCache != null && scalableCacheGeneration == DefinitionCaches.Generation) return scalableCache;
         var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var guid in AssetDatabase.FindAssets("PresentationPawnDefinition"))
+        foreach (var guid in AssetDatabase.FindAssets(DefinitionCaches.PawnContainers))
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
             if (!path.EndsWith(".asset")) continue;
@@ -61,7 +61,7 @@ public class ResizeLabWindow : EditorWindow
                 names.Add(o.name);
             }
         }
-        scalableCache = names.ToArray();
+        scalableCache = names.ToArray(); scalableCacheGeneration = DefinitionCaches.Generation;
         return scalableCache;
     }
 
@@ -112,6 +112,7 @@ public class ResizeLabWindow : EditorWindow
                 {
                     int idx = i;   // capture
                     var rect = GUILayoutUtility.GetLastRect();
+                    DefinitionCaches.Invalidate();   // a click reads the databases again (a pawn made this session)
                     new PawnDropdown(new AdvancedDropdownState(), GatherScalablePawnNames(), n =>
                     { rules[idx].match = n; dirty = true; Repaint(); }).Show(rect);
                 }

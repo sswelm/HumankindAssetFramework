@@ -3513,6 +3513,21 @@ view and Show all must expose every row, preserve roles and generation arguments
 recipe clean. All 18 checks pass; the original PR failed eight, including restoration of the saved vertex filter after
 the reset and the fixed +/-999 bounds. This checks the window's reset methods, not interactive arrow-key routing.
 
+**Definition lists after a database edit (2026-11-24):** `bash tools/definition_caches_unity_drill.sh` runs the real
+list readers of the Model Factory, the Resize Lab, the Sound window and the District Factory in a temporary Unity
+project, against stand-in definition databases (the windows find a definition by its type name). It adds a pawn
+without saving, saves one, sets a pawn's profile to Boat and to a human profile, renames a pawn, adds a district,
+writes an asset that is no database, and deletes a database. After each step every list must show the change with no
+restart: after a Pick click for the unsaved pawn, and with no click once the database is saved. Control rows show
+that the lists are kept between changes; without them a reader that kept nothing would pass. It also holds the Model
+Factory's new entry on Keep Model and a stored entry without `normalsMode` on Recalculate. All 36 checks pass.
+Planted defects, each run through the drill: the asset hook off, each of the four lists kept for the session (the
+reported defect is the Model Factory's), the boat answer kept, the district word dropped from the path rule, every
+`.asset` counted as a database, a Pick click that does nothing, the new entry back on Recalculate, and `ModelDef`'s
+own default changed to Keep Model. Each fails the rows it should. The first plant also found a row that passed for
+the wrong reason (a list last read a generation earlier scanned again by itself); every list is now read before each
+change. The drill is not part of the push gate. It does not click the Pick button: it makes the button's two calls.
+
 PR #212 review guards: missing, blank and unrecognized backend preferences use the C# factory default, while valid
 recipe/editor choices keep their precedence. The wrapper's timing labels describe its actual stage boundaries (rig,
 skinning and join together; then clips; then mesh/export preparation), and completion remains the last log line.

@@ -19,7 +19,11 @@ public class ModelFactoryWindow : EditorWindow
     // (ModelDef is [Serializable], so the whole edited entry round-trips.)
     // One construction seam for new/reset entries. (It briefly initialized the per-entry staticAxisV2 flag,
     // 2026-09-09..12; the single-convention rework deleted the flag, and the seam stays for the next default.)
-    static ModelDef FreshEntry() => new ModelDef();
+    // NORMALS START ON KEEP MODEL (2026-11-24, user: "Keep Model as Normals setting should be the default"): a new
+    // entry and a Reset keep the model's own normals. Only this seam changed. ModelDef's own field default stays
+    // Recalculate, because that is what a registry entry WITHOUT the field was baked with; loading one must not
+    // turn it into Keep Model.
+    static ModelDef FreshEntry() => new ModelDef { normalsMode = (int)NormalsMode.KeepModel };
     [SerializeField] ModelDef cur = FreshEntry();
     [SerializeField] int selected;      // 0 = <New>, else index into `existing`
     string[] existing = { "<New>" };
@@ -1060,6 +1064,7 @@ public class ModelFactoryWindow : EditorWindow
             if (GUILayout.Button("Pick", GUILayout.Width(70)))
             {
                 var r = GUILayoutUtility.GetLastRect();
+                DefinitionCaches.Invalidate();   // a click reads the databases again: a pawn made a minute ago must be in the list
                 new PawnDropdown(new AdvancedDropdownState(), GatherPawnNames(), n =>
                 {
                     cur.pawnDescription = n;
@@ -1914,18 +1919,21 @@ public class ModelFactoryWindow : EditorWindow
         catch { return false; }
     }
 
-    static string[] pawnCache;
+    // Both pawn caches hold for one DefinitionCaches.Generation (a saved database edit or a Pick click moves it).
+    static string[] pawnCache; static int pawnCacheGeneration = -1, boatCacheGeneration = -1;
     // Is this target pawn a BOAT? Read the game's own characteristic — AnimationCapabilityProfile 7 (Boat) on the
     // PresentationPawnDefinition — never the name (user rule; the same signal the runtime's ship category uses).
-    // Cached per name: the first lookup scans the definition databases, later ones are a dictionary hit.
+    // Cached per name: the first lookup scans the definition databases, later ones are a dictionary hit - until the
+    // databases change, because a new pawn starts on the default profile and is set to Boat afterwards.
     static readonly Dictionary<string, bool> boatPawnCache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
     internal static bool IsBoatPawn(string pawnDescription)
     {
         string key = (pawnDescription ?? "").Trim();
         if (key.Length == 0) return false;
+        if (boatCacheGeneration != DefinitionCaches.Generation) { boatPawnCache.Clear(); boatCacheGeneration = DefinitionCaches.Generation; }
         if (boatPawnCache.TryGetValue(key, out bool cached)) return cached;
         bool boat = false;
-        foreach (var guid in AssetDatabase.FindAssets("PresentationPawnDefinition"))
+        foreach (var guid in AssetDatabase.FindAssets(DefinitionCaches.PawnContainers))
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
             if (!path.EndsWith(".asset")) continue;
@@ -2063,9 +2071,9 @@ public class ModelFactoryWindow : EditorWindow
 
     internal static string[] GatherPawnNames()
     {
-        if (pawnCache != null) return pawnCache;
+        if (pawnCache != null && pawnCacheGeneration == DefinitionCaches.Generation) return pawnCache;
         var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var guid in AssetDatabase.FindAssets("PresentationPawnDefinition"))
+        foreach (var guid in AssetDatabase.FindAssets(DefinitionCaches.PawnContainers))
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
             if (!path.EndsWith(".asset")) continue;
@@ -2073,7 +2081,7 @@ public class ModelFactoryWindow : EditorWindow
                 if (o != null && o.GetType().Name == "PresentationPawnDefinition" && !string.IsNullOrEmpty(o.name))
                     names.Add(o.name);
         }
-        pawnCache = names.ToArray();
+        pawnCache = names.ToArray(); pawnCacheGeneration = DefinitionCaches.Generation;
         return pawnCache;
     }
 
