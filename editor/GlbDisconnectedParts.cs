@@ -35,6 +35,9 @@ public static partial class GlbDisconnectedParts
         public int VerticesBefore, VerticesAfter, IslandsBefore, IslandsAfter, FacesRewound;
         public readonly List<string> IslandLines = new List<string>();   // EVERY sheet's verdict, largest first (the report; Details keeps the largest six for the status)
         public int FusedNodeIndex = -1; public string FusedNodeName;   // the appended shell (a fuse only): the output sidecar names it with its group's letter
+        // what the weld cost (a fuse only): the group's surface on the authored positions and on the welded ones, and the
+        // faces that had area and have none left; WeldDamaged = a non-zero dial took enough for a warning (see WeldDamaged)
+        public double SurfaceBefore, SurfaceAfter; public int FacesFlattened; public bool WeldDamaged;
         public Compaction Compaction;   // what writing the output left out (never null on a written result); its line is the LAST of Details when it has one
     }
 
@@ -1405,6 +1408,22 @@ public static partial class GlbDisconnectedParts
     }
 
     /// <summary>
+    /// Did a NON-ZERO weld take enough of a group to say so? A hundredth of its faces flattened to nothing, or a
+    /// hundredth of its surface lost. Surface GAINED is no sign: closing a real gap between two plates stretches both
+    /// (the gap test's two unit plates 0.3 apart end 15% larger, as asked). At weld 0 never: the faces that vanish there
+    /// are within a millionth of the group's length of having no area already, and "lower the weld" would have
+    /// nothing to lower. Measured 2026-11-24 on the RSS Centurion at 2.288‰, 23 groups: the three the weld left
+    /// alone flattened 0 faces and kept 100.00% (E, F, Z); the least damaged of the other twenty flattened 4.1% (P,
+    /// 99.94% kept — the faces decide there, the surface would have let it pass), the worst kept 0.00% (C, J, R, W).
+    /// </summary>
+    public static bool WeldDamaged(double weldFraction, int faces, int facesFlattened, double surfaceBefore, double surfaceAfter)
+    {
+        if (!(weldFraction > 0) || faces <= 0) return false;
+        if ((long)facesFlattened * 100 >= faces) return true;
+        return surfaceBefore > 0 && surfaceBefore - surfaceAfter >= 0.01 * surfaceBefore;
+    }
+
+    /// <summary>
     /// Fuse several groups from ONE source in one output: every group is planned in parallel against the same source
     /// bytes, then applied in the given order (so the fused parts are appended in that order, exactly as chaining
     /// FuseNodes group by group would). <paramref name="onTick"/> is called on the CALLING thread every ~100 ms while
@@ -1848,6 +1867,16 @@ public static partial class GlbDisconnectedParts
         // seam reported one island and still rendered the 0.01 gap (review of 4e748c1). Every vertex of a class now
         // sits at the class centroid — at weld 0 a move within float rounding, at 0.5‰ exactly what was asked for —
         // and every judgement below (winding, direction, vertex normals) sees the geometry that will be written.
+        // WHAT THE WELD COST (2026-11-24, RSS Centurion; user: "Group U gets all messed up", "group K is missing", "the
+        // chains are also missing"). The dial stood at 2.288‰ and nobody had seen it: the distance is a share of the
+        // GROUP's length, so a group of small parts spread along a 5,252-long ship welded within 12.0 — wider than its
+        // 11.8-thick parts. Group C (anchor chains) kept 0 of 156,344 square units, K (davits) 1,532 of 43,094, and the
+        // summary's "collapsed" count said 652 of K's 7,212 faces where 7,148 had no area left: it counts a face whose
+        // THREE corners weld together, and a face is gone as soon as TWO do. So the surface is measured here, on the
+        // positions the judgements below and the writer use, before the move and after it.
+        var areaBefore = new double[faceCount];
+        double FaceArea(int f) => 0.5 * FLen(FCross(FSub(pos[tris[f * 3 + 1]], pos[tris[f * 3]]), FSub(pos[tris[f * 3 + 2]], pos[tris[f * 3]])));
+        for (int f = 0; f < faceCount; f++) areaBefore[f] = FaceArea(f);
         {
             var sum = new Dictionary<int, Vec3>(); var count = new Dictionary<int, int>();
             for (int v = 0; v < pos.Count; v++)
@@ -1857,6 +1886,17 @@ public static partial class GlbDisconnectedParts
             }
             for (int v = 0; v < pos.Count; v++) if (count[classes[v]] > 1) pos[v] = FScale(sum[classes[v]], 1.0 / count[classes[v]]);
         }
+        for (int f = 0; f < faceCount; f++)
+        {
+            double after = FaceArea(f);
+            result.SurfaceBefore += areaBefore[f]; result.SurfaceAfter += after;
+            if (areaBefore[f] > 0 && after == 0) result.FacesFlattened++;   // two corners in one class sit on one centroid: exactly zero, no tolerance to choose
+        }
+        result.WeldDamaged = WeldDamaged(weldFraction, faceCount, result.FacesFlattened, result.SurfaceBefore, result.SurfaceAfter);
+        if (result.WeldDamaged)
+            result.Warnings.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "The weld flattened {0:N0} of {1:N0} face(s) to nothing and the group kept {2:0.#}% of its surface: its weld distance, {3:0.####} ({4:0.###}‰ of the group's length {5:0.#}), is wider than the detail in these parts. Set the weld to 0 (or lower it) and fuse again.",
+                result.FacesFlattened, faceCount, result.SurfaceBefore > 0 ? 100.0 * result.SurfaceAfter / result.SurfaceBefore : 100.0, weld, weldFraction * 1000.0, longest));
         List<List<int>> allIslands = Islands(classes, out long[] fEdgeKeys, out bool[] fEdgeDir, out Dictionary<long, List<int>> fEdgeFaces, out int collapsedFaces);
         result.IslandsAfter = allIslands.Count;
 

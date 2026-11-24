@@ -550,7 +550,10 @@ windows. **Deep dive:**
   ↑/↓ move the highlight, 0 clears; several letters = several shells), leave
   **Fuse — weld seams closer than** at **0** (coincident positions, within float rounding — the Teutonic's plates already touch,
   and that alone found its hole; raise it only for plates that leave gaps, knowing that every triangle smaller
-  than the distance collapses: at 0.5‰ the Teutonic lost 1,564 rivet-sized faces and its hull island broke apart),
+  than the distance collapses: at 0.5‰ the Teutonic lost 1,564 rivet-sized faces and its hull island broke apart.
+  The distance is a share of each **group's** own length, the dial is below the preview and keeps its value between
+  ships; above 0 a warning box under it says so, and after a fuse the status names every group the weld flattened —
+  at 2.288‰ four of the RSS Centurion's 23 groups, the anchor chains among them, kept none of their surface),
   tick **Check mirrored parts** if one side of a symmetric hull comes out see-through (0.5.7: some files store their
   mirrored parts already facing outward, and the glTF reversal then turns them inward; the fuse checks them against
   the plain parts they touch and acts only on a clear verdict, and warns you when a group would need it),

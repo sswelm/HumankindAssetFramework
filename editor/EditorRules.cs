@@ -1403,13 +1403,37 @@ public static class WorkshopRules
         public IList<string> Islands;   // EVERY island's verdict (Details carries the largest six for the status) — review of 0097bd5
     }
 
+    /// <summary>
+    /// The first lines of the Fuser's status when a non-zero weld took the detail out of groups (2026-11-24, RSS
+    /// Centurion: the dial stood at 2.288‰ under the preview, three groups came out as shards or not at all, and the
+    /// only trace was a "collapsed" count inside a 29 MB report). Null when no group was damaged. One entry per
+    /// damaged group: its letter, the faces flattened to nothing, its faces, its surface before and after the weld.
+    /// </summary>
+    public static string WeldDamageSummary(double weldPermille, IList<(string letter, int flattened, int faces, double before, double after)> damaged)
+    {
+        if (damaged == null || damaged.Count == 0) return null;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var sb = new System.Text.StringBuilder();
+        sb.Append("⚠ THE WELD DAMAGED ").Append(damaged.Count).Append(damaged.Count == 1 ? " GROUP" : " GROUPS").Append(": the weld dial is at ")
+          .Append(weldPermille.ToString("0.###", inv)).Append("‰, not 0, and that distance is wider than the detail in ")
+          .Append(damaged.Count == 1 ? "this group" : "these groups").Append(". Set \"Fuse — weld seams closer than\" to 0 and Fuse again.\n");
+        // the worst first, and six at most: the Centurion had twenty, and the status box is for the one thing to do next
+        // (the report file carries every group's own warning line)
+        const int shown = 6;
+        foreach (var d in damaged.OrderBy(d => d.before > 0 ? d.after / d.before : 1.0).Take(shown))
+            sb.Append("   ⊕").Append(d.letter).Append(": ").Append(d.flattened.ToString("N0", inv)).Append(" of ").Append(d.faces.ToString("N0", inv))
+              .Append(" faces flattened to nothing, ").Append((d.before > 0 ? 100.0 * d.after / d.before : 100.0).ToString("0.#", inv)).Append("% of its surface kept\n");
+        if (damaged.Count > shown) sb.Append("   … and ").Append(damaged.Count - shown).Append(" more (each group's line is in the report)\n");
+        return sb.ToString();
+    }
+
     public static string FuseReport(string sourcePath, string outputPath, double weldPermille, IList<FuseGroupReport> groups)
     {
         var sb = new System.Text.StringBuilder();
         sb.Append("Model Workshop fuse report\n");
         sb.Append("source: ").Append(sourcePath).Append('\n');
         sb.Append("output: ").Append(outputPath).Append('\n');
-        sb.Append("weld: ").Append(weldPermille.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append(" permille of the model's length\n");
+        sb.Append("weld: ").Append(weldPermille.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append(" permille of each group's own length\n");
         sb.Append("groups: ").Append(groups.Count).Append('\n');
         foreach (FuseGroupReport g in groups)
         {

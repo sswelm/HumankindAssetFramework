@@ -5,6 +5,18 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser: a weld that flattens parts now says so** (2026-11-24, user report, the RSS Centurion: "Group U gets
+  all messed up", "group K is missing", "the chains are also missing"). The **Fuse — weld seams closer than** dial
+  stood at 2.288‰ instead of 0. It sits below the preview and keeps its value from one ship to the next, and its
+  distance is a share of each **group's** own length, so a group of small parts spread along the ship welds as widely
+  as the hull: 20 of that ship's 23 groups lost faces, four of them (the anchor chains among them) their whole
+  surface. Three changes, none to what a fuse writes: with the dial above 0 a warning box under it says so, with a
+  **Set to 0** button, and the Fuse button names the weld; after a fuse, the status leads with the groups a non-zero
+  weld damaged (faces flattened to nothing and surface kept, worst first) and each such group carries a warning in
+  the console and the report; the dial's label, tooltip and the report's header say *each group's length*, where they
+  said *the model's*. A group is reported when a hundredth of its faces lost all area or a hundredth of its surface
+  went; never at weld 0. The summary's "collapsed" count is unchanged and counts less (a face whose three corners
+  weld together; a face is gone as soon as two do — 652 against 7,148 on that ship's davits).
 - **Model Factory: wings no longer bake pale when their edge strips carry broken UVs** (2026-11-22, user report, the
   F100). A converted model painted each wing inside one texture tile, but its thin leading/trailing-edge strips had a
   broken projection running to ±150 tiles; the bake took that as a 308-tile *tiled* material and spread the whole range

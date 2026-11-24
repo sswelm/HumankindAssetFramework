@@ -10,6 +10,37 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Model Fuser: a weld that flattens parts says so (2026-11-24).** Reported by the user on the RSS Centurion, a
+  pre-dreadnought of 2,164 parts in 23 fuse groups: "something weird is going on with Group U after fusing, where it
+  gets all messed up", then "group K is missing", then "the chains are also missing".
+  - **The cause was a dial nobody had seen.** The fuse report's first lines: `weld: 2.288 permille`. The 23 fuse
+    reports before it on the same machine, Teutonic to Hunley, all say `weld: 0`. The slider sits below the 600-pixel
+    preview, is serialized with the window, and so carries from ship to ship. The user fused a second time while this
+    was being diagnosed and got the same file: the dial was still out of view.
+  - **Why it hit small parts hardest.** The weld distance is the dial times the **group's** longest extent (the
+    tooltip and the report said "the model's"). Group U is small parts spread along the whole ship: 5,252 long, so it
+    welded within 12.0, and its parts are 11.8 thick. Group K, the davits: 2.09 against tubes 5.5 across.
+  - **Measured, weld 0 against 2.288‰, same source, same groups** (surface = sum of triangle areas as written). C,
+    the chains: 156,344 to 0. K: 43,094 to 1,532. U: 14,324,974 to 13,077,506 with 33,431 of 38,205 faces at zero
+    area. Of the 23 groups, 20 lost faces (408,282 of 472,105 in all), four kept no surface at all (C, J, R, W), three
+    were untouched (E, F, Z: 0 faces, 100.00%). Headless renders of both outputs: clean at 0; at 2.288‰ the user's
+    screenshot, shards along the casemates and no railings, davits or rigging. The fuse at 0 took 4 s for the 23
+    groups, at 2.288‰ 143 s.
+  - **The count that was there understated it.** The summary's "face(s) smaller than the weld kept collapsed" said 652
+    for K. It counts a face whose three corners weld into one class; a face has no area as soon as two do, and that was
+    7,148 of K's 7,212.
+  - **The change** does not alter what a fuse writes. `GlbDisconnectedParts` measures each group's surface on the
+    authored positions and on the welded ones (the positions the writer uses) and counts the faces that had area and
+    have none; `WeldDamaged` is true for a non-zero dial when a hundredth of the faces are flattened or a hundredth of
+    the surface is lost, and the group then carries a warning. Surface gained is not a sign: two plates pulled together
+    across a real gap both grow. The window shows a warning box with **Set to 0** under the dial whenever it is above
+    0, names the weld on the Fuse button, and leads the status with the damaged groups, worst first, six at most.
+  - **Proved by:** the guard on the real ship (20 groups flagged at 2.288‰ with a warning each, none at 0); a tube
+    fixture welded wider than itself (80 of 80 faces flattened where "collapsed" says 0), narrower than itself and at
+    0; the gap test (surface 2.0 to 2.3, no warning); a planted defect (the flattened count never rising) fails two
+    tests. **Not done:** the dial still scales with the group and still persists between ships; a per-group or
+    absolute distance, or a reset on a new file, would be a change to the fuse's inputs and is left for a decision.
+    The window itself was compiled against Unity's assemblies, not opened.
 - **Vehicle Lab: Wheel centre, for a screw that wobbles (2026-11-23, PR #314).** Reported by the user on the H.L. Hunley
   submarine: "there is a problem making the screw rotate correctly, the middle of the axis is way off when rotating".
   - **Measured first.** The Lab puts a wheel bone at the middle of the wheel's bounding box. The Hunley's screw has

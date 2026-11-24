@@ -205,6 +205,34 @@ public class WorkshopRulesTests
     }
 
     [Fact]
+    public void A_damaging_weld_leads_the_fuse_status_worst_group_first()
+    {
+        Assert.Null(WorkshopRules.WeldDamageSummary(2.288, new List<(string, int, int, double, double)>()));
+        Assert.Null(WorkshopRules.WeldDamageSummary(2.288, null));
+
+        // the RSS Centurion's U and C at 2.288 permille, as measured
+        string two = WorkshopRules.WeldDamageSummary(2.288, new List<(string, int, int, double, double)> { ("U", 33430, 38205, 14324973.2, 13077506.4), ("C", 76928, 76940, 156343.9, 0.0) });
+        var lines = two.Split('\n');
+        Assert.Equal("⚠ THE WELD DAMAGED 2 GROUPS: the weld dial is at 2.288‰, not 0, and that distance is wider than the detail in these groups. Set \"Fuse — weld seams closer than\" to 0 and Fuse again.", lines[0]);
+        Assert.Equal("   ⊕C: 76,928 of 76,940 faces flattened to nothing, 0% of its surface kept", lines[1]);    // the worst first, whatever its letter
+        Assert.Equal("   ⊕U: 33,430 of 38,205 faces flattened to nothing, 91.3% of its surface kept", lines[2]);
+        Assert.Equal("", lines[3]); Assert.Equal(4, lines.Length);                                                // ends on a newline: the status's own first line follows
+
+        string one = WorkshopRules.WeldDamageSummary(0.5, new List<(string, int, int, double, double)> { ("K", 7148, 7212, 43094.2, 1532.2) });
+        Assert.StartsWith("⚠ THE WELD DAMAGED 1 GROUP: the weld dial is at 0.5‰, not 0, and that distance is wider than the detail in this group.", one);
+        Assert.Contains("⊕K: 7,148 of 7,212 faces flattened to nothing, 3.6% of its surface kept", one);
+
+        // seven damaged groups: the six worst are named, the seventh is counted (the Centurion had twenty)
+        var seven = new List<(string, int, int, double, double)>();
+        for (int i = 0; i < 7; i++) seven.Add((((char)('A' + i)).ToString(), 10, 100, 100.0, 10.0 * i));   // A keeps 0%, G keeps 60%
+        var many = WorkshopRules.WeldDamageSummary(1, seven).Split('\n');
+        Assert.StartsWith("⚠ THE WELD DAMAGED 7 GROUPS", many[0]);
+        Assert.StartsWith("   ⊕A: ", many[1]); Assert.StartsWith("   ⊕F: ", many[6]);
+        Assert.Equal("   … and 1 more (each group's line is in the report)", many[7]);
+        Assert.DoesNotContain(many, l => l.Contains("⊕G"));
+    }
+
+    [Fact]
     public void The_fuse_report_puts_every_island_and_stitched_part_on_its_own_line()
     {
         var groups = new List<WorkshopRules.FuseGroupReport>
@@ -217,7 +245,7 @@ public class WorkshopRulesTests
         string text = WorkshopRules.FuseReport(@"D:\m\ship.glb", @"D:\m\ship_split.glb", 0.5, groups);
         var lines = text.Split('\n');
         Assert.Contains(@"source: D:\m\ship.glb", lines);
-        Assert.Contains("weld: 0.5 permille of the model's length", lines);
+        Assert.Contains("weld: 0.5 permille of each group's own length", lines);
         Assert.Contains("== group A — 2 part(s)", lines);
         Assert.Contains("parts: Object_6, Object_8", lines);
         Assert.Contains("WARNING: 1 lap/trim strip(s) lying on the other parts' surface: 'Object_8'.", lines);
