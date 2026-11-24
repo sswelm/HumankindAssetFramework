@@ -48,6 +48,17 @@ Stage 3 (step (d), part d1: the frame every rig shares):
                      the tire listed twice; the wave rock (RootHull); a rudder also listed as preserve, a missing name in each set (the
                      WARNs); a body part named Mesh_Wheel_00 (the wheel group renamed Mesh_Wheel_00.001); an animated part joined
   fx_r_axis          the axle forced to Z; the wave on with a one-frame cycle (no RootHull)
+  fx_r_wheel_centre  wheelcentre=area (2026-11-23): a three-bladed screw whose box centre lies 0.19 off its shaft, a fan of two
+                     parts (the centroid over the whole cluster; the blade LISTED TWICE, weighed once), a main rotor of a
+                     triangular plate (untouched: it keeps its hub)
+  fx_r_wheel_centre_box the same model without the tag: every wheel bone at its box centre, no wheel centre line
+  fx_r_wheel_centre_x the screw with the axle forced to X: the pivot keeps the box centre along X, the centroid across it
+  fx_r_wheel_centre_z the same with the axle forced to Z (review 2026-11-23: no fixture had a Z axle under the tag)
+  fx_r_wheel_centre_flat a wheel of one zero-area triangle: the WARNING, the box centre kept
+  fx_r_tracks_centre, fx_r_tracks_hybrid_centre, fx_links_centre  wheelcentre=area on LIVE TRACKS (the nine carriers, the
+                     conveyor's link bones, rigid links): the wheels the wrap bones copy each carry an off-centre shard in
+                     their cluster, so the bone leaves its anchor's box centre - the wrap bones copy the wheel bones, the
+                     tread's path reads the boxes
   fx_r_many          101 clusters (the last bone Wheel_100); a 0.1-wide wheel on the 0.05 length floor; a hundred tied sizes
   fx_r_wall          130 clusters: a finished rig past the 126-bone budget prints the *** WARNING (the bone-index wall)
   fx_r_missing_wheel a wheel name the scene has not: find()'s VEHICLE ERROR and exit in stage 3 (EXIT:3:)
@@ -298,6 +309,24 @@ def raw_mesh(r, name, material, pos, idx):
     return len(r.meshes) - 1
 
 
+def screw(r, name, material, blades=3, radius=1.0, hub=0.2, thick=0.1, start=20.0):
+    """A screw about glTF Z (Blender's Y): a square hub, `hub` wide and `thick` deep, centred on the origin, and `blades` flat
+    blades of two unequal triangles each, the first `start` degrees from +X. The shape maps onto itself under a turn of
+    360 / blades degrees about Z, so its surface centroid lies on Z; with an odd count its box is NOT centred there (3 blades of
+    radius 1 from 20 degrees: the box centre at x 0.087, y -0.171, which is 0.19 off the shaft - off on BOTH axes, where a first
+    blade at 90 degrees would leave the box centred in x and hide a defect along it)."""
+    h = hub / 2.0; t = thick / 2.0
+    pos = [(-h, -h, -t), (h, -h, -t), (h, h, -t), (-h, h, -t), (-h, -h, t), (h, -h, t), (h, h, t), (-h, h, t)]
+    idx = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7]
+    for b in range(blades):
+        a = math.radians(start + 360.0 * b / blades); ca, sa = math.cos(a), math.sin(a)
+        base = len(pos)
+        for rad, off, z in ((h, -0.08, 0.0), (h, 0.08, 0.0), (radius, 0.0, 0.02), (radius * 0.6, 0.3, 0.02)):
+            pos.append((rad * ca - off * sa, rad * sa + off * ca, z))
+        idx += [base, base + 1, base + 2, base + 1, base + 3, base + 2]
+    return raw_mesh(r, name, material, pos, idx)
+
+
 def ring_hub(r, name, material, radius, height, n=16):
     """A hub: two rings of n vertices (glTF y up) joined by a band of quads, open at both ends."""
     pos = [(radius * math.cos(2 * math.pi * i / n), y, radius * math.sin(2 * math.pi * i / n)) for y in (0.0, height) for i in range(n)]
@@ -359,8 +388,11 @@ def boxes_in_one(r, name, material, count):
     return len(r.meshes) - 1
 
 
-def tracked_roads(out, models, key="fx_r_tracks_roads", **fields):
-    """fx_r_tracks_roads: a ribbon belt round a sprocket, two road wheels, an idler and under a return roller (glTF: x forward, y up, z the side)."""
+def tracked_roads(out, models, key="fx_r_tracks_roads", lugs=False, **fields):
+    """fx_r_tracks_roads: a ribbon belt round a sprocket, two road wheels, an idler and under a return roller (glTF: x forward, y up, z the side).
+    `lugs` gives the sprocket, the idler and the first and last road wheel - the four wheels the tread's wrap bones copy - a
+    small off-centre shard each, marked Wheel: it joins its wheel's cluster and pulls the cluster's surface centroid off the
+    anchor's box centre (the wheel centre fixtures). The return roller and the far side's wheel carry none."""
     r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
     r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, 0.5, -0.5), material=ma), scale=[2.0, 0.6, 1.0])
     parts = [("Hull", 0, {})]
@@ -370,6 +402,9 @@ def tracked_roads(out, models, key="fx_r_tracks_roads", **fields):
     for name, x, y, d, side in wheels:
         r.node(name, mesh=r.mesh(name, at=(-0.5, -0.5, -0.5), material=ma), translation=[x, y, side], scale=[d, d, 0.25])
         parts.append((name, 1, {}))
+        if lugs and name in ("Sprocket", "Idler", "RoadF", "RoadR"):   # the four wheels the tread's wrap bones copy
+            r.node(name + "Lug", mesh=r.mesh(name + "Lug", at=(-0.5, -0.5, -0.5), material=ma), translation=[x + 0.12, y + 0.08, side], scale=[0.1, 0.1, 0.25])
+            parts.append((name + "Lug", 1, {}))
     path = []
     def arc(cx, cy, rad, a0, a1, step):
         n = int(round(abs(a1 - a0) / step))
@@ -393,7 +428,9 @@ def tracked_roads(out, models, key="fx_r_tracks_roads", **fields):
 def rigid_tread_fixtures(out, models):
     """A pitched, closed belt (not the eight-vertex carrier fallback), with and without auxiliary roles."""
     for key, trails in (("fx_links", 0), ("fx_links_dense", 70), ("fx_links_tight", 108),
-                        ("fx_links_full", 120), ("fx_links_fallback", 108), ("fx_r_tracks_hybrid", 0)):
+                        ("fx_links_full", 120), ("fx_links_fallback", 108), ("fx_r_tracks_hybrid", 0),
+                        ("fx_r_tracks_hybrid_centre", 0), ("fx_links_centre", 0)):
+        centre = key.endswith("_centre")   # wheelcentre=area on live tracks: each wheel gets an off-centre shard in its cluster
         r = Rig(); ma = r.material("Steel")
         r.node("Hull", mesh=r.mesh("Hull", at=(-2, .7, -.8), material=ma), scale=[4, 1, 1.6])
         parts = [("Hull", 0, {})]
@@ -406,6 +443,9 @@ def rigid_tread_fixtures(out, models):
                 idx += [j, k, k + 32, j, k + 32, j + 32]
             name = "W%d" % i
             r.node(name, mesh=raw_mesh(r, name, ma, pos, idx)); parts.append((name, 1, {}))
+            if centre:
+                r.node(name + "Lug", mesh=r.mesh(name + "Lug", at=(-.5, -.5, -.5), material=ma), translation=[x + .2, .7, side], scale=[.15, .15, .2])
+                parts.append((name + "Lug", 1, {}))
         radius = .55; length = 6 + 2 * math.pi * radius; stations = 120
         for side, name in ((-1.1, "BeltL"), (1.1, "BeltR")):
             if key == "fx_links_fallback" and name == "BeltR":
@@ -437,10 +477,14 @@ def rigid_tread_fixtures(out, models):
             name = "Trail%03d" % i
             r.node(name, mesh=r.mesh(name, size=.02, material=ma), translation=[0, 1 + i * .03, 0])
             parts.append((name, 10, {}))
-        if key == "fx_r_tracks_hybrid":
+        if key in ("fx_r_tracks_hybrid", "fx_r_tracks_hybrid_centre"):
             # the same pitched belts on the CONVEYOR (no treadmode): link bones on the wraps, shuttle bones on the straights -
             # a job of the stage comparison (recipes), not of the rigid-links check
-            recipe(out, key, r.write(models, key), parts, frames=4)
+            recipe(out, key, r.write(models, key), parts, frames=4, **({"wheelCentre": 1} if centre else {}))
+            continue
+        if key == "fx_links_centre":
+            # rigid links under the wheel centre: a job of the stage comparison only (the rigid-links check keeps its five)
+            recipe(out, key, r.write(models, key), parts, treadMode=1, frames=4, wheelCentre=1)
             continue
         recipe(out, key, r.write(models, key), parts, sub="recipes_rigid", treadMode=1, frames=4)
 
@@ -649,6 +693,31 @@ def main(out):
     r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, -1.0, 0.0), size=2.0, material=ma))
     r.node("Keep", mesh=r.mesh("Keep", at=(4.0, 0.0, 0.0), material=ma))
     recipe(out, "fx_r_axis", r.write(models, "fx_r_axis"), [("Tire", 1, {}), ("Hull", 0, {}), ("Keep", 19, {})], axisChoice=3, waveEnabled=True, rockDegrees=5.0, rockFrames=1)
+    # fx_r_wheel_centre (2026-11-23, the H.L. Hunley's screw): wheelcentre=area. A three-bladed screw (its box centre 0.19 off the
+    # shaft, its surface centroid on it), a fan of TWO parts - a hub and one blade beside it, the centroid taken over the whole
+    # cluster -, and a main rotor, which keeps its hub. fx_r_wheel_centre_box is the same model without the tag (the box centres,
+    # no line); _x forces the axle to X (the pivot keeps the box centre along X and takes the centroid across it); _flat is a wheel
+    # of one zero-area triangle (the WARNING, the box centre kept).
+    def screw_model(key):
+        r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+        r.node("Screw", mesh=screw(r, "Screw", ma), translation=[0.0, 1.0, -3.0])
+        r.node("FanHub", mesh=r.mesh("FanHub", at=(-0.5, -0.5, -0.5), material=ma), translation=[6.0, 1.0, 0.0], scale=[1.0, 1.0, 0.2])
+        r.node("FanBlade", mesh=raw_mesh(r, "FanBlade", ma, [(0.1, 0.1, 0.0), (0.6, 0.2, 0.0), (0.3, 0.7, 0.05), (0.7, 0.6, 0.05)], [0, 1, 2, 1, 3, 2]), translation=[6.0, 1.0, 0.0])
+        # the rotor: a flat triangular plate, whose surface centroid is NOT its box centre - a rotor moved by the tag would show
+        r.node("Mast", mesh=raw_mesh(r, "Mast", ma, [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, -1.0), (0.0, 0.2, 0.0), (1.0, 0.2, 0.0), (0.0, 0.2, -1.0)],
+                                     [0, 1, 2, 3, 5, 4, 0, 3, 4, 0, 4, 1, 1, 4, 5, 1, 5, 2, 2, 5, 3, 2, 3, 0]), translation=[-6.0, 2.0, 0.0])
+        r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, -1.0, -1.0), size=2.0, material=ma))
+        return r.write(models, key)
+    # FanBlade is listed TWICE (review 2026-11-23): one surface, weighed once - weighed twice the fan's pivot moves
+    screw_parts = [("Screw", 1, {}), ("FanHub", 1, {}), ("FanBlade", 1, {}), ("FanBlade", 1, {}), ("Mast", 8, {}), ("Hull", 0, {})]
+    recipe(out, "fx_r_wheel_centre", screw_model("fx_r_wheel_centre"), screw_parts, wheelCentre=1)
+    recipe(out, "fx_r_wheel_centre_box", screw_model("fx_r_wheel_centre_box"), screw_parts)
+    recipe(out, "fx_r_wheel_centre_x", screw_model("fx_r_wheel_centre_x"), screw_parts, wheelCentre=1, axisChoice=1)
+    recipe(out, "fx_r_wheel_centre_z", screw_model("fx_r_wheel_centre_z"), screw_parts, wheelCentre=1, axisChoice=3)
+    r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
+    r.node("Line", mesh=raw_mesh(r, "Line", ma, [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)], [0, 1, 2]), translation=[4.0, 0.0, 0.0])
+    r.node("Hull", mesh=r.mesh("Hull", at=(-1.0, -1.0, -1.0), size=2.0, material=ma))
+    recipe(out, "fx_r_wheel_centre_flat", r.write(models, "fx_r_wheel_centre_flat"), [("Line", 1, {}), ("Hull", 0, {})], wheelCentre=1)
     # fx_r_many: 101 wheels far apart - 101 clusters, the last bone Wheel_100 (the %02d field widens); the first only 0.1 wide (its bone
     # takes the 0.05 floor; sorted last, it is Wheel_100); the other 100 tie on size (the stable sort keeps their list order)
     r = Rig(); ma = r.material("Paint", (0.5, 0.5, 0.5))
@@ -864,6 +933,9 @@ def main(out):
     tracked("fx_r_tracks_inverted", inverted=True, fixInsideOut=True)
     tracked_roads(out, models)
     tracked_roads(out, models, key="fx_r_tracks_roads_double", doubleSided=True, fixInsideOut=True)
+    # the wheel centre on a TRACKED vehicle (2026-11-23): the tread's wrap bones copy the sprocket's, the idler's and the road
+    # wheels' bones, which no longer sit at the clusters' box centres - every reader of a wheel bone against a cluster centre shows
+    tracked_roads(out, models, key="fx_r_tracks_centre", lugs=True, wheelCentre=1)
     rigid_tread_fixtures(out, models)
     two_sided_fixtures(out, models)
     # Stage 4 e3: Deploy direction/elevation and Recoil timing/stance; no frame_set in either action.

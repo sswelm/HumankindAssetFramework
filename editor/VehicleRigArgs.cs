@@ -5,7 +5,7 @@
 // vehicle_rig.py on exactly the arguments a Generate runs it on. The Lab's gate rows hold the two fillings to the same
 // line on every saved recipe (VehicleLabWindow.GenerateHeadless), the unit tests hold the template to the script's
 // argv table (argv[1..75] positional, then the tagged merge2= bright= flagfold= defaultreduce= shroudreduce= gunreduce=
-// windowreduce= railingreduce= twosided= parttx= arguments, each quoted as one token).
+// windowreduce= railingreduce= twosided= treadmode= wheelcentre= parttx= arguments, each quoted as one token).
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -24,6 +24,11 @@ public sealed class VehicleRigArgs
     /// 1 = rigid links (every link a copy of one template link on its own bone, a full circuit - the T-62's shape).
     /// Reaches the script as the tagged argument <c>treadmode=links</c>, only when the tracks run at all.</summary>
     public int treadMode;
+    /// <summary>Where a wheel bone sits across its axle: 0 = the anchor part's box centre (every recipe before 2026-11-23),
+    /// 1 = the cluster's surface centroid - a screw or propeller with an odd number of blades, whose box is not centred on
+    /// its shaft. Reaches the script as the tagged argument <c>wheelcentre=area</c>; absent at 0 and on the source-skeleton
+    /// fast path, where the source's own bones are the pivots.</summary>
+    public int wheelCentre;
     public bool waveEnabled; public float rockDegrees; public int rockFrames = 120, rockAxisChoice; public float rockHeading, rockPitchDeg = 2.4f;
     public int rockPitchCycles = 1, rockRollCycles = 1; public float rockPitchPhase = 90f;
     public float modelRotX, modelRotY, modelRotZ;
@@ -97,6 +102,7 @@ public static class VehicleRigArgLine
         Q("railingreduce=" + Names(a, "railing") + "|" + F1(a.railingReducePct));   // sent at every dial setting, like the two above: the names must reach the script's marked set
         if (a.twoSidedMarked) Q("twosided=" + Names(a, "twosided"));   // only when a part is marked: every other recipe keeps its line (2026-11-14)
         if (a.treadMode == 1 && !a.tracksStatic && a.spinEnabled) Q("treadmode=links");   // absent = the conveyor, as every recipe before 2026-11-10
+        if (a.wheelCentre == 1 && !a.fast) Q("wheelcentre=area");   // absent = the box centre, as every recipe before 2026-11-23; never on the fast path, which places no wheel bone
         if (a.partTxFile != null) Q("parttx=@" + a.partTxFile);
         return t;
     }
@@ -169,6 +175,7 @@ public static class VehicleRigArgLine
         int tac = Int(o, "treadAdvCells", 3); a.treadAdvCells = tac > 0 ? tac : 3;
         float tcl = Flt(o, "treadCellsPerLink", 4f); a.treadCellsPerLink = tcl > 0f ? tcl : 4f;
         a.treadMode = Int(o, "treadMode", 0) == 1 ? 1 : 0;
+        a.wheelCentre = Int(o, "wheelCentre", 0) == 1 ? 1 : 0;
         var mr = Vec(o, "modelRot", 0, 0, 0); a.modelRotX = mr[0]; a.modelRotY = mr[1]; a.modelRotZ = mr[2];
         a.tracksStatic = Bool(o, "tracksStatic", false); a.spinEnabled = Bool(o, "spinEnabled", true); a.doubleSided = Bool(o, "doubleSided", false); a.fixInsideOut = Bool(o, "fixInsideOut", false);
         a.oarSweepDeg = Flt(o, "oarSweepDeg", 24f); a.oarDipDeg = Flt(o, "oarDipDeg", 18f); a.oarFrames = Int(o, "oarFrames", 24);

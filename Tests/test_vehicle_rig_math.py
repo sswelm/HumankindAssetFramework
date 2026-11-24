@@ -11,7 +11,7 @@ import unittest
 SCRIPT = Path(__file__).parents[1] / "editor" / "Tools~" / "vehicle_rig.py"
 SOURCE = SCRIPT.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE, filename=str(SCRIPT))
-PURE_NAMES = {"_fitted_cycle_count", "_oar_recovery_metrics", "_merge2_scale", "_tagged_reduce_pct", "_tagged_names_pct", "_rigid_link_budget", "_two_sided_origin"}
+PURE_NAMES = {"_fitted_cycle_count", "_oar_recovery_metrics", "_merge2_scale", "_tagged_reduce_pct", "_tagged_names_pct", "_rigid_link_budget", "_two_sided_origin", "_area_centroid"}
 PURE_DEFS = [node for node in TREE.body if isinstance(node, ast.FunctionDef) and node.name in PURE_NAMES]
 if {node.name for node in PURE_DEFS} != PURE_NAMES:
     raise RuntimeError("Vehicle Lab pure helper contract changed; update this test deliberately")
@@ -266,6 +266,116 @@ class TwoSidedRoleGuard(unittest.TestCase):
         self.assertNotIn("_loff", body); self.assertNotIn("_flip", body)
         self.assertEqual(1, body.count("bmesh.ops.reverse_faces("))
         self.assertIn("bmesh.ops.reverse_faces(_twb, faces=[_g for _g in _ret['geom'] if isinstance(_g, bmesh.types.BMFace)])", body)
+
+
+class WheelCentreTests(unittest.TestCase):
+    # 2026-11-23, the H.L. Hunley's screw: "wheelcentre=area" puts a wheel bone at its cluster's surface centroid. The contract,
+    # from the shape and not from the code: a shape that maps onto itself under a turn about its axle has its surface centroid ON
+    # the axle, whatever its blade count - and its box centre there only when the count is even.
+    class _P:
+        def __init__(self, x, y, z):
+            self.x, self.y, self.z = x, y, z
+
+    class _World:
+        def __matmul__(self, co):
+            return co
+
+    @classmethod
+    def _part(cls, points, faces, triangles=None):
+        class _V:
+            def __init__(self, co): self.co = co
+        class _F:
+            def __init__(self, vertices): self.vertices = vertices
+        class _Data:
+            def calc_loop_triangles(self):
+                self.loop_triangles = [_F(t) for t in (faces if triangles is None else triangles)]
+        class _O: pass
+        o = _O(); o.matrix_world = cls._World(); o.data = _Data()
+        o.data.vertices = [_V(cls._P(*p)) for p in points]; o.data.polygons = [_F(f) for f in faces]
+        return o
+
+    @classmethod
+    def _screw(cls, blades, cx=2.0, cz=1.0):
+        # in Blender's frame: thin along Y, blades in the XZ plane about (cx, cz), each of two unequal triangles
+        pts = []; faces = []
+        for b in range(blades):
+            a = math.radians(20.0 + 360.0 * b / blades); ca, sa = math.cos(a), math.sin(a)
+            at = len(pts)
+            for rad, off in ((0.1, -0.08), (0.1, 0.08), (1.0, 0.0), (0.6, 0.3)):
+                pts.append((cx + rad * ca - off * sa, 0.0, cz + rad * sa + off * ca))
+            faces += [(at, at + 1, at + 2), (at + 1, at + 3, at + 2)]
+        return pts, faces
+
+    def _centroid(self, parts, names=None):
+        NAMESPACE["find"] = lambda name: parts[name]
+        try:
+            return NAMESPACE["_area_centroid"](list(parts) if names is None else names)
+        finally:
+            del NAMESPACE["find"]
+
+    def test_the_surface_centroid_is_on_the_shaft_for_every_blade_count(self):
+        for blades in (2, 3, 4, 5, 7):
+            pts, faces = self._screw(blades)
+            c = self._centroid({"Screw": self._part(pts, faces)})
+            self.assertAlmostEqual(2.0, c[0], places=12, msg="%d blades" % blades)
+            self.assertAlmostEqual(1.0, c[2], places=12, msg="%d blades" % blades)
+
+    def test_a_three_bladed_screws_box_centre_is_off_its_shaft(self):
+        pts, _ = self._screw(3)
+        box_x = (min(p[0] for p in pts) + max(p[0] for p in pts)) / 2.0
+        box_z = (min(p[2] for p in pts) + max(p[2] for p in pts)) / 2.0
+        self.assertGreater(abs(box_x - 2.0), 0.05)  # the fixture discriminates on BOTH axes: the box centre is NOT the answer here
+        self.assertGreater(abs(box_z - 1.0), 0.05)
+
+    def test_a_cluster_weighs_its_parts_by_area_and_a_quad_as_its_two_triangles(self):
+        # a 2 x 1 rectangle (area 2, centre (1, 0.5)) as ONE four-corner face, and a right triangle (area 0.5, centroid (10 + 1/3, 1/3))
+        quad = self._part([(0, 0, 0), (2, 0, 0), (2, 0, 1), (0, 0, 1)], [(0, 1, 2, 3)], [(0, 1, 2), (0, 2, 3)])
+        tri = self._part([(10, 0, 0), (11, 0, 0), (10, 0, 1)], [(0, 1, 2)])
+        c = self._centroid({"Quad": quad, "Tri": tri})
+        self.assertAlmostEqual((2 * 1.0 + 0.5 * (10 + 1 / 3.0)) / 2.5, c[0], places=12)
+        self.assertAlmostEqual((2 * 0.5 + 0.5 * (1 / 3.0)) / 2.5, c[2], places=12)
+        self.assertEqual(0.0, c[1])
+        # a part LISTED TWICE is one surface (review 2026-11-23): the same centroid, to the bit
+        self.assertEqual(c, self._centroid({"Quad": quad, "Tri": tri}, names=["Quad", "Tri", "Tri"]))   # ONE of the two repeated: repeating both would leave the centroid where it is
+
+    def test_a_concave_face_counts_only_the_area_inside_its_boundary(self):
+        # An L: a 4 x 1 rectangle centred at (2, 0.5), plus a 1 x 2 rectangle centred at (0.5, 2).
+        points = [(4, 0, 0), (4, 0, 1), (1, 0, 1), (1, 0, 3), (0, 0, 3), (0, 0, 0)]
+        face = (0, 1, 2, 3, 4, 5)
+        triangles = [(5, 0, 1), (5, 1, 2), (5, 2, 4), (2, 3, 4)]
+        for f, t in ((face, triangles), ((0, 5, 4, 3, 2, 1), [tri[::-1] for tri in triangles])):
+            centroid = self._centroid({"ConcaveWheel": self._part(points, [f], t)})
+            self.assertEqual((1.5, 0.0, 1.0), centroid)
+
+    def test_the_part_s_world_matrix_is_applied(self):
+        # review 2026-11-23: the identity world of the other tests let a dropped `_mw @` through
+        class _Shift:
+            def __matmul__(self, co):
+                return WheelCentreTests._P(co.x + 10.0, co.y, co.z * 2.0)
+        tri = self._part([(0, 0, 0), (3, 0, 0), (0, 0, 3)], [(0, 1, 2)]); tri.matrix_world = _Shift()
+        c = self._centroid({"Tri": tri})
+        self.assertAlmostEqual(11.0, c[0], places=12); self.assertAlmostEqual(2.0, c[2], places=12)
+
+    def test_the_warning_is_one_the_lab_surfaces_and_the_bone_is_laid_from_the_pivot(self):
+        loop = SOURCE[SOURCE.index("for i, cl in enumerate(clusters):"):SOURCE.index("# ONE Turret bone shared by every turret part")]
+        self.assertIn('print("VEHICLE *** WARNING: wheel centre: Wheel_%02d has no surface area - the box centre kept" % i)', loop)
+        self.assertIn("                eb.head = _wpiv\n", loop.replace("\r\n", "\n"))
+        self.assertIn('        eb.tail = _wpiv + ax * _dirn * max(0.05, max(cl["s"]) * 0.25)', loop)
+        self.assertIn('_wac = _area_centroid(cl["names"])', loop)
+
+    def test_no_area_or_a_non_finite_one_is_no_centroid(self):
+        self.assertIsNone(self._centroid({"Line": self._part([(0, 0, 0), (1, 0, 0), (2, 0, 0)], [(0, 1, 2)])}))
+        self.assertIsNone(self._centroid({"Empty": self._part([(0, 0, 0)], [])}))
+        self.assertIsNone(self._centroid({"Nan": self._part([(0, 0, 0), (float("nan"), 0, 0), (0, 0, 1)], [(0, 1, 2)])}))
+        self.assertIsNone(self._centroid({"Inf": self._part([(0, 0, 0), (float("inf"), 0, 0), (0, 0, 1)], [(0, 1, 2)])}))
+
+    def test_only_the_wheel_bones_pivot_moves(self):
+        # the tag is read as written; the clustering, the tread and the rolling-contact radius keep the box (cl["c"], cl["m"])
+        self.assertEqual(1, SOURCE.count('wheel_centre_area = any(a.strip() == "wheelcentre=area" for a in argv)'))
+        self.assertEqual(1, SOURCE.count('if wheel_centre_area and not cl.get("is_rotor"):'))
+        loop = SOURCE[SOURCE.index("for i, cl in enumerate(clusters):"):SOURCE.index("# ONE Turret bone shared by every turret part")]
+        self.assertNotIn('cl["c"] =', loop); self.assertNotIn('cl["m"] =', loop); self.assertNotIn('cl["s"] =', loop)
+        self.assertIn('_wpiv = Vector(tuple(cl["c"][_k] if ax[_k] != 0.0 else _wac[_k] for _k in range(3)))', loop)
 
 
 class PreviewRigGuard(unittest.TestCase):

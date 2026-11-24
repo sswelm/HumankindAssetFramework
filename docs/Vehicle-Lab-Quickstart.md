@@ -147,6 +147,39 @@ For ordinary wheels, leave **Axle axis = Auto**, **Spin frames = 15**, and start
 backward, reverse the sign of **Spin degrees**. Tracks, trails, gun deployment/recoil, rotors, and wave rock reveal their
 own controls only when the corresponding roles are present.
 
+**A screw or propeller that wobbles: Wheel centre (2026-11-23).** A wheel bone sits at the middle of the wheel's bounding
+box. That is the axle of a round wheel, and of a propeller with an even number of blades. With an odd number (3, 5, 7) one
+blade points up while two point down and out, so the box is not centred on the shaft and the screw turns about a point
+beside it. Set **Wheel centre = Surface centroid (screws, propellers)** in *Spin — wheels & tracks* and press **Generate
+rig** again: the bone moves to the area-weighted middle of the wheel's surface, which lies on the shaft whatever the blade
+count. Generate shows where it went, in the status box under the button and in the Console:
+
+```
+VEHICLE wheel centre: Wheel_00 at its surface centroid (0.005,6.006,0.312), 0.071 from the box centre
+```
+
+Measured on the H.L. Hunley's three-bladed screw (0.60 wide, hub radius 0.067): the box centre lies 0.072 off the shaft,
+the surface centroid 0.006. The setting is one per model, covers every part marked **Wheel** and is saved in the recipe
+as `wheelCentre`. Rotors keep their hub.
+
+- **The screw must come out as ONE wheel.** Parts are grouped into wheels as before - a part joins the biggest part
+  whose centre is near enough - and the centroid is taken per wheel. A screw that is one part, like the Hunley's, is one
+  wheel. A propeller cut into separate blades is NOT: the biggest part is a blade, the other blades lie outside its
+  reach, and each blade becomes a wheel of its own turning about itself (measured: three blades and a hub, three wheel
+  bones, none on the shaft). The `VEHICLE RIG DONE` line counts them - `4 wheel part(s) clustered into 3 wheel(s)` is
+  that case. Join the blades and hub into one part in the Model Fuser first.
+- **Every part of a wheel is weighed**, where Box centre reads only the biggest. A part marked Wheel that sits beside the
+  axle - a bracket, a fender - pulls the pivot towards it under this setting.
+- **What moves and what does not.** Only the bone's pivot moves, and only across the axle. The axle direction, the
+  rolling-contact radius and the tread's wheel geometry still read the box. Two things read the bone and follow it: a
+  tread's wrap bones, and the spoke-symmetry snap of a ground wheel's degrees, which measures the rim about the bone -
+  a wheel on the ground whose pivot moves far can come out at another snapped speed.
+- **A wheel with no surface area** keeps its box centre, and the status box says so (`*** WARNING: wheel centre`).
+- On the source-skeleton fast path the source's own bones are the pivots: the setting is greyed out and not sent.
+- Leave it at **Box centre** for round wheels: every earlier recipe bakes exactly as before. On a tracked vehicle keep
+  **Box centre** as well: the tread's path is fitted to the wheels' boxes, and how a tread looks around wheel bones moved
+  off them has not been judged.
+
 **Recoil, as Generate reports it (2026-11-07).** With **Recoil (fraction of tube)** set, Generate prints the breech
 clearance at full recoil:
 
@@ -474,6 +507,7 @@ Probe refreshes the part boxes on the next load.
 | Black cockpit becomes grey | Turn on **Keep black** and re-bake. |
 | Materials work at reduction 0 but break when reduced | Raise the triangle ceiling until mapping is stable. |
 | Tail rotor spins in the wrong plane | Adjust Tail-rotor axle/trim, then **Generate rig** again. |
+| A screw or propeller wobbles about a point beside its shaft | Odd blade count: set **Wheel centre = Surface centroid** in *Spin — wheels & tracks*, then **Generate rig** again. |
 | Wheels spin while parked or stay still while moving | Review the state-driven wheel recipe and `Spin[0..0]`/`Spin` roles. |
 | A flat animated donor rotor remains over your real rotor | In Model Factory's Runtime section enable **Silence donor VFX (flashes)**, Save settings, and relaunch. This suppresses donor VFX; it does not remove donor mesh geometry. |
 | First borrowed donor rotor sits too low | **Respawn after load** is only for models borrowing a donor's animated rotor, not models using their own generated rotor bones. |

@@ -35,6 +35,7 @@ public static partial class BlenderVehicleRig
         public List<string> PartTx;                 // the parttx= lines, or null; rigfast keeps only presence for its warning
         public bool TracksStatic;                   // argv[16] "1": the tread loops rigid, no link bones (the line at argument time)
         public bool TreadLinks;                     // a `treadmode=links` argument on live tracks: one bone per molded link
+        public bool WheelCentreArea;                // a `wheelcentre=area` argument: a wheel bone at its cluster's surface centroid across the axle
         public bool PreserveJpegAlpha;              // not an argument: the caller's export option, for the fast path (it exports inside stage 1)
         public int TreadAdvCells = 3;               // max(1, min(8, int(float(argv[12])))) or 3: the conveyor's advance per loop, in cells
         public double TreadCellsPerLink = 4.0;      // max(0.25, min(4.0, float(argv[15]))) or 4: cells per molded link (the Lab's Tread detail)
@@ -175,6 +176,7 @@ public static partial class BlenderVehicleRig
         }
         a.TracksStatic = argv.Count > 16 && At(16).Trim() == "1";
         a.TreadLinks = !a.TracksStatic && argv.Any(x => VehicleProbe.Input.PyStrip(x) == "treadmode=links");
+        a.WheelCentreArea = argv.Any(x => VehicleProbe.Input.PyStrip(x) == "wheelcentre=area");
         a.DoubleSided = VehicleProbe.Input.PyStrip(At(41)) == "1";
         a.FixInsideOut = VehicleProbe.Input.PyStrip(At(46)) == "1";
         // the reduce tags in the script's order - defaultreduce, shroudreduce, gunreduce, turretreduce, windowreduce, railingreduce -, the names before the LAST
