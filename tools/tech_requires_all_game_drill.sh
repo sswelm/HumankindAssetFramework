@@ -13,16 +13,28 @@ set -uo pipefail
 cd "$(dirname "$0")/.." && ROOT="$(pwd)" || exit 2
 MANAGED="${1:-${HK_MANAGED:-/c/Program Files (x86)/Steam/steamapps/common/Humankind/Humankind_Data/Managed}}"
 [ -d "$MANAGED" ] || { echo "SKIP — Managed dir not found: $MANAGED (the hooks were NOT drilled)"; exit 3; }
+# A folder that is there but is not the game's Managed folder (HK_MANAGED pointed at the game's root, an emptied
+# install) is a wrong setting, not a missing game: FAIL and say so, where the drill would die on its first load.
+for dll in Assembly-CSharp.dll Amplitude.Mercury.Firstpass.dll Amplitude.Mercury.Data.dll; do
+  [ -f "$MANAGED/$dll" ] || { echo "FAIL — $MANAGED is not the game's Managed folder: no $dll in it (HK_MANAGED, or argument 1, takes <Humankind>/Humankind_Data/Managed)"; exit 1; }
+done
 dotnet build "$ROOT/HumankindAssetFramework.csproj" -c Release --nologo -v q -p:WarningLevel=0 || { echo 'FAIL — plugin build'; exit 1; }
 dotnet build "$ROOT/tools/tech-requires-all-drill/TechRequireAllGameDrill.csproj" -c Release --nologo -v q || { echo 'FAIL — drill build'; exit 1; }
 EXE="$ROOT/tools/tech-requires-all-drill/bin/Release/HumankindAssetFramework.Tests.exe"
 WMANAGED="$(cygpath -m "$MANAGED" 2>/dev/null || echo "$MANAGED")"
-"$EXE" "$WMANAGED"; rc=$?
-[ "$rc" -eq 0 ] || { echo "FAIL — TechRequireAll game drill (rc=$rc)"; exit 1; }
+# The stage is this script's to set, never the shell's: with HAF_DRILL_STAGE=load or nolist still exported from a hand
+# run, the first pass ran that stage and the script printed PASS on 12 or 24 checks instead of 47 (the second review of
+# PR #312). "full" is no stage the drill knows: the whole run, with a list.
 # The removal guard must hold WITHOUT a list: a save made with one keeps its queue constraints. A run of its own,
 # because the plugin reads the list once per process.
-HAF_DRILL_STAGE=nolist "$EXE" "$WMANAGED"; rc=$?
-[ "$rc" -eq 0 ] || { echo "FAIL — TechRequireAll game drill, no list file (rc=$rc)"; exit 1; }
+for stage in full nolist; do
+  output=$(HAF_DRILL_STAGE="$stage" "$EXE" "$WMANAGED" 2>&1); rc=$?
+  printf '%s\n' "$output"
+  [ "$rc" -eq 0 ] || { echo "FAIL — TechRequireAll game drill, stage $stage (rc=$rc)"; exit 1; }
+  # Loading the game's assemblies can exit zero before any hook checks run.
+  last=${output##*$'\n'}
+  [ "${last%$'\r'}" = "DRILL PASS" ] || { echo "FAIL — TechRequireAll game drill, stage $stage exited without DRILL PASS"; exit 1; }
+done
 if [ -n "${HAF_DRILL_MONO:-}" ]; then
   # Measured 2026-11-20 with the Unity editor's Mono 6.13: the process segfaults while EXITING once the game's
   # assemblies are loaded, with no hook applied and no HAF code run. So the exit code is judged against that
