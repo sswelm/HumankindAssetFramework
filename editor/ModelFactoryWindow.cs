@@ -19,7 +19,12 @@ public class ModelFactoryWindow : EditorWindow
     // (ModelDef is [Serializable], so the whole edited entry round-trips.)
     // One construction seam for new/reset entries. (It briefly initialized the per-entry staticAxisV2 flag,
     // 2026-09-09..12; the single-convention rework deleted the flag, and the seam stays for the next default.)
-    static ModelDef FreshEntry() => new ModelDef();
+    // NORMALS START ON KEEP MODEL (2026-11-24, user: "Keep Model as Normals setting should be the default"): a new
+    // entry and a Reset keep the model's own normals. Every window that makes a NEW entry calls this seam (the
+    // Animation Lab too: an animated bake ignores the setting, but "Make static" brings it back into play).
+    // ModelDef's own field default stays Recalculate, because that is what a registry entry WITHOUT the field was
+    // baked with; loading one must not turn it into Keep Model.
+    internal static ModelDef FreshEntry(bool animated = false) => new ModelDef { normalsMode = (int)NormalsMode.KeepModel, animated = animated };
     [SerializeField] ModelDef cur = FreshEntry();
     [SerializeField] int selected;      // 0 = <New>, else index into `existing`
     string[] existing = { "<New>" };
@@ -1060,7 +1065,8 @@ public class ModelFactoryWindow : EditorWindow
             if (GUILayout.Button("Pick", GUILayout.Width(70)))
             {
                 var r = GUILayoutUtility.GetLastRect();
-                new PawnDropdown(new AdvancedDropdownState(), GatherPawnNames(), n =>
+                // a click reads the databases again: a pawn made a minute ago must be in the list
+                new PawnDropdown(new AdvancedDropdownState(), FreshPawnNames(), n =>
                 {
                     cur.pawnDescription = n;
                     if (string.IsNullOrWhiteSpace(cur.resourceName)) cur.resourceName = DeriveResourceName(n); // suggest a name for a NEW resource
@@ -1914,21 +1920,26 @@ public class ModelFactoryWindow : EditorWindow
         catch { return false; }
     }
 
-    static string[] pawnCache;
+    // Both pawn caches hold for one DefinitionCaches.Generation (a saved database edit or a Pick click moves it).
+    static string[] pawnCache; static int pawnCacheGeneration = -1, boatCacheGeneration = -1;
     // Is this target pawn a BOAT? Read the game's own characteristic — AnimationCapabilityProfile 7 (Boat) on the
     // PresentationPawnDefinition — never the name (user rule; the same signal the runtime's ship category uses).
-    // Cached per name: the first lookup scans the definition databases, later ones are a dictionary hit.
-    static readonly Dictionary<string, bool> boatPawnCache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+    // Cached per name: the first lookup scans the definition databases, later ones are a dictionary hit - until the
+    // databases change, because a new pawn starts on the default profile and is set to Boat afterwards.
+    // Ordinal keys, as the scan compares names (review of 2026-11-24: with case-insensitive keys a name asked
+    // in the wrong case first got "no boat", and that answer was then handed to the right spelling as well).
+    static readonly Dictionary<string, bool> boatPawnCache = new Dictionary<string, bool>(StringComparer.Ordinal);
     internal static bool IsBoatPawn(string pawnDescription)
     {
         string key = (pawnDescription ?? "").Trim();
         if (key.Length == 0) return false;
+        if (boatCacheGeneration != DefinitionCaches.Generation) { boatPawnCache.Clear(); boatCacheGeneration = DefinitionCaches.Generation; }
         if (boatPawnCache.TryGetValue(key, out bool cached)) return cached;
         bool boat = false;
-        foreach (var guid in AssetDatabase.FindAssets("PresentationPawnDefinition"))
+        foreach (var guid in AssetDatabase.FindAssets(DefinitionCaches.PawnContainers))
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
-            if (!path.EndsWith(".asset")) continue;
+            if (!DefinitionCaches.MayHoldDefinitions(path)) continue;
             foreach (var o in AssetDatabase.LoadAllAssetsAtPath(path))
                 if (o != null && o.GetType().Name == "PresentationPawnDefinition" && o.name == key)
                 {
@@ -1990,7 +2001,7 @@ public class ModelFactoryWindow : EditorWindow
         var defs = ModelRegistry.Load();
         if (defs == null || defs.Count == 0) return "";
         entryCount = defs.Count;
-        var pawnArr = GatherPawnNames();
+        var pawnArr = FreshPawnNames();   // a check the user asked for reads the databases as they are now
         var pawns = pawnArr != null && pawnArr.Length > 0 ? new System.Collections.Generic.HashSet<string>(pawnArr) : null;
         var sb = new System.Text.StringBuilder();
 
@@ -2061,19 +2072,24 @@ public class ModelFactoryWindow : EditorWindow
         }
     }
 
+    // The pawn names as the databases hold them NOW: what a Pick click, the pre-bake check and Validate pack read.
+    // Each is one user action, so the re-read is paid once per click and a pawn that is added but not saved yet is
+    // known (review of 2026-11-24: the pre-bake check still warned "matches no known unit descriptor" for one).
+    internal static string[] FreshPawnNames() { DefinitionCaches.Invalidate(); return GatherPawnNames(); }
+
     internal static string[] GatherPawnNames()
     {
-        if (pawnCache != null) return pawnCache;
+        if (pawnCache != null && pawnCacheGeneration == DefinitionCaches.Generation) return pawnCache;
         var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var guid in AssetDatabase.FindAssets("PresentationPawnDefinition"))
+        foreach (var guid in AssetDatabase.FindAssets(DefinitionCaches.PawnContainers))
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
-            if (!path.EndsWith(".asset")) continue;
+            if (!DefinitionCaches.MayHoldDefinitions(path)) continue;
             foreach (var o in AssetDatabase.LoadAllAssetsAtPath(path))
                 if (o != null && o.GetType().Name == "PresentationPawnDefinition" && !string.IsNullOrEmpty(o.name))
                     names.Add(o.name);
         }
-        pawnCache = names.ToArray();
+        pawnCache = names.ToArray(); pawnCacheGeneration = DefinitionCaches.Generation;
         return pawnCache;
     }
 
@@ -2399,7 +2415,7 @@ public class ModelFactoryWindow : EditorWindow
         try
         {
             var preIssues = Haf.Schema.PackValidator.ValidateEntry(cur, new EditorValidationCtx
-            { Pawns = new System.Collections.Generic.HashSet<string>(GatherPawnNames()), SkeletonPath = "Assets/Resources/" + cur.resourceName + "_Skeleton.asset" });
+            { Pawns = new System.Collections.Generic.HashSet<string>(FreshPawnNames()), SkeletonPath = "Assets/Resources/" + cur.resourceName + "_Skeleton.asset" });
             if (preIssues.Count > 0)
                 Debug.LogWarning($"[Validate] '{cur.resourceName}' pre-bake: {preIssues.Count} issue(s) (bake proceeds — fix and re-Save/re-Bake):\n    "
                                  + string.Join("\n    ", preIssues));

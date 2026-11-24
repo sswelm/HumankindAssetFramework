@@ -18,7 +18,7 @@ using UnityEngine;
 public class AnimationLabWindow : EditorWindow
 {
     // [SerializeField] so the form survives a DOMAIN RELOAD (recompile / play-mode toggle), matching the other Labs.
-    [SerializeField] ModelDef cur = new ModelDef { animated = true };
+    [SerializeField] ModelDef cur = ModelFactoryWindow.FreshEntry(animated: true);
     [SerializeField] int selected;                 // 0 = <New>, else index into `existing`
     // Foldout state for the gun-elevation timing block. [SerializeField] so a domain reload (any recompile)
     // does not spring it back open — the same reason every other bit of window state here is serialized.
@@ -820,7 +820,7 @@ public class AnimationLabWindow : EditorWindow
         }
         else
         {
-            w.cur = new ModelDef { animated = true, resourceName = resourceName ?? "", modelFile = modelFile ?? "", pawnDescription = pawnDescription ?? "" };
+            w.cur = ModelFactoryWindow.FreshEntry(animated: true); w.cur.resourceName = resourceName ?? ""; w.cur.modelFile = modelFile ?? ""; w.cur.pawnDescription = pawnDescription ?? "";
             w.status = "New animated entry pre-filled from the Model Factory — pick a clip and Bake.";
         }
         w.RefreshList();   // re-derives the dropdown index from the loaded name
@@ -973,7 +973,7 @@ public class AnimationLabWindow : EditorWindow
     void OnSelectResource(bool rebuildPreview = true)
     {
         formDiffersFromRegistry = false;   // loading fresh = in sync by definition
-        if (selected <= 0) { cur = new ModelDef { animated = true }; status = ""; if (rebuildPreview) { DestroyFitPreview(); previewPath = ""; } return; }
+        if (selected <= 0) { cur = ModelFactoryWindow.FreshEntry(animated: true); status = ""; if (rebuildPreview) { DestroyFitPreview(); previewPath = ""; } return; }
         var e = ModelRegistry.Load().FirstOrDefault(x => x.resourceName == existing[selected]);
         if (e == null) return;
         cur = JsonUtility.FromJson<ModelDef>(JsonUtility.ToJson(e));   // clone so edits don't mutate the stored copy
@@ -1015,7 +1015,7 @@ public class AnimationLabWindow : EditorWindow
                 if (GUILayout.Button("Remove", GUILayout.Width(72)))
                     if (EditorUtility.DisplayDialog("Remove entry",
                         $"Remove '{existing[selected]}' from the registry? (Baked assets stay on disk.)", "Remove", "Cancel"))
-                    { bool rem = ModelRegistry.Remove(existing[selected]); cur = new ModelDef { animated = true }; selected = 0; RefreshList(); status = rem ? "Removed." : "Remove FAILED — see the Console (registry locked or corrupt)."; }
+                    { bool rem = ModelRegistry.Remove(existing[selected]); cur = ModelFactoryWindow.FreshEntry(animated: true); selected = 0; RefreshList(); status = rem ? "Removed." : "Remove FAILED — see the Console (registry locked or corrupt)."; }
         }
         if (formDiffersFromRegistry)
             EditorGUILayout.HelpBox("Form ≠ saved registry entry (your edits survived a compile, or the registry changed " +
@@ -1632,7 +1632,7 @@ public class AnimationLabWindow : EditorWindow
                     GUILayout.Height(34), GUILayout.Width(110)))
                     SaveOnly();
             if (GUILayout.Button("Reset", GUILayout.Height(34), GUILayout.Width(72)))
-            { cur = new ModelDef { animated = true }; selected = 0; status = ""; GUI.FocusControl(null); }
+            { cur = ModelFactoryWindow.FreshEntry(animated: true); selected = 0; status = ""; GUI.FocusControl(null); }
         }
         if (!canBake && hasModel)
             EditorGUILayout.HelpBox("This entry has no baked assets and no model file — open it in the Model Factory to set the file, then bake.", MessageType.Warning);

@@ -302,7 +302,7 @@ public class RetextureWindow : EditorWindow
     {
         try
         {
-            var def = ModelRegistry.Load().FirstOrDefault(m => m.resourceName == resourceName) ?? new ModelDef();
+            var def = ModelRegistry.Load().FirstOrDefault(m => m.resourceName == resourceName) ?? ModelFactoryWindow.FreshEntry();
             // Applying onto an EXISTING entry the form was never loaded from would overwrite its adjust/engine-sound
             // settings with the form's (possibly default) values — e.g. typing a name and hitting Apply silently
             // flipped an entry's engineSound off (review 2026-07-19). Ask first; Edit pre-loads and skips the dialog.

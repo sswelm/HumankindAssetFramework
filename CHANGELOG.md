@@ -4609,6 +4609,54 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Authoring tools
 
+- **A definition made in the editor is in the Pick lists at once, and a new Model Factory entry starts on Keep
+  Model (2026-11-24).** Reported from the Model Factory: a pawn definition made that session
+  (`Era5_Common_SemiSubmersibleTorpedoBoats_01`, added to `PresentationPawnDefinition_Era5_ENC.asset`) was in the
+  Pawn description **Pick** list only after Unity was restarted.
+  - **The defect:** the list was read from the databases once and kept in a static field until the next script
+    reload or restart. Four more kept reads had the same life: the Resize Lab's pawn list, the Sound window's pawn
+    list, the District Factory's district list, and the per-pawn "is this a boat" answer. A pawn whose profile was
+    set to Boat after the first ask kept the first answer. The pre-bake check and **Validate pack** read the same
+    pawn list, so a new pawn drew the warning "matches no known unit descriptor".
+  - **The fix:** a kept read is valid for one generation (`editor/DefinitionCaches.cs`). The generation moves when
+    Unity imports, deletes or moves an `.asset` (saving an edited database is an import), and on every Pick click,
+    pre-bake check and Validate pack, so a definition that is added but not saved yet is known too. The Formation
+    Override window was never affected: it reads its unit list on every repaint.
+  - **Who asks the boat answer when:** the Animation Lab on every draw, so its ground plane follows a saved change.
+    The Model Factory's preview asks when a preview is loaded (an entry selected, a bake), so its water follows at
+    the next one. That timing is older than this change and was left.
+  - **Review fixes (same day, two reviews by execution and by reading):**
+    - The asset hook first judged a file by its name. `AssetDatabase.FindAssets` also matches the names of
+      sub-assets, so the scans read a database whose file name lacks the word; the hook did not see it saved, and
+      its lists stayed as they were until a Pick click. No file in the ENC project has that shape (all 31 carry the
+      word in the name). The hook now counts every `.asset`, and the five scans filter their hits with the same
+      function, so the hook sees every file a scan reads. The price: a bake's own `.asset` files move the generation
+      too, and the next read scans again.
+    - The pre-bake check and Validate pack kept the old list for a pawn that was added and not saved when no Pick
+      click had happened. They now read the databases as the Pick click does.
+    - The boat answers were stored under case-insensitive keys while the scan compares names exactly: a name asked
+      in the wrong case first got "no boat", and the right spelling was then handed that answer. Older than this
+      change; the keys are exact now.
+    - Each Pick button now reads through one function per window, and the drill calls that function.
+  - **Cost:** the asset hook implements only `OnPostprocessAllAssets`. Adding such a hook to a scratch project with
+    one texture and one native asset reimported neither; a control hook with `OnPreprocessTexture` reimported the
+    texture. One Pick click's re-read took 11 to 21 ms over some forty drill runs on 1,404 stand-in definitions in
+    26 databases. The ENC project holds 1,361 pawn definitions in 26 databases, and its definitions are far larger
+    than the stand-ins; the re-read was not timed there.
+  - **Keep Model:** a new entry and **Reset** start with Normals on `KeepModel`; it was `Recalculate`. Every window
+    that makes a new unit entry uses the Factory's new-entry seam: the Model Factory, the Animation Lab (an animated
+    bake ignores the setting, "Make static" brings it back), and the Retexture and Sound windows when they create an
+    entry. A registry entry stored without `normalsMode` still reads `Recalculate`, the setting it was baked with,
+    and saved entries keep their value. A form that is already open on `<New>` keeps what it shows until **Reset**.
+    The District Factory still starts on Recalculate.
+  - **Held by:** `bash tools/definition_caches_unity_drill.sh` (the real readers in a temporary Unity project, see
+    [Testing](docs/Testing.md)) and `Tests/DefinitionCachesTests.cs` for the path rule. Not driven: the click on a
+    Pick button, and that the button, the pre-bake check and Validate pack name the fresh-read function (four
+    buttons and two checks, read in the source). Left open: [Review-Backlog](docs/Review-Backlog.md).
+  - **District Factory:** Pick stays available when the kept list is empty, so a fresh read can find the first
+    unsaved definition. Health checks now find definitions in suffixed database assets such as
+    `ConstructibleCommonExtensionDefinitionENC.asset`, including their visual-level and affinity checks.
+
 - **FUSION KEEPS EXPOSED VERTICAL JOINS FACING OUTWARD (2026-10-04).** The Protected Cruiser's starboard wall
   beside the stairs retained all its triangles but the parity pass reversed 21 faces of `Material2_2006_Part_004`
   in group H. The existing join safeguard only checked fronts visible from above. The parity minority now also
