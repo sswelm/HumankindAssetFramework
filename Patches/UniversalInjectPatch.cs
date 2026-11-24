@@ -716,19 +716,29 @@ namespace HumankindAssetFramework
         internal static List<string> RegistryEntryChunks(string text, string arrayName)
         {
             var outp = new List<string>();
-            foreach (var span in RegistryEntrySpans(text, arrayName, out _, out _)) outp.Add(text.Substring(span.Key, span.Value));
+            foreach (var span in RegistryEntrySpans(text, arrayName, out _, out _, out _)) outp.Add(text.Substring(span.Key, span.Value));
             return outp;
         }
 
         // The walk behind RegistryEntryChunks: each entry as (start, length). `closedAt` is where the walk saw the `]`
         // that closes the array, or -1: it never did, so the array's `]` - if the text has one - lies INSIDE the last
-        // entry, which lost its closing brace and was closed by a later one (the document's own) or by nothing.
+        // entry, which lost its closing brace and was closed by a later one (the document's own) or by nothing. (Or
+        // the text has none: a file cut short behind its last entry. A stray `]` in that entry is then taken for the
+        // array's - two damages, a known limit.)
         // `unpairedCloseInLast` is where: the first `]` inside the last entry, outside strings, that closes nothing the
-        // entry opened (-1: none). Noting it changes nothing about the entries the walk hands back.
-        static List<KeyValuePair<int, int>> RegistryEntrySpans(string text, string arrayName, out int closedAt, out int unpairedCloseInLast)
+        // entry opened (-1: none). `closePaired`: a `[` opened since the array's own was still open at the `]` at
+        // `closedAt`, so that `]` may be its partner and not the array's (an entry that a stray `}` closed early, and
+        // the `]` of its own `parts`) - or the walk read a string that runs over a line end, which no JSON string
+        // does: a quote is lost, the walk has been reading the text inside out, and its count of brackets is worth
+        // nothing (two quotes lost in one district of the live registry hid the `[` of its parts, and the `]` of an
+        // inner array stood there as the registry's own: 64 of 5,819 double damages lost the district after it).
+        // Noting these changes nothing about the entries the walk hands back.
+        static List<KeyValuePair<int, int>> RegistryEntrySpans(string text, string arrayName, out int closedAt, out int unpairedCloseInLast, out bool closePaired)
         {
             var outp = new List<KeyValuePair<int, int>>();
-            closedAt = -1; unpairedCloseInLast = -1;
+            closedAt = -1; unpairedCloseInLast = -1; closePaired = false;
+            int open = 0;   // `[` since the array's own, outside strings, not closed again
+            bool stringOverLines = false;
             var key = Regex.Match(text ?? "", "\"" + Regex.Escape(arrayName) + "\"\\s*:\\s*\\[");
             if (!key.Success) return outp;
             int i = key.Index + key.Length, depth = 0, start = -1, brackets = 0, unpaired = -1;
@@ -741,6 +751,7 @@ namespace HumankindAssetFramework
                     if (esc) esc = false;
                     else if (c == '\\') esc = true;
                     else if (c == '"') inStr = false;
+                    else if (c == '\n' || c == '\r') stringOverLines = true;   // no JSON string holds a line end: a quote is lost
                     continue;
                 }
                 if (c == '"') { inStr = true; continue; }
@@ -750,7 +761,9 @@ namespace HumankindAssetFramework
                     if (--depth == 0 && start >= 0) { outp.Add(new KeyValuePair<int, int>(start, i - start + 1)); start = -1; unpairedCloseInLast = unpaired; }
                     continue;
                 }
-                if (c == ']' && depth == 0) { closedAt = i; break; }   // the registry array closed
+                if (c == ']' && depth == 0) { closedAt = i; closePaired = open > 0 || stringOverLines; break; }   // the registry array closed
+                if (c == '[') open++;
+                else if (c == ']' && open > 0) open--;
                 if (start >= 0)
                 {
                     if (c == '[') brackets++;
@@ -777,7 +790,8 @@ namespace HumankindAssetFramework
         //
         // THE TELL is a count. The array's text is searched for the entry's name key ("resourceName", "district"), and
         // the keys are sorted into the objects they stand in - a key in an object that is some key's value, or that
-        // sits in an array the entry opened, is that object's; two keys with no brace between them are one object's.
+        // is an element of an array the entry opened, is that object's; two keys with no brace between them are one
+        // object's; a name between two objects with nothing but its value is a remark.
         // The walk must hand back at least as many objects carrying a name key.
         // When it hands back fewer, each entry is the object AROUND its name key, found from the key itself and
         // without regard to strings (they are what is damaged): back to the brace that encloses the key, forward to
@@ -791,9 +805,8 @@ namespace HumankindAssetFramework
         // What this mode cannot do. An entry WITHOUT the name key is not found: the docs require the key, and without
         // it nothing in a damaged text says the object is an entry. Its text is kept out of the entry above when that
         // entry closed before it; when the entry above lost its closing brace as well, nothing separates the two, and
-        // a key the entry above did not write is read from it. And a `}` INSIDE a string value with an object further
-        // on in the same entry ends the entry at that object (its later keys fall to their defaults), because this
-        // mode ignores strings.
+        // a key the entry above did not write is read from it. And the text `}, {` INSIDE a string value ends the
+        // entry there (its later keys fall to their defaults), because this mode ignores strings.
         //
         // NOT MORE THAN THE DOCUMENT SAYS. The array must still be there: `"models"` and its `[` (the colon between
         // them may be lost). A document whose array is renamed, absent, or not an array (`"models": {`, `null`) loads
@@ -802,25 +815,36 @@ namespace HumankindAssetFramework
         // `namesWithoutArray` counts the name keys of such a text, so the caller can say why nothing loaded.
         //
         // `damage` is null by braces, and what the count found otherwise - the caller logs it under its own tag.
-        internal static List<string> RegistryEntryTexts(string text, string arrayName, string nameKey, out string damage, out int namesWithoutArray)
+        internal static List<string> RegistryEntryTexts(string text, string arrayName, string nameKey, out string damage, out int namesWithoutArray, out int secondNames)
         {
             text = text ?? "";
-            damage = null; namesWithoutArray = 0;
+            damage = null; namesWithoutArray = 0; secondNames = 0;
             var result = new List<string>();
-            string nameKeyPattern = "\"" + Regex.Escape(nameKey) + "\"\\s*:";
-            var array = Regex.Match(text, "\"" + Regex.Escape(arrayName) + "\"\\s*:?\\s*\\[");
-            if (!array.Success) { namesWithoutArray = Regex.Matches(text, nameKeyPattern).Count; return result; }
-            var spans = RegistryEntrySpans(text, arrayName, out int closedAt, out int unpairedCloseInLast);
+            string name = Regex.Escape(nameKey), soundKey = "\"" + name + "\"\\s*:";
+            // A NAME KEY, ALSO ONE THAT LOST A QUOTE (`resourceName": "B"`, `"resourceName: "B"`). Such an entry has no
+            // readable name and is not read, but it must be COUNTED: left out, the entry after it made the count come
+            // out even, and was read with this one's values (the reference pack's last model under its own name with
+            // the volley gun's pawn and skeleton, without a word in the log).
+            string nameKeyPattern = soundKey + "|\"" + name + "\\s*:|(?<![\\w\"])" + name + "\"\\s*:";
+            // for the count the caller reports: `"district": [` is the array's key misspelled, not a district's name
+            string nameOfAnEntry = soundKey + "(?!\\s*\\[)";
+            // (the colon and the white space after it as ONE optional group: `\s*:?\s*` tried every split of a run of
+            // white space that no `[` follows - 5 s on 20,000 spaces)
+            var array = Regex.Match(text, "\"" + Regex.Escape(arrayName) + "\"\\s*(?::\\s*)?\\[");
+            if (!array.Success) { namesWithoutArray = Regex.Matches(text, nameOfAnEntry).Count; return result; }
+            int soundKeyLength = nameKey.Length + 2;
+            var spans = RegistryEntrySpans(text, arrayName, out int closedAt, out int unpairedCloseInLast, out bool closePaired);
 
             // WHERE THE ARRAY ENDS.
             // The walk's answer, when two things hold. It saw the array close right behind an entry it had closed
             // (nothing but commas between): with keys lying outside every object, an entry lost its opening brace and
-            // the `]` is that entry's own array's. And no name key stands behind that `]` outside every later array:
-            // after a stray `}` the walk closes an entry early and takes a `]` of that entry's own (a district's
-            // `parts`) or a stray `]` between two entries for the registry's, and the entries that follow give it
-            // away - their name keys lie behind it in no array that opened after it, where the name keys of a parked
-            // array further on all lie inside theirs. The walk respects strings, so a bracket inside one cannot
-            // move this end.
+            // the `]` is that entry's own array's. And that `]` is not one of the two the walk takes for the
+            // registry's after a stray `}` closed an entry early: the `]` of the entry's own array (a district's
+            // `parts`), which has its `[` still open before it, and a stray `]` between two entries, which
+            // has the next entry right behind it. Failing that, the walk's answer still stands when no name key lies
+            // behind it outside every later array. The walk respects strings, so a bracket inside one cannot move
+            // this end. (Until the third review the second condition was the names alone: a parked array further on
+            // that lost its `[` then moved the end, and its objects became models.)
             // Otherwise counted without regard to strings: the first `]` that closes nothing opened after the array's
             // own opening, unless an object stands right behind it (`] {`, `], {`: nothing but another entry can
             // follow there, so that `]` is a stray one and the array goes on). The walk has no answer when a quote or
@@ -831,7 +855,7 @@ namespace HumankindAssetFramework
                 int afterLast = spans.Count > 0 ? spans[spans.Count - 1].Key + spans[spans.Count - 1].Value : from;
                 bool clean = true;
                 for (int i = afterLast; i < closedAt && clean; i++) clean = char.IsWhiteSpace(text[i]) || text[i] == ',';
-                if (clean && !NameKeyBehindOutsideEveryArray(text, closedAt, nameKeyPattern)) to = closedAt;
+                if (clean && ((!closePaired && !ObjectBehind(text, closedAt)) || !NameKeyBehindOutsideEveryArray(text, closedAt, nameKeyPattern))) to = closedAt;
             }
             if (to < 0)
                 for (int i = from, open = 0; i < text.Length; i++)
@@ -848,37 +872,90 @@ namespace HumankindAssetFramework
             // THE ENTRIES THE NAME KEYS SPEAK OF: one per object that holds a name key of its own.
             var starts = new List<int>();     // where each entry's text begins
             var keyEnds = new List<int>();    // the end of its (first) name key
+            var readable = new List<bool>();  // one of its name keys has both its quotes
             var inOwnArray = new List<int>(); // objects holding a name key inside an array opened since the entry before
             int floor = from, counted = from, openSince = 0;   // `[` opened in [floor, counted) and not closed again
+            bool brokeOut = false;                             // a `}` since the outermost of them closed nothing opened in it
+            int bracesIn = 0;
+            int backTo = from;                                 // the text before it is known to hold no unpaired brace
             foreach (Match m in Regex.Matches(text, nameKeyPattern))
             {
                 if (m.Index < from || m.Index >= to) continue;
-                int brace = OpenBraceAround(text, m.Index, floor, out bool nothingBetween);
+                bool sound = m.Value[0] == '"' && m.Value[soundKeyLength - 1] == '"';
+                int brace = OpenBraceAround(text, m.Index, backTo, out bool nothingBetween);
                 // two name keys with no brace of either kind between them stand in ONE object (a key written twice, a
-                // comment that quotes the old one). An entry that lost its opening brace has its neighbour's closing
-                // brace before it.
-                if (starts.Count > 0 && nothingBetween) continue;
+                // comment that quotes the old one - or two entries that lost the `}, {` between them, which nothing
+                // tells from those: the caller is given the count and says so). An entry that lost its opening brace
+                // has its neighbour's closing brace before it.
+                // A brace INSIDE A STRING between the two keys (`"hideMeshes": "a } b"`) is no brace: read with regard
+                // to strings from the first key on, the second is reached outside a string with every brace paired.
+                // (Where a quote is lost that reading is inside out, and reaches every later key INSIDE a string.)
+                if (starts.Count > 0 && (nothingBetween || SameObjectByStrings(text, backTo, m.Index)))
+                {
+                    if (sound) { secondNames++; readable[readable.Count - 1] = true; }
+                    backTo = m.Index + m.Length;
+                    continue;
+                }
+                int start = brace;
                 if (brace >= 0)
                 {
                     // a key in an object that is some key's VALUE is that object's, not an entry's
-                    if (PrecededBy(text, brace, from) == ':') continue;
-                    // ...and so is a key in an object that sits in an array opened since the entry before (the entry's
-                    // own array of objects). Counted forward, once: the first version walked back from every key, and
-                    // 2,000 models behind one array that lost its `]` took 8 s.
+                    if (PrecededBy(text, brace) == ':') continue;
+                    // ...and so is a key in an object that is an ELEMENT of an array opened since the entry before (the
+                    // entry's own array of objects). An array that looks open may as well have lost its `]`, and then
+                    // the objects behind it are the next entries: two adjacent lines deleted at the end of a model (the
+                    // `]` of its last array and its `},`) took every later model with them. So the object must look
+                    // like an element: no closing brace since the array opened closed nothing opened in it (that one
+                    // closed the ENTRY), and a `[` or a comma stands before the object. Counted forward, once.
+                    // (Not asked: whether the array holds objects at all. `[ 1, { ... } ]` is an element in a mixed
+                    // array and the next model behind three deleted lines, and the first is the sound file.)
                     if (brace < counted) { counted = floor; openSince = 0; }
                     for (; counted < brace; counted++)
                     {
-                        if (text[counted] == '[') openSince++;
-                        else if (text[counted] == ']' && openSince > 0) openSince--;
+                        char c = text[counted];
+                        if (c == '[')
+                        {
+                            if (openSince++ == 0) { brokeOut = false; bracesIn = 0; }
+                        }
+                        else if (c == ']') { if (openSince > 0) openSince--; }
+                        else if (openSince > 0)
+                        {
+                            if (c == '{') bracesIn++;
+                            else if (c == '}') { if (bracesIn > 0) bracesIn--; else brokeOut = true; }
+                        }
                     }
-                    if (openSince > 0) { inOwnArray.Add(brace); continue; }
+                    char before = PrecededBy(text, brace);
+                    if (openSince > 0 && !brokeOut && (before == '[' || before == ','))
+                    {
+                        // (counted with the second names: a part's closing brace and the `]` of the parts deleted, and
+                        // the next entry is one more part - nothing tells that from a part that carries the key)
+                        inOwnArray.Add(brace);
+                        if (sound) secondNames++;
+                        continue;
+                    }
                 }
-                starts.Add(brace >= 0 ? brace : m.Index);
+                else
+                {
+                    // NO BRACE AROUND THE KEY. An entry that lost its opening brace - or a remark between two entries
+                    // that quotes a name (`}, # old: "resourceName": "Tank1"`), which must not become an entry.
+                    if (!BracelessEntry(text, m.Index + m.Length, to)) continue;
+                    // The entry begins behind the closing brace of the one before it, not at its name: the keys a hand
+                    // wrote before the name are its own, and the entry before must not read them.
+                    start = BehindLastUnpairedClose(text, floor, m.Index);
+                }
+                starts.Add(start);
                 keyEnds.Add(m.Index + m.Length);
-                floor = m.Index + m.Length; counted = floor; openSince = 0;
+                readable.Add(sound);
+                floor = m.Index + m.Length; counted = floor; openSince = 0; backTo = floor;
             }
             int named = 0;
             foreach (var span in spans) if (Regex.IsMatch(text.Substring(span.Key, span.Value), nameKeyPattern)) named++;
+
+            // an array that is there and holds no name, in a text that holds names elsewhere (the array's key written
+            // twice with the empty one first, entries pasted behind the array's end): nothing is read, and the caller
+            // must be able to say so
+            if (starts.Count == 0 && named == 0)
+                foreach (Match m in Regex.Matches(text, nameOfAnEntry)) if (m.Index < from || m.Index >= to) namesWithoutArray++;
 
             if (named >= starts.Count)
             {
@@ -887,19 +964,24 @@ namespace HumankindAssetFramework
                 // key it did not write was read from the arrays after it (the last model of a pack without `scale`
                 // took the first `unitScales` rule's). It ends at the array's `]`, which the walk noted: the first one
                 // inside the entry, outside strings, that closes nothing the entry opened. (An entry with a stray `]` of
-                // its own is not this case: the walk closes it at its own brace and sees the array close.)
+                // its own is not this case while the array's `]` is there: the walk closes the entry at its own brace
+                // and sees the array close.)
                 for (int s = 0; s < spans.Count; s++)
                 {
                     int start = spans[s].Key, length = spans[s].Value;
-                    if (closedAt < 0 && s == spans.Count - 1 && unpairedCloseInLast > start) length = unpairedCloseInLast - start;
+                    if (closedAt < 0 && s == spans.Count - 1 && unpairedCloseInLast >= 0) length = unpairedCloseInLast - start;
                     result.Add(text.Substring(start, length));
                 }
                 return result;
             }
 
-            damage = starts.Count + " object(s) with a \"" + nameKey + "\" in the text, " + named + " readable by their braces";
+            int unnamed = 0;
+            foreach (bool r in readable) if (!r) unnamed++;
+            damage = starts.Count + " object(s) with a \"" + nameKey + "\" in the text, " + named + " readable by their braces"
+                + (unnamed > 0 ? "; " + unnamed + " of them not read, a quote of the \"" + nameKey + "\" key itself is lost" : "");
             for (int n = 0; n < starts.Count; n++)
             {
+                if (!readable[n]) continue;   // it has no name to be read under; its text is kept out of the entries around it
                 int cap = n + 1 < starts.Count ? starts[n + 1] : to;
                 // NO OTHER OBJECT'S VALUES. An object with a name key of its own that was counted into this entry's
                 // array ends the entry: if that array is really the entry's (an array of objects), the keys behind it
@@ -936,6 +1018,72 @@ namespace HumankindAssetFramework
             return -1;
         }
 
+        // Read WITH regard to strings from `from` (behind a name key): is `key` reached outside a string, with every
+        // brace on the way paired?
+        static bool SameObjectByStrings(string text, int from, int key)
+        {
+            int depth = 0;
+            bool inStr = false, esc = false;
+            for (int i = from; i < key; i++)
+            {
+                char c = text[i];
+                if (inStr)
+                {
+                    if (esc) esc = false;
+                    else if (c == '\\') esc = true;
+                    else if (c == '"') inStr = false;
+                    continue;
+                }
+                if (c == '"') inStr = true;
+                else if (c == '{') depth++;
+                else if (c == '}') { if (depth == 0) return false; depth--; }
+            }
+            return !inStr && depth == 0;
+        }
+
+        // Is a name key with no brace around it an ENTRY (one that lost its opening brace)? Yes when its own closing
+        // brace follows before any other object begins; yes when other keys follow it; and yes when a comma stands
+        // between its value and the next object (`"resourceName": "B",` then `{`: the name's line slipped above the
+        // brace, two lines swapped, and the object is the entry's). A name with nothing but its value before the next
+        // object or the array's end is a remark: `}, # old: "resourceName": "Tank1"` made a 52nd model of the
+        // reference pack, with every value at its default.
+        static bool BracelessEntry(string text, int from, int cap)
+        {
+            int braces = 0, brackets = 0;
+            bool otherKey = false;
+            char last = '\0';
+            for (int i = from; i < cap; i++)
+            {
+                char c = text[i];
+                if (c == '{')
+                {
+                    if (braces == 0 && brackets == 0 && last != ':') return otherKey || last == ',';
+                    braces++;
+                }
+                else if (c == '}') { if (braces == 0) return true; braces--; }
+                else if (c == '[') brackets++;
+                else if (c == ']') { if (brackets > 0) brackets--; }
+                else if (c == ':' && last == '"') otherKey = true;
+                if (!char.IsWhiteSpace(c)) last = c;
+            }
+            return otherKey;
+        }
+
+        // Where the text of an entry without its opening brace begins: behind the last `}` between `floor` and its
+        // name key that closes nothing opened since the floor (the closing brace of the entry before), and behind
+        // the comma after it. `floor` itself when there is none (the first entry of the array).
+        static int BehindLastUnpairedClose(string text, int floor, int key)
+        {
+            int depth = 0, start = floor;
+            for (int i = floor; i < key; i++)
+            {
+                if (text[i] == '{') depth++;
+                else if (text[i] == '}') { if (depth > 0) depth--; else start = i + 1; }
+            }
+            while (start < key && (char.IsWhiteSpace(text[start]) || text[start] == ',')) start++;
+            return start;
+        }
+
         // Is there a name key behind `at` that lies in no array opened behind `at`? Counted with regard to strings:
         // this is asked about the text behind an end the walk found, and the walk reads that text the same way.
         static bool NameKeyBehindOutsideEveryArray(string text, int at, string nameKeyPattern)
@@ -965,30 +1113,32 @@ namespace HumankindAssetFramework
             return false;
         }
 
-        // Does an object begin right behind the `]` at `at` - `] {` or `], {`?
+        // Does an object begin right behind the `]` at `at` - `] {` or `], {`, or behind the closing brace after it
+        // (`] }, {`: the `]` of an entry's own array whose `[` is lost, the entry's end, the next entry)?
         static bool ObjectBehind(string text, int at)
         {
             int next = at + 1;
-            while (next < text.Length && char.IsWhiteSpace(text[next])) next++;
+            while (next < text.Length && (char.IsWhiteSpace(text[next]) || text[next] == '}')) next++;
             if (next < text.Length && text[next] == ',') { next++; while (next < text.Length && char.IsWhiteSpace(text[next])) next++; }
             return next < text.Length && text[next] == '{';
         }
 
-        // The last character before `at` that is not white space, looking back no further than `floor` ('\0': none).
-        static char PrecededBy(string text, int at, int floor)
+        // The last character before `at` that is not white space ('\0': none).
+        static char PrecededBy(string text, int at)
         {
             int before = at - 1;
-            while (before >= floor && char.IsWhiteSpace(text[before])) before--;
-            return before >= floor ? text[before] : '\0';
+            while (before >= 0 && char.IsWhiteSpace(text[before])) before--;
+            return before >= 0 ? text[before] : '\0';
         }
 
         // Where an entry read around its name ends: at `cap` (the next named entry's start, or the array's end), or
         // earlier, at an object that begins once the entry has CLOSED (a `}` that closes nothing opened since the key),
         // outside every array the entry opened, and that is no key's value. That is a NEIGHBOUR - an entry without
         // the name key - and reading on would hand its values to this entry. Neither a closing brace that closes
-        // nothing (what follows it before the next entry can only be this entry's own keys, a `"position": { }`
-        // among them) nor a `{` before the entry closed (a stray one: the keys behind it are the entry's own) ends
-        // the entry. Earlier versions cut at those, and one stray brace cost an entry its later keys.
+        // nothing (what follows it before the next entry BEGINS - behind its own closing brace, when that entry lost
+        // its opening one - can only be this entry's own keys, a `"position": { }` among them) nor a `{` before the
+        // entry closed (a stray one: the keys behind it are the entry's own) ends the entry. Earlier versions cut at
+        // those, and one stray brace cost an entry its later keys.
         static int EntryEnd(string text, int from, int cap)
         {
             int braces = 0, brackets = 0;
@@ -998,12 +1148,18 @@ namespace HumankindAssetFramework
                 char c = text[i];
                 if (c == '{')
                 {
-                    if (closed && braces == 0 && brackets == 0 && PrecededBy(text, i, from) != ':') return i;
+                    if (closed && braces == 0 && brackets == 0 && PrecededBy(text, i) != ':') return i;
                     braces++;
                 }
                 else if (c == '}') { if (braces > 0) braces--; else closed = true; }
                 else if (c == '[') brackets++;
-                else if (c == ']') { if (brackets > 0) brackets--; }
+                else if (c == ']')
+                {
+                    if (brackets > 0) brackets--;
+                    // a `]` that closes nothing, behind the entry's closing brace: the registry array's own end, which
+                    // the count above missed because an earlier array lost its `]` and took this one for its own
+                    else if (closed && braces == 0) return i;
+                }
             }
             return cap;
         }
@@ -1136,15 +1292,17 @@ namespace HumankindAssetFramework
                 // after the damaged one (RegistryEntryTexts). The second way is kept from the first kind of document
                 // as a second lock: its braces are sound, so the walk is the whole answer and nothing the count
                 // could get wrong can reach it.
-                string structureDamage = null; int namesWithoutArray = 0;
-                var modelTexts = parsed ? RegistryEntryChunks(doc, "models") : RegistryEntryTexts(doc, "models", "resourceName", out structureDamage, out namesWithoutArray);
+                string structureDamage = null; int namesWithoutArray = 0, secondNames = 0;
+                var modelTexts = parsed ? RegistryEntryChunks(doc, "models") : RegistryEntryTexts(doc, "models", "resourceName", out structureDamage, out namesWithoutArray, out secondNames);
                 if (structureDamage != null)
                     Plugin.Log.LogWarning("[Uni] the structure of the models array is damaged too (" + structureDamage
                         + "): reading each model from the object around its \"resourceName\". A model without that key is not recovered. Fix the JSON syntax to be safe.");
                 // the pack that parses says nothing here either, but there the file can be opened and read; a damaged
                 // one that loads no model needs its reason said
                 if (namesWithoutArray > 0)
-                    Plugin.Log.LogWarning("[Uni] the pack holds " + namesWithoutArray + " \"resourceName\" key(s) but no readable \"models\" array (is the key misspelled?): no model is read from it.");
+                    Plugin.Log.LogWarning("[Uni] the pack holds " + namesWithoutArray + " \"resourceName\" key(s), none of them in a readable \"models\" array (is the key misspelled, or the array written twice?): no model is read from it.");
+                if (secondNames > 0)
+                    Plugin.Log.LogWarning("[Uni] " + secondNames + " \"resourceName\" key(s) stand inside a model that already has one (in the same object, or in an array of its objects) and are not read as models of their own. If a model is missing, the `}, {` or the `]` before it is lost.");
                 foreach (var chunk in modelTexts)
                 {
                     var text = chunk;   // every Regex.Matches below reads THIS entry's object, not the document

@@ -162,7 +162,7 @@ namespace HumankindAssetFramework.Tests
             Plugin.Log.LogEvent += listen;
             try { Assert.True(DistrictInject.ParseDistrictsRaw(doc).Count == 0, what); }
             finally { Plugin.Log.LogEvent -= listen; }
-            lock (said) Assert.Contains(said, line => line.Contains("no readable \"districts\" array"));
+            lock (said) Assert.Contains(said, line => line.Contains("in a readable \"districts\" array"));
         }
 
         // A STRAY CLOSING BRACE in the middle of a district. What follows it before the next district can only be this
@@ -213,12 +213,68 @@ namespace HumankindAssetFramework.Tests
             lock (said) Assert.Contains(said, line => line.Contains("[District] the structure of the districts array is damaged too (2 object(s) with a \"district\" in the text, 1 readable by their braces)"));
         }
 
+        // ---- the third review (2026-11-24, on the pushed PR): hand edits of a district with parts ----
+
+        // TWO ADJACENT LINES DELETED. The `]` of a district's parts and its `},`: the next district looked like one
+        // more part, the count came out even and every later district was lost. The `"parts": [` line and the `{`
+        // under it: the first part's brace closed the district, and the `]` of the parts, with nothing before it to
+        // close, was taken for the registry's own. An element of an array has a `[` or a comma before it; a `]`
+        // followed by `}, {` is an entry's own, and the array goes on.
+        [Theory]
+        [InlineData("the ] of the parts and the },", @"{ ""name"": ""wall"", ""tris"": 20 } ] }, { ""district"": ""D2""", @"{ ""name"": ""wall"", ""tris"": 20 } { ""district"": ""D2""")]
+        [InlineData("the opening of the parts and of the first part", @"""parts"": [ { ""name"": ""roof""", @"""name"": ""roof""")]
+        public void RegexRecovery_TwoAdjacentLinesOfADistrictDeleted_CostNoLaterDistrict(string what, string from, string to)
+        {
+            string doc = @"{ ""districts"": [ { ""district"": ""D1"", ""fxMeshGuid"": ""1,2,3,4"", ""groundMaterial"": ""G1"", ""parts"": [ { ""name"": ""roof"", ""tris"": 10 }, { ""name"": ""wall"", ""tris"": 20 } ] }"
+                + @", { ""district"": ""D2"", ""groundMaterial"": ""G2"", ""parts"": [] }, { ""district"": ""D3"", ""groundMaterial"": ""G3"", ""parts"": [ { ""name"": ""roof"" } ] } ] }";
+            Assert.True(doc.Contains(from), what);
+            doc = doc.Replace(from, to);
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var districts = DistrictInject.ParseDistrictsRaw(doc);
+            Assert.True(new[] { "D1", "D2", "D3" }.SequenceEqual(districts.Select(d => d.district)), what + ": " + string.Join(",", districts.Select(d => d.district)));
+            Assert.Equal(new[] { "G1", "G2", "G3" }, districts.Select(d => d.groundMaterial));
+        }
+
+        // The array's key written twice with the empty one first loads nothing (the first is read, as ever), and a
+        // `"district": [` typed for `"districts": [` leaves no array: both must say why, and count the DISTRICTS the
+        // file holds - the misspelled array key is not one of them.
+        [Theory]
+        [InlineData("the key twice, the empty one first", @"{ ""districts"": [],, ""districts"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"" }, { ""district"": ""B"", ""fxMeshGuid"": ""1,2,3,4"" } ] }")]
+        [InlineData("district typed for districts", @"{ ""district"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"" } { ""district"": ""B"", ""fxMeshGuid"": ""1,2,3,4"" } ] }")]
+        public void RegexRecovery_WithNoDistrictInAReadableArray_CountsTheDistrictsItDidNotRead(string what, string doc)
+        {
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var said = new List<string>();
+            System.EventHandler<LogEventArgs> listen = (s, e) => { lock (said) said.Add(e.Data?.ToString() ?? ""); };
+            Plugin.Log.LogEvent += listen;
+            try { Assert.True(DistrictInject.ParseDistrictsRaw(doc).Count == 0, what); }
+            finally { Plugin.Log.LogEvent -= listen; }
+            lock (said) Assert.Contains(said, line => line.Contains("holds 2 \"district\" key(s), none of them in a readable \"districts\" array"));
+        }
+
+        // TWO QUOTES LOST IN ONE DISTRICT. Between them the walk reads the text inside out: the `[` of the parts and of
+        // the copies stand inside what it takes for strings, the district closes at the first copy's brace, and the
+        // `]` of the copies stands there as the registry's own, with no `[` open before it. The walk's end is not
+        // trusted once a string ran over a line end, which no JSON string does (the third review's own fix lost the
+        // district after it in 64 of 5,819 double damages of the live registry before this was held).
+        [Fact]
+        public void RegexRecovery_TwoQuotesLostInADistrictWithParts_CostNoLaterDistrict()
+        {
+            string doc = @"{ ""districts"": [ { ""district"": ""D1"", ""fxMeshGuid"": ""1,2,3,4"", ""modelFile"": D:/m/temple.glb""," + "\n"
+                + @" ""parts"": [ { ""copies"": [ { ""x"": 1.5, z"": -1.5 }, { ""x"": -1.5, ""z"": 1.5 }, { ""x"": -1.5, ""z"": -1.5 } ], ""targetTris"": 6000 } ] }, "
+                + @"{ ""district"": ""D2"", ""fxMeshGuid"": ""5,6,7,8"", ""groundMaterial"": ""G2"" } ] }";
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var districts = DistrictInject.ParseDistrictsRaw(doc);
+            Assert.Equal(new[] { "D1", "D2" }, districts.Select(d => d.district));
+            Assert.Equal("G2", districts[1].groundMaterial);
+        }
+
         // A null text is an empty registry, on both ways in.
         [Fact]
         public void EntryTexts_OfNoText_AreNone()
         {
             Assert.Empty(DistrictInject.DistrictEntryTexts(null));
-            Assert.Empty(UniversalInject.RegistryEntryTexts(null, "models", "resourceName", out string damage, out int namesWithoutArray));
+            Assert.Empty(UniversalInject.RegistryEntryTexts(null, "models", "resourceName", out string damage, out int namesWithoutArray, out _));
             Assert.Null(damage);
             Assert.Equal(0, namesWithoutArray);
         }

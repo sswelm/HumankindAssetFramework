@@ -193,13 +193,15 @@ namespace HumankindAssetFramework
         // parked one loaded the parked districts).
         internal static List<string> DistrictEntryTexts(string text)
         {
-            var texts = UniversalInject.RegistryEntryTexts(text, "districts", "district", out string damage, out int namesWithoutArray);
+            var texts = UniversalInject.RegistryEntryTexts(text, "districts", "district", out string damage, out int namesWithoutArray, out int secondNames);
             if (damage != null)
                 Plugin.Log?.LogWarning("[District] the structure of the districts array is damaged too (" + damage
                     + "): reading each district from the object around its \"district\" key.");
             // the parsing path says "has no districts array"; this one must not leave zero districts unexplained
             if (namesWithoutArray > 0)
-                Plugin.Log?.LogWarning("[District] haf_districts.json holds " + namesWithoutArray + " \"district\" key(s) but no readable \"districts\" array (is the key misspelled?) - no custom districts will load.");
+                Plugin.Log?.LogWarning("[District] haf_districts.json holds " + namesWithoutArray + " \"district\" key(s), none of them in a readable \"districts\" array (is the key misspelled, or the array written twice?) - no custom districts will load.");
+            if (secondNames > 0)
+                Plugin.Log?.LogWarning("[District] " + secondNames + " \"district\" key(s) stand inside a district that already has one (in the same object, or in an array of its objects) and are not read as districts of their own. If a district is missing, the `}, {` or the `]` before it is lost.");
             return texts;
         }
 

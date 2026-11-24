@@ -12,10 +12,10 @@ namespace HumankindAssetFramework.Tests
     // That is exact while the array's structure survived - and the fallback runs on files a hand has damaged. A closing
     // quote missing in one model turns the rest of the array inside out for a walk that respects strings; a closing
     // brace missing keeps it one level deep. Either way every model AFTER the damaged one was swallowed into it: on
-    // the reference pack, each of its 50 models damaged in turn, half the models came back - one lost quote in a
+    // the reference pack, each of its 51 models damaged in turn, half the models came back - one lost quote in a
     // hand-edited pack.json took every later unit out of the game.
     //
-    // UniversalInject.RegistryEntryTexts counts: the walk must hand back as many objects carrying a "resourceName" as
+    // UniversalInject.RegistryEntryTexts counts: the walk must hand back at least as many objects carrying a "resourceName" as
     // the array's text holds objects with one, or each model is read from the object AROUND its key. The district
     // fallback shares it (Tests/DistrictRegistryParseTests.cs holds that side).
     //
@@ -61,7 +61,7 @@ namespace HumankindAssetFramework.Tests
         // Which way a document takes: null = by its braces, otherwise what the count found.
         static string Damage(string doc)
         {
-            UniversalInject.RegistryEntryTexts(doc, "models", "resourceName", out string damage, out _);
+            UniversalInject.RegistryEntryTexts(doc, "models", "resourceName", out string damage, out _, out _);
             return damage;
         }
 
@@ -199,7 +199,7 @@ namespace HumankindAssetFramework.Tests
             string doc = Head + Models + WithoutItsLast(A, " }") + ", " + nameLast + ", " + C + Tail;
             DoesNotParse(doc);
             // held on the texts: the field reader takes the FIRST resourceName in a model's text, here the part's
-            var texts = UniversalInject.RegistryEntryTexts(doc, "models", "resourceName", out string damage, out _);
+            var texts = UniversalInject.RegistryEntryTexts(doc, "models", "resourceName", out string damage, out _, out _);
             Assert.NotNull(damage);
             Assert.Equal(new[] { WithoutItsLast(A, " }"), nameLast, C }, texts);
         }
@@ -231,23 +231,24 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(new[] { 2f, 4f, 3f }, got.Select(m => m.scale));
         }
 
-        // NO OTHER OBJECT'S VALUES. In a damaged structure, an object with a resourceName of its own that the count puts
-        // into a model's array ends the model there. Two files look alike to a reader that cannot trust brackets:
-        // a model with an array of objects, and a model whose skel lost its `]` followed by the NEXT model. Reading on
-        // is harmless in the first and hands the model its neighbour's skel and scale in the second (the second review
-        // measured exactly that), so the model ends, and what it did not write stays at its default.
+        // NO OTHER OBJECT'S VALUES. Two files look alike to a reader that cannot trust brackets: a model with an array
+        // of objects, and a model whose skel lost its `]` followed by the NEXT model. Reading on is harmless in the
+        // first and hands the model its neighbour's skel and scale in the second (the second review measured exactly
+        // that). What tells them apart is the model's own closing brace: it stands between the `[` and the next
+        // model, and no element of an array is preceded by a brace that closes nothing opened in the array. So the
+        // models behind the lost `]` are models (the third review; until then they were lost with it).
         [Fact]
-        public void AModelWhoseSkelLostItsBracket_InADamagedStructure_TakesNothingFromTheModelsAfterIt()
+        public void AModelWhoseSkelLostItsBracket_InADamagedStructure_TakesNothingFromTheModelsAfterIt_AndCostsNone()
         {
             const string d = @"{ ""resourceName"": ""D"", ""pawnDescription"": ""PD"", ""scale"": 4, ""skel"": [31,32,33,34], ""atlas"": [35,36,37,38] }";
             string doc = Head + Models + WithoutItsLast(A, " }") + ", " + Swap(B, "[11,12,13,14]", "[11,12,13,14") + ", " + C + ", " + d + Tail;
             DoesNotParse(doc);
             var got = UniversalInject.ParseModels(doc);
-            Assert.Equal(new[] { "A", "B" }, got.Select(m => m.resourceName));   // C and D are lost: two damages
-            Assert.Equal(new[] { "PA", "PB" }, got.Select(m => m.pawnDescription));
-            Assert.Equal(new[] { 2f, 1f }, got.Select(m => m.scale));           // not C's 3
-            Assert.Equal(new[] { 1, 0 }, got.Select(m => m.sa));                 // not C's 21
-            Assert.Equal(new[] { 5, 0 }, got.Select(m => m.ta));
+            Assert.Equal(new[] { "A", "B", "C", "D" }, got.Select(m => m.resourceName));
+            Assert.Equal(new[] { "PA", "PB", "PC", "PD" }, got.Select(m => m.pawnDescription));
+            Assert.Equal(new[] { 2f, 1f, 3f, 4f }, got.Select(m => m.scale));      // B: not C's 3
+            Assert.Equal(new[] { 1, 0, 21, 31 }, got.Select(m => m.sa));            // B: not C's 21 (its own lost its bracket)
+            Assert.Equal(new[] { 5, 0, 25, 35 }, got.Select(m => m.ta));
         }
 
         [Fact]
@@ -320,6 +321,18 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(new[] { "A", "B" }, UniversalInject.ParseModels(doc).Select(m => m.resourceName));
         }
 
+        // ...also when the walk's end has an open `[` before it (a model's skel lost its `]`), so that the names
+        // behind it decide: those of the parked array all lie INSIDE an array that opened after the end, and do not
+        // speak against it.
+        [Fact]
+        public void AnUnclosedArrayInAModel_DoesNotBringTheNextArrayIn()
+        {
+            string doc = @"{ ""modId"": ""m"",, ""models"": [ " + Swap(A, "[1,2,3,4]", "[1,2,3,4") + ", " + B + @" ], ""models_off"": [ { ""textureFile"": ""x]y"", ""resourceName"": ""P1"" }, " + Parked + @", { ""resourceName"": ""P3"" } ] }";
+            DoesNotParse(doc);
+            Assert.Null(Damage(doc));
+            Assert.Equal(new[] { "A", "B" }, UniversalInject.ParseModels(doc).Select(m => m.resourceName));
+        }
+
         // A key of the DOCUMENT with the name key's name, behind a damaged models array, is no model.
         [Fact]
         public void ANameKeyOfTheDocumentItself_BehindADamagedArray_IsNoModel()
@@ -330,6 +343,24 @@ namespace HumankindAssetFramework.Tests
             var got = UniversalInject.ParseModels(doc);
             Assert.Equal(new[] { "A", "B" }, got.Select(m => m.resourceName));
             Assert.Equal(new[] { "PA", "PB" }, got.Select(m => m.pawnDescription));
+        }
+
+        // ...and so is one behind a SOUND array, whatever stands in the models' strings; and the objects of a parked
+        // array that lost its `[` are not models. The array's end is the walk's: its `]` closes nothing that opened
+        // outside a model, and no object stands right behind it. (Before the third review a name key behind that `]`
+        // was enough to distrust it, and the count without regard to strings then ran past it: an unpaired `[` in a
+        // model's string, "Gun[0", made a model of the document's own key, and a parked object came to life.)
+        [Theory]
+        [InlineData("a key of the document", @" ], ""resourceName"": ""TOP"", ""unitScales"": [ { ""match"": ""PA"", ""scale"": 9 } ] }")]
+        [InlineData("a parked array that lost its [", @" ], ""models_off"": { ""resourceName"": ""PARKED1"", ""scale"": 5 }, { ""resourceName"": ""PARKED2"" } ], ""waterLevel"": 0.16 }")]
+        public void ANameBehindASoundModelsArray_IsNoModel(string what, string tail)
+        {
+            string doc = @"{ ""modId"": ""m"",, " + Models + Swap(A, @"""ha""", @"""Gun[0""") + ", " + B + ", " + Nameless + tail;
+            DoesNotParse(doc);
+            Assert.True(Damage(doc) == null, what + ": " + Damage(doc));
+            var got = UniversalInject.ParseModels(doc);
+            Assert.True(new[] { "A", "B", "" }.SequenceEqual(got.Select(m => m.resourceName)), what + ": " + string.Join(",", got.Select(m => m.resourceName)));
+            Assert.Equal(new[] { "PA", "PB", "PN" }, got.Select(m => m.pawnDescription));
         }
 
         // TWO DAMAGES, held for what stays right: a model with an unpaired `]`, then a model without its opening brace.
@@ -404,8 +435,8 @@ namespace HumankindAssetFramework.Tests
             var said = SaidWhile(() => count = UniversalInject.ParseModels(doc).Count);
             Assert.True(count == 0, what);
             // a damaged one says why; one that parses is read as it always was, and this reader adds nothing to it
-            if (parses) Assert.DoesNotContain(said, line => line.Contains("no readable \"models\" array"));
-            else Assert.Contains(said, line => line.Contains("no readable \"models\" array"));
+            if (parses) Assert.DoesNotContain(said, line => line.Contains("in a readable \"models\" array"));
+            else Assert.Contains(said, line => line.Contains("in a readable \"models\" array"));
         }
 
         // ---- what the recovery says, and its edges ----
@@ -472,7 +503,7 @@ namespace HumankindAssetFramework.Tests
         {
             const string doc = @"{ ""models"": [ { ""hideMeshes"": ""x ] y"", ""resourceName"": ""A"" } { ""pawnDescription"": ""nameless"" }, { ""resourceName"": ""B"", ""hideMeshes"": ""a } b ] c"" } ] }";
             DoesNotParse(doc);
-            var texts = UniversalInject.RegistryEntryTexts(doc, "models", "resourceName", out string damage, out int namesWithoutArray);
+            var texts = UniversalInject.RegistryEntryTexts(doc, "models", "resourceName", out string damage, out int namesWithoutArray, out _);
             Assert.Null(damage);
             Assert.Equal(0, namesWithoutArray);
             Assert.Equal(new[] { @"{ ""hideMeshes"": ""x ] y"", ""resourceName"": ""A"" }", @"{ ""pawnDescription"": ""nameless"" }", @"{ ""resourceName"": ""B"", ""hideMeshes"": ""a } b ] c"" }" }, texts);
@@ -482,21 +513,226 @@ namespace HumankindAssetFramework.Tests
         [Fact]
         public void EntryTexts_OfADamagedArray_AreTheObjectsAroundTheNames()
         {
-            var texts = UniversalInject.RegistryEntryTexts(Head + Models + WithoutItsLast(A, " }") + ", " + B + ", " + C + Tail, "models", "resourceName", out string damage, out _);
+            var texts = UniversalInject.RegistryEntryTexts(Head + Models + WithoutItsLast(A, " }") + ", " + B + ", " + C + Tail, "models", "resourceName", out string damage, out _, out _);
             Assert.Equal("3 object(s) with a \"resourceName\" in the text, 1 readable by their braces", damage);
             Assert.Equal(new[] { WithoutItsLast(A, " }"), B, C }, texts);
         }
 
         // A DOCUMENT THAT PARSES and still reaches the fallback (every model fails the object parse: a scale that is no
-        // number) is read by its braces: the nameless model is kept, which the recovery around a name would not do.
+        // number) is read by its braces, whatever the count says. This one the count would send through the recovery
+        // (a brace in a string inside an array of objects, then a named object: 2 names, 1 object by braces) - held,
+        // or the test proves nothing, as its first version did - and the recovery would make a model of "p" and lose
+        // the nameless one.
         [Fact]
         public void AParsedDocumentWhoseModelsAllFailed_KeepsEveryObject()
         {
-            const string doc = @"{ ""models"": [ { ""resourceName"": ""A"", ""scale"": ""big"" }, { ""pawnDescription"": ""nameless"", ""scale"": ""big"" } ] }";
+            const string doc = @"{ ""models"": [ { ""resourceName"": ""A"", ""scale"": ""big"", ""parts"": [ { ""k"": ""}"" }, { ""resourceName"": ""p"" } ] }, { ""pawnDescription"": ""nameless"", ""scale"": ""big"" } ] }";
             Newtonsoft.Json.Linq.JObject.Parse(doc);
+            Assert.NotNull(Damage(doc));
             var got = UniversalInject.ParseModels(doc);
             Assert.Equal(new[] { "A", "" }, got.Select(m => m.resourceName));
             Assert.Equal(new[] { "", "nameless" }, got.Select(m => m.pawnDescription));
+        }
+
+        // ---- the third review (2026-11-24, on the pushed PR): hand edits, and what a blind reread found ----
+
+        // A REMARK THAT QUOTES A NAME, standing between two models, is no model. The count took it for a model that
+        // lost its opening brace: `}, # old: "resourceName": "OldName"` made a 52nd model of the reference pack, every
+        // value at its default, and sent a file with sound braces through the recovery. A name with nothing but its
+        // value before the next object or the array's end is a remark.
+        [Theory]
+        [InlineData("behind a model", A + @", # old: ""resourceName"": ""OldName""" + "\n" + B + ", " + C)]
+        [InlineData("on its own line, with a date", A + ",\n" + @"// renamed from ""resourceName"": ""Tank1"" on 11-20" + "\n" + B + ", " + C)]
+        [InlineData("at the array's opening", @"# was ""resourceName"": ""OldName""" + "\n" + A + ", " + B + ", " + C)]
+        [InlineData("before the array's end", A + ", " + B + ", " + C + @" # ""resourceName"": ""OldName""" + "\n")]
+        public void ARemarkThatQuotesAName_BetweenTwoModels_IsNoModel(string what, string body)
+        {
+            string doc = @"{ ""modId"": ""m"",, " + Models + body + Tail;
+            DoesNotParse(doc);
+            Assert.True(Damage(doc) == null, what + ": " + Damage(doc));
+            var got = UniversalInject.ParseModels(doc);
+            Assert.True(new[] { "A", "B", "C" }.SequenceEqual(got.Select(m => m.resourceName)), what + ": " + string.Join(",", got.Select(m => m.resourceName)));
+            Assert.Equal(new[] { "PA", "PB", "PC" }, got.Select(m => m.pawnDescription));
+        }
+
+        // ...and a model that DID lose its opening brace is still one: its own closing brace follows its keys.
+        // Its text begins behind the closing brace of the model above, not at its name: written name-last, its keys
+        // were read as the model's above (B took the scale and atlas X wrote), and it came back with its name alone.
+        [Fact]
+        public void KeysBeforeTheName_OfAModelWithoutItsOpeningBrace_StayWithIt()
+        {
+            const string x = @"""pawnDescription"": ""PX"", ""scale"": 4, ""atlas"": [41,42,43,44], ""resourceName"": ""X"" }";
+            string doc = Head + Models + B + ", " + x + ", " + C + Tail;
+            DoesNotParse(doc);
+            Assert.NotNull(Damage(doc));
+            var got = UniversalInject.ParseModels(doc);
+            Assert.Equal(new[] { "B", "X", "C" }, got.Select(m => m.resourceName));
+            Assert.Equal(new[] { "PB", "PX", "PC" }, got.Select(m => m.pawnDescription));
+            Assert.Equal(new[] { 1f, 4f, 3f }, got.Select(m => m.scale));     // B wrote none: not X's 4
+            Assert.Equal(new[] { 0, 41, 25 }, got.Select(m => m.ta));
+        }
+
+        // ...and so is a model whose name line slipped ABOVE its opening brace (two lines swapped): a comma stands
+        // between the name and the object, which a remark does not end in.
+        [Fact]
+        public void ANameLineAboveItsOpeningBrace_IsStillThatModel()
+        {
+            string doc = Head + Models + A + @", ""resourceName"": ""B""," + "\n" + @"{ ""pawnDescription"": ""PB"", ""skel"": [11,12,13,14] }, " + C + Tail;
+            DoesNotParse(doc);
+            var got = UniversalInject.ParseModels(doc);
+            Assert.Equal(new[] { "A", "B", "C" }, got.Select(m => m.resourceName));
+            Assert.Equal(new[] { "PA", "PB", "PC" }, got.Select(m => m.pawnDescription));
+            Assert.Equal(new[] { 1, 11, 21 }, got.Select(m => m.sa));
+        }
+
+        // TWO ADJACENT LINES DELETED at the end of a model: the `]` of its last array and its `},`. The array looks
+        // open, and the count took every model behind it for one of its objects: nothing told the damage, the braces
+        // read one model, and every later unit was gone (49 of the reference pack's 51 positions, as before this
+        // reader). An element of an array has a `[` or a comma before it; the next model here has a number.
+        [Fact]
+        public void TheEndOfAModelsLastArrayAndItsBraceDeleted_CostNoLaterModel()
+        {
+            string doc = Head + Models + Swap(A, @"""atlas"": [5,6,7,8] }", @"""atlas"": [5,6,7,8") + " " + B + ", " + C + Tail;
+            DoesNotParse(doc);
+            Assert.NotNull(Damage(doc));
+            var got = UniversalInject.ParseModels(doc);
+            Assert.Equal(new[] { "A", "B", "C" }, got.Select(m => m.resourceName));
+            Assert.Equal(new[] { "PA", "PB", "PC" }, got.Select(m => m.pawnDescription));
+            Assert.Equal(new[] { 2f, 1f, 3f }, got.Select(m => m.scale));
+            Assert.Equal(new[] { 1, 11, 21 }, got.Select(m => m.sa));
+        }
+
+        // ...and the last model then ends at the array's `]`, though the count of brackets paid that one to the array
+        // that lost its own: B wrote no scale and must not take the tuning table's.
+        [Fact]
+        public void TheEndOfAModelsLastArrayAndItsBraceDeleted_TheLastModelDoesNotReadTheTuningTable()
+        {
+            string doc = Head + Models + Swap(A, @"""atlas"": [5,6,7,8] }", @"""atlas"": [5,6,7,8") + " " + C + ", " + B + Tail;
+            DoesNotParse(doc);
+            var got = UniversalInject.ParseModels(doc);
+            Assert.Equal(new[] { "A", "C", "B" }, got.Select(m => m.resourceName));
+            Assert.Equal(new[] { 2f, 3f, 1f }, got.Select(m => m.scale));   // B: not the table's 9
+        }
+
+        // A KNOWN LIMIT, HELD SO IT CANNOT MOVE UNSEEN. Three lines deleted (the array's last number with them) leave
+        // a comma before the next model: it reads exactly like an object in a mixed array, `[ 5, 6, 7, { ... } ]`,
+        // and is taken for one. The models behind it are lost, as before this reader - and the log says a name was
+        // passed over inside a model.
+        [Fact]
+        public void TheLastNumberTheBracketAndTheBraceDeleted_StillCostTheLaterModels_AndTheLogSaysANameWasPassedOver()
+        {
+            string doc = Head + Models + Swap(A, @"""atlas"": [5,6,7,8] }", @"""atlas"": [5,6,7,") + " " + B + ", " + C + Tail;
+            DoesNotParse(doc);
+            List<ModelEntry> got = null;
+            var said = SaidWhile(() => got = UniversalInject.ParseModels(doc));
+            Assert.Equal(new[] { "A" }, got.Select(m => m.resourceName));
+            Assert.Contains(said, line => line.Contains("\"resourceName\" key(s) stand inside a model that already has one"));
+        }
+
+        // AN UNPAIRED `[` INSIDE A STRING ("Gun[0") looked like an open array too: the intact model behind it was
+        // counted as its object and dropped, where the braces alone had read it.
+        [Fact]
+        public void AnUnpairedBracketInAString_ThenADamage_CostsNoModel()
+        {
+            string doc = Head + Models + Swap(A, @"""ha""", @"""Gun[0""") + ", " + B + ", " + C.Substring(2) + Tail;
+            DoesNotParse(doc);
+            var got = UniversalInject.ParseModels(doc);
+            Assert.Equal(new[] { "A", "B", "C" }, got.Select(m => m.resourceName));
+            Assert.Equal(new[] { "PA", "PB", "PC" }, got.Select(m => m.pawnDescription));
+            Assert.Equal("Gun[0", got[0].hideMeshes);
+        }
+
+        // A MODEL WHOSE NAME KEY LOST A QUOTE has no name to be read under, and is not read. It must still be counted:
+        // left out, the model after it made the count come out even when it was the last but one, and the last model
+        // was read under its own name with this one's pawn and skeleton - on the reference pack "Zeppelin" with the
+        // volley gun's, without a word in the log. Anywhere else in the array the count already fired.
+        [Theory]
+        [InlineData("its opening quote, last but one", @"{ resourceName"": ""B""", false)]
+        [InlineData("its closing quote, last but one", @"{ ""resourceName: ""B""", false)]
+        [InlineData("its opening quote, first", @"{ resourceName"": ""B""", true)]
+        public void AModelWhoseNameKeyLostAQuote_IsNotRead_AndGivesTheNextModelNothing(string what, string damagedKey, bool first)
+        {
+            string b = Swap(B, @"{ ""resourceName"": ""B""", damagedKey);
+            string doc = Head + Models + (first ? b + ", " + A : A + ", " + b) + ", " + C + Tail;
+            DoesNotParse(doc);
+            List<ModelEntry> got = null;
+            var said = SaidWhile(() => got = UniversalInject.ParseModels(doc));
+            Assert.True(new[] { "A", "C" }.SequenceEqual(got.Select(m => m.resourceName)), what + ": " + string.Join(",", got.Select(m => m.resourceName)));
+            Assert.Equal(new[] { "PA", "PC" }, got.Select(m => m.pawnDescription));   // C: not B's PB
+            Assert.Equal(new[] { 1, 21 }, got.Select(m => m.sa));                      // C: not B's 11
+            Assert.Contains(said, line => line.Contains("1 of them not read, a quote of the \"resourceName\" key itself is lost"));
+        }
+
+        // A BRACE INSIDE A STRING, between two name keys of ONE model. The count walks back from a key without regard
+        // to strings and took that brace for the model's end: a file with sound braces went through the recovery, the
+        // second key became a ghost model with the first one's pawn and scale, and the nameless model was lost.
+        [Theory]
+        [InlineData("the key written twice", @"""hideMeshes"": ""a } b"", ""resourceName"": ""A2""")]
+        [InlineData("a comment that quotes the old key", @"""hideMeshes"": ""a } b"", /* was ""resourceName"": ""OLD"" */ ""k"": 1")]
+        [InlineData("an opening brace in the string", @"""hideMeshes"": ""a { b"", ""resourceName"": ""A2""")]
+        public void ASecondNameKeyBehindABraceInAString_DoesNotSwitchTheReader(string what, string extra)
+        {
+            string doc = @"{ ""modId"": ""m"",, ""models"": [ { ""resourceName"": ""A"", " + extra + @", ""pawnDescription"": ""PA"", ""scale"": 2 }, { ""pawnDescription"": ""nameless"" } ] }";
+            DoesNotParse(doc);
+            Assert.True(Damage(doc) == null, what + ": " + Damage(doc));
+            var got = UniversalInject.ParseModels(doc);
+            Assert.True(new[] { "A", "" }.SequenceEqual(got.Select(m => m.resourceName)), what + ": " + string.Join(",", got.Select(m => m.resourceName)));
+            Assert.Equal(new[] { "PA", "nameless" }, got.Select(m => m.pawnDescription));
+            Assert.Equal(new[] { 2f, 1f }, got.Select(m => m.scale));
+        }
+
+        // TWO MODELS THAT LOST THE `}, {` BETWEEN THEM read as one, under the first one's name: nothing tells that
+        // from a name written twice. The second is lost - and the log says that a second name was passed over.
+        [Fact]
+        public void TwoModelsWithoutTheSeamBetweenThem_AreOne_AndTheLogSaysASecondNameWasPassedOver()
+        {
+            string doc = @"{ ""modId"": ""m"",, " + Models + WithoutItsLast(A, " }") + ", " + B.Substring(2) + ", " + C + Tail;
+            DoesNotParse(doc);
+            List<ModelEntry> got = null;
+            var said = SaidWhile(() => got = UniversalInject.ParseModels(doc));
+            Assert.Equal(new[] { "A", "C" }, got.Select(m => m.resourceName));
+            Assert.Contains(said, line => line.Contains("1 \"resourceName\" key(s) stand inside a model that already has one"));
+            // ...and a pack with one name per model does not say it
+            said = SaidWhile(() => UniversalInject.ParseModels(@"{ ""modId"": ""m"",, " + Models + A + ", " + B + ", " + C + Tail));
+            Assert.DoesNotContain(said, line => line.Contains("already has one"));
+        }
+
+        // THE ARRAY'S KEY WRITTEN TWICE, the empty one first: the fallback reads the first, as it always did, and
+        // finds no model. It must not leave that unexplained.
+        [Fact]
+        public void AnEmptyModelsArrayBeforeTheRealOne_LoadsNothing_AndSaysWhy()
+        {
+            string doc = @"{ ""modId"": ""m"",, ""models"": [], " + Models + A + ", " + B + " ] }";
+            DoesNotParse(doc);
+            List<ModelEntry> got = null;
+            var said = SaidWhile(() => got = UniversalInject.ParseModels(doc));
+            Assert.Empty(got);
+            Assert.Contains(said, line => line.Contains("the pack holds 2 \"resourceName\" key(s), none of them in a readable \"models\" array"));
+        }
+
+        // A bracket count is kept per entry: carried from one entry to the next, the `]` a model's skel lost would be
+        // paid by the array's own, and the last model would run on into the tuning table behind it.
+        [Fact]
+        public void ABracketLostInOneModel_IsNotOwedByTheLast()
+        {
+            const string doc = @"{ ""models"": [ { ""resourceName"": ""A"", ""skel"": [1,2,3,4 }, { ""resourceName"": ""B"", ""pawnDescription"": ""PB"" ], ""unitScales"": [ { ""match"": ""PA"", ""scale"": 9 } ] }";
+            DoesNotParse(doc);
+            var got = UniversalInject.ParseModels(doc);
+            Assert.Equal(new[] { "A", "B" }, got.Select(m => m.resourceName));
+            Assert.Equal(1f, got[1].scale);   // not the table's 9
+        }
+
+        // The pattern that finds the array must not try every split of a run of white space: `"models"` followed by
+        // 20,000 spaces and no `[` took 5 s (12 s on the game's Mono).
+        [Fact]
+        public void AModelsKeyBeforeALongRunOfWhiteSpace_IsRefusedAtOnce()
+        {
+            string doc = @"{ ""resourceName"": ""A"", ""models""" + new string(' ', 20000) + "x }";
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            Assert.Empty(UniversalInject.RegistryEntryTexts(doc, "models", "resourceName", out _, out int names, out _));
+            clock.Stop();
+            Assert.Equal(1, names);
+            Assert.True(clock.ElapsedMilliseconds < 1000, clock.ElapsedMilliseconds + " ms");
         }
     }
 }

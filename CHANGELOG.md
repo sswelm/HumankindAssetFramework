@@ -27,61 +27,107 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     | `"models": [` without its colon | 1 | 0 of 51 | 51 |
 
     "Right" is all 120 values of the model equal to the same model read from a copy whose structure is intact (the
-    one field the lost quote damages left out). The undamaged pack, and a copy with only a doubled comma, read the
-    same before and after, value for value.
+    one field the lost quote damages left out, so 119 for that model in those copies). The undamaged pack, and a
+    copy with only a doubled comma, read the same before and after, value for value.
   - **The fix (`UniversalInject.RegistryEntryTexts`, shared with the district fallback):** the brace walk stays the
     first choice and is not changed. It is checked by a count: the array's text is searched for `"resourceName"`
     keys, the keys are sorted into the objects they stand in, and the walk must hand back at least as many objects
     carrying one. When it hands back fewer, each model is the object AROUND its key - back to the brace that
     encloses it, forward to the next model or the array's end - found without regard to strings, since they are
     what is damaged. A warning names the count. A document that PARSES keeps the brace walk alone.
-  - **What the recovery must leave alone** took two more attempts, both stopped by review before a push:
-    - The first version ended the walk at any `]` that closed nothing, so a model whose `skel` lost its `[` cost
-      every model after it (1,225 of 2,450 other models read right on the pack as it then was, against 2,450);
-      and it took a second `"resourceName"` in one model for a second model (475 of 11,864 generated documents with
-      sound braces went through the recovery, which ignores strings).
+  - **What the recovery must leave alone** took four versions. Two were stopped by review before a push, the third
+    was pushed (PR #319, commit 910bae4e) and reviewed again:
+    - The first ended the walk at any `]` that closed nothing, so a model whose `skel` lost its `[` cost every model
+      after it (1,225 of 2,450 other models read right on the pack as it then was, against 2,450); and it took a
+      second `"resourceName"` in one model for a second model (475 of 11,864 generated documents with sound braces
+      went through the recovery, which ignores strings).
     - The second trusted the `]` at which the walk stopped whenever it stood right behind a closed entry. A district
       holds a `parts` array of objects; after one stray `}` the walk closes the district early and meets the `]` of
-      `parts` exactly so. 250 of 3,630 one-character damages of the live district registry lost every later
-      district.
-    - Now the walk is the old one, byte for byte on 39,945 generated documents, and its `]` is taken for the
-      array's only when no entry stands behind it. Two of the 11,864 generated model documents with sound braces
-      still take the recovery, and none of 7,880 district ones. Of 7,757 damaged copies of the reference pack (50
-      kinds of damage on each model, random deletions and insertions of one and two characters, cuts) none gives
-      back fewer right models and 4,716 give back more. Of 4,031 one-character damages of two test packs the new
-      reader is right wherever the old one was (1,724), better in 1,039 and worse in 2. Of 3,630 one-character
-      damages of the live district registry outside the array's own key (see below) none gives back fewer right
-      districts, and 32 of 5,819 double damages do.
+      `parts` exactly so. 250 of 3,497 one-character deletions and insertions of the live district registry lost
+      every later district.
+    - The third, the pushed one, was measured on single characters and five kinds of damage. Its review damaged
+      copies of the real files the way a hand does (a line deleted, two lines swapped, a block commented out,
+      merge markers, smart quotes: 64,773 copies of the pack and 1,643 of the district registry), reread the code
+      blind, and audited every number written here. It found: a remark that quotes a name between two models
+      (`}, # old: "resourceName": "Tank1"`) became a 52nd model with every value at its default; a model written
+      name-last that lost its opening brace gave its keys to the model above; a brace inside a string between two
+      name keys of one model sent a file with sound braces through the recovery and made a ghost model; an
+      unpaired `[` inside a string ("Gun[0") dropped the intact model behind it; two adjacent lines deleted at the
+      end of a model (the `]` of its last array and its `},`) still lost every later model without a word, as
+      before the fix; a quote lost in the `"resourceName"` key of the last model but one still read the last model
+      under its own name with the other one's pawn and skeleton, as before the fix; a parked array that lost its
+      `[` moved the models array's end and came to life; `"models"` followed by 20,000 spaces took 5 s; and five
+      statements and four denominators in these documents were wrong.
+    - **Now.** A name with no brace around it is an entry only when its own closing brace, other keys or a comma
+      follow it before the next object; such an entry begins behind the closing brace of the one above. Two name
+      keys are one object's also when the only brace between them stands in a string. An object behind an open `[`
+      is that array's element only when a `[` or a comma stands before it and no brace since closed the entry. A
+      name key that lost a quote is counted, and its entry is not read. The walk's `]` is the array's end when no
+      `[` is open before it and no object stands right behind it, unless the walk read a string over a line end.
+      The pattern for the array's key is linear.
+    - **Measured on the final code**, old reader (master) against new:
+
+      | Check | Result |
+      |---|---|
+      | the brace walk, generated documents | identical on 39,945, and on 329,742 fuzz documents |
+      | documents that parse | read the same: 12,093 + 8,108 generated, 44,162 + 551 hand-edited copies |
+      | generated documents with sound braces that take the recovery | 10 of 11,864 (models), 8 of 7,880 (districts); the pushed version 2 and 0 |
+      | 64,773 hand-edited copies of the pack, 20,611 of them not parsing | models read right: 3,135,101 before, 3,269,534 now, of 3,303,296; entries that are no model: 3,225 before, 1,666 now |
+      | the same copies against the pushed version | none worse, 205 better |
+      | 7,107 damaged copies of the pack (one and two characters, cuts) | none gives back fewer right models, 4,731 give back more |
+      | 4,031 one-character damages of two test packs | right wherever the old reader was (1,724), better in 1,056, worse in 1 |
+      | the live district registry, outside the array's own key: 3,497 one-character deletions and insertions and 133 cuts | none gives back fewer right districts, 4 give back more |
+      | the same, 5,819 double damages | 1 gives back fewer, 42 more (the pushed version: 32 and 14) |
+      | 1,643 hand-edited copies of the district registry, 1,092 not parsing | 34 give back fewer right districts than the reader of PR #315 (the pushed version: 46), see below |
+
+      The 18 documents with sound braces that take the recovery each hold an object that carries the name key
+      inside a model or a district, beside brackets and braces inside strings; no key of the schema holds such an
+      object. 153 of the hand-edited pack copies count as worse than before by a script's rule and are not: the old
+      reader was "right" there by reading a damaged model's values under the next model's name. On a generated set
+      with hand-written key order, brackets and braces inside strings and nested names, single deletions that cost
+      an untouched model fell from 4,276 (pushed) to 3,792 of 62,490, and ones that hand a model another object's
+      value rose from 271 to 377.
+    - **The 34 district copies** against the reader PR #315 had for a day, which read from each `"district"` key
+      to the next: 18 damage the array's own key (the decision below); 8 are two or three adjacent lines deleted
+      inside or right behind a district's `parts` (the next district reads exactly like one more part); 4 lost the
+      `}, {` between two districts or wrote the array's key twice with an empty one first, and now say so in the
+      log; 4 are a remark holding `} ]`.
   - **Also fixed:** the last model of a pack without its closing brace ran past the array to the end of the file,
     and a key it did not write was read from the arrays after it (a model without `scale` took the first
     `unitScales` rule's). It ends at the array's `]`.
-  - **No other object's values.** Where the recovery cannot tell a model's own array of objects from the next model
-    behind a `skel` that lost its `]`, the model ends there: what it did not write stays at its default instead of
-    taking the next model's skel and scale.
+  - **No other object's values.** A model whose `skel` lost its `]` ends at the next model, and the models after
+    it are read (the pushed version lost them). An object with a name key that really is an element of a model's
+    own array ends the model there: what the model did not write stays at its default.
+  - **What the log says now.** Beside the count of the recovery: how many `resourceName` keys stand inside a model
+    that already has one and were passed over (two models that lost the `}, {` between them read as one, and
+    nothing tells that from a name written twice); how many entries were not read because a quote of the name key
+    itself is lost; and, when no model was read, how many names the file holds outside a readable array (the
+    array's key misspelled, or written twice with the empty one first).
   - **Nothing without the array, and it says so.** A pack whose models array is renamed, absent or not an array
     (`"Models"`, `"models_off"`, a bare array, `"models": {`, `null`) loads no models when it parses. It loads none
-    when it is damaged either, and a warning gives the count of `resourceName` keys and asks whether the key is
-    misspelled. Reading models from wherever a name stands would bring a parked array to life on the day a comma
-    went missing.
+    when it is damaged either, and the warning above asks whether the key is misspelled. Reading models from
+    wherever a name stands would bring a parked array to life on the day a comma went missing.
   - **The district fallback uses the same function,** in place of the version it got earlier this day (PR #315),
     which read from each `"district"` key to the next. Three things change for it. Keys a hand wrote BEFORE the
     name stay with their district (they went to the district above). An object after the array that carries a
     `"district"` key is no district (it was one: an empty `districts` array beside a parked one loaded the parked
     districts). And a registry with no `"districts"` array recovers nothing and says why, where the earlier version
-    read districts out of such a file: 17 of the one-character damages of the live registry, and 70 of the double
-    ones, are damages to the array's own key and now load no district. The live registry, its backup and the corrupt
+    read districts out of such a file: 17 of the 19 one-character damages to the array's own key in the live
+    registry, and 70 of the 87 double ones, now load no district. The live registry, its backup and the corrupt
     backup of 2026-08-20 read the same.
-  - **Tests (`Tests/ModelFallbackStructureTests.cs`, 62 cases, and 13 more in
-    `Tests/DistrictRegistryParseTests.cs`; the suite is 3,096):** damages after which every model must come back
+  - **Tests (`Tests/ModelFallbackStructureTests.cs`, 85 cases, and 18 more in
+    `Tests/DistrictRegistryParseTests.cs`; the suite is 3,124):** damages after which every model must come back
     with its own pawn, scale, guids and position - seventeen to a three-model pack shaped like the Factory's, each
-    held to the way it is read (braces or recovery) - and files the recovery must leave alone: an unpaired bracket
-    in a model, five kinds of second name key in one model, brackets inside strings, arrays beside the models
-    array, a district with `parts`, and ten documents without a models array. 45 defects planted in the new
-    code are all caught.
-  - **Not handled:** a model WITHOUT a `resourceName` is not found in a damaged structure, and when the model above
-    it lost its closing brace as well, that model reads the keys it did not write from it. A model whose own
-    `"resourceName"` key is damaged is read under the next model's name with its own values, as before. A brace
-    typed as a bracket. Some double damages (32 of 5,819 on the district registry). See [Review-Backlog](docs/Review-Backlog.md).
+    held to the way it is read (braces or recovery), and the hand edits of the third review - and files the
+    recovery must leave alone: an unpaired bracket in a model, a second name key in one model (eight kinds, three
+    of them behind a brace in a string), remarks that quote a name, brackets inside strings, arrays beside the
+    models array, a district with `parts`, and ten documents without a models array. 68 defects planted in the final code are each caught by a failing test.
+  - **Not handled** (each measured or constructed, [Review-Backlog](docs/Review-Backlog.md)): a model WITHOUT a
+    `resourceName` is not found in a damaged structure; three adjacent lines deleted at a model's end (the next
+    model reads like an element of a mixed array); a bracket typed for a brace (123 give back one right model fewer (the damaged model itself) and 1,289 more, of 4,404 on the reference pack; 19 of 120 on the
+    district registry, the pushed version 51); a remark that carries further keys or stands inside a model above
+    its name; a quote lost in the last model, which still reads the arrays behind it; a file without line ends
+    that lost two quotes in one district.
 - **The regex readers take a number however it is spelled, and the fallback's `idleAltInterval` default is the
   schema's (2026-11-23).** Found by the review of the culture PR, whose fraction test passes because a plain decimal
   was always read right.
