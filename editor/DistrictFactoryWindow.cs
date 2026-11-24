@@ -169,7 +169,7 @@ public class DistrictFactoryWindow : EditorWindow
         foreach (var guid in AssetDatabase.FindAssets("Constructible"))
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
-            if (!path.EndsWith("Definition.asset")) continue;
+            if (!DefinitionCaches.MayHoldDefinitions(path)) continue;
             foreach (var o in AssetDatabase.LoadAllAssetsAtPath(path))
             {
                 if (o == null || o.name != name) continue;
@@ -222,18 +222,23 @@ public class DistrictFactoryWindow : EditorWindow
                 "The district's ConstructibleDefinitionName — e.g. Extension_Base_BreederReactor. The plugin matches the " +
                 "on-map district by this name. Remember the DATA side: the definition needs a renderable " +
                 "ConstructibleVisualAffinity and CLEARED Additional Visual Levels, or nothing renders at all."), cur.district);
-            var districts = GatherDistrictNames();
-            using (new EditorGUI.DisabledScope(districts.Length == 0))
-                if (GUILayout.Button(new GUIContent("Pick", districts.Length == 0 ? "No district definitions found in the project databases — type the name" : null), GUILayout.Width(70)))
+            if (GUILayout.Button(new GUIContent("Pick", "Read the project databases and browse district names, including unsaved additions."), GUILayout.Width(70)))
+            {
+                var r = GUILayoutUtility.GetLastRect();
+                var districts = FreshDistrictNames();
+                if (districts.Length == 0)
+                    status = "No district definitions found in the project databases. You can type the name directly.";
+                else
                 {
-                    var r = GUILayoutUtility.GetLastRect();
                     new StringDropdown(new AdvancedDropdownState(), districts, districts, "Districts", n =>
                     {
                         cur.district = n;
                         if (string.IsNullOrWhiteSpace(cur.resourceName)) cur.resourceName = DeriveResourceName(n);
+                        status = "";
                         Repaint();
                     }).Show(r);
                 }
+            }
         }
         cur.resourceName = EditorGUILayout.TextField(new GUIContent("Resource name",
             "Unique id — names the baked assets (<name>_ModelMesh / _DistrictMesh / _FxMesh). Letters, digits, '_' or '-' only."), cur.resourceName);
@@ -1143,20 +1148,21 @@ public class DistrictFactoryWindow : EditorWindow
     // Every district-flavoured ConstructibleDefinition name found in the project databases (vanilla SDK + ENC). District
     // definitions live as sub-assets of the Constructible*ExtensionDefinition database assets; their concrete types all
     // end in "DistrictDefinition" (ExtensionDistrictDefinition, ArtificialDepositDistrictDefinition, Wondrous…).
-    static string[] districtCache;
+    static string[] districtCache; static int districtCacheGeneration = -1;   // holds for one DefinitionCaches.Generation
+    static string[] FreshDistrictNames() { DefinitionCaches.Invalidate(); return GatherDistrictNames(); }   // what the Pick click reads
     static string[] GatherDistrictNames()
     {
-        if (districtCache != null) return districtCache;
+        if (districtCache != null && districtCacheGeneration == DefinitionCaches.Generation) return districtCache;
         var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var guid in AssetDatabase.FindAssets("ConstructibleCommonExtensionDefinition"))
+        foreach (var guid in AssetDatabase.FindAssets(DefinitionCaches.DistrictContainers))
         {
             var path = AssetDatabase.GUIDToAssetPath(guid);
-            if (!path.EndsWith(".asset")) continue;
+            if (!DefinitionCaches.MayHoldDefinitions(path)) continue;
             foreach (var o in AssetDatabase.LoadAllAssetsAtPath(path))
                 if (o != null && o.GetType().Name.EndsWith("DistrictDefinition") && !string.IsNullOrEmpty(o.name))
                     names.Add(o.name);
         }
-        districtCache = names.ToArray();
+        districtCache = names.ToArray(); districtCacheGeneration = DefinitionCaches.Generation;
         return districtCache;
     }
 }

@@ -291,6 +291,172 @@ public class GlbFuseTests
         Assert.Equal(1, wide.IslandsAfter);
         Assert.Equal(6, wide.VerticesAfter);
         Assert.Equal(2, wide.FacesRewound);
+        // closing a real gap is the weld doing its job, not damage: both plates stretch to the seam's midpoint x = 1.15
+        // (2 plates x 1.15 x 1 = 2.3 from 2 x 1 x 1 = 2), no face is lost, and the fuse says nothing about the weld
+        Assert.Equal(2.0, wide.SurfaceBefore, 5); Assert.Equal(2.3, wide.SurfaceAfter, 5);
+        Assert.Equal(0, wide.FacesFlattened); Assert.False(wide.WeldDamaged);
+        Assert.DoesNotContain(wide.Warnings, w => w.Contains("flattened"));
+    }
+
+    // a square tube along X (a davit, a chain link's bar): `rings` segments of four sides, `w` wide, `len` long, open ends
+    static Part Tube(string name, float len, float w, int rings)
+    {
+        var p = new List<float>(); var idx = new List<int>();
+        for (int r = 0; r <= rings; r++)
+        {
+            float x = len * r / rings;
+            p.AddRange(new[] { x, 0, 0,  x, w, 0,  x, w, w,  x, 0, w });
+        }
+        for (int r = 0; r < rings; r++) for (int k = 0; k < 4; k++)
+        {
+            int a = r * 4 + k, b = r * 4 + (k + 1) % 4, c = a + 4, d = b + 4;
+            idx.AddRange(new[] { a, c, b,  b, c, d });
+        }
+        return new Part { Name = name, Positions = p.ToArray(), Indices = idx.ToArray() };
+    }
+
+    [Fact]
+    public void A_weld_wider_than_a_part_flattens_it_and_the_fuse_says_so()
+    {
+        // RSS Centurion, 2026-11-24: the dial at 2.288 permille welded group K within 2.09, its davits are tubes 5.5 across with
+        // ring corners closer than that, and the davits were gone from the fused ship. A tube 100 long, 1 wide, a ring every 10:
+        // surface = 4 sides x 100 x 1 = 400, faces = 10 rings x 4 sides x 2 = 80.
+        byte[] tube = BuildGlb(Tube("Davit", 100, 1, 10));
+
+        // 0.02 x 100 = 2: wider than a ring (1 across, 1.414 corner to corner), narrower than the 10 between rings.
+        // Every ring becomes one point, every face keeps two corners on one point: the tube is a line.
+        var wide = GlbDisconnectedParts.FuseNodes(tube, new[] { 0 }, 0.02);
+        Assert.Equal(80, wide.SourceTriangles); Assert.Equal(80, wide.OutputTriangles);   // the triangles are all still there...
+        Assert.Equal(400.0, wide.SurfaceBefore, 3);
+        Assert.Equal(0.0, wide.SurfaceAfter, 9);                                           // ...with nothing left to see
+        Assert.Equal(80, wide.FacesFlattened);
+        Assert.Contains("0 face(s) smaller than the weld kept collapsed", wide.Details[0]);   // the summary's count sees none of it: no face has all THREE corners on one point
+        Assert.True(wide.WeldDamaged);
+        Assert.Contains(wide.Warnings, w => w.Contains("flattened 80 of 80 face(s)") && w.Contains("kept 0% of its surface") && w.Contains("Set the weld to 0"));
+
+        // 0.005 x 100 = 0.5: a weld that is on but narrower than the tube harms nothing, and says nothing
+        var narrow = GlbDisconnectedParts.FuseNodes(tube, new[] { 0 }, 0.005);
+        Assert.Equal(400.0, narrow.SurfaceAfter, 3); Assert.Equal(0, narrow.FacesFlattened); Assert.False(narrow.WeldDamaged);
+        Assert.DoesNotContain(narrow.Warnings, w => w.Contains("flattened"));
+
+        // at 0 the tube is untouched
+        var exact = GlbDisconnectedParts.FuseNodes(tube, new[] { 0 }, 0.0);
+        Assert.Equal(400.0, exact.SurfaceBefore, 3); Assert.Equal(400.0, exact.SurfaceAfter, 3);
+        Assert.Equal(0, exact.FacesFlattened); Assert.False(exact.WeldDamaged);
+        Assert.DoesNotContain(exact.Warnings, w => w.Contains("flattened"));
+    }
+
+    [Fact]
+    public void One_part_flattened_inside_a_large_group_is_named()
+    {
+        // Review of the first cut: the thresholds are shares of the GROUP, so a davit beside a deck passed in silence.
+        // A deck of 100 x 100 unit cells (20,000 faces, surface 10,000) at y = -5, and a tube 10 long, 0.1 wide, a ring
+        // every 1 (80 faces, surface 4 x 10 x 0.1 = 4). Weld 0.002 x 100 = 0.2: wider than the tube's rings (0.141 corner
+        // to corner), narrower than a deck cell and than the 1 between rings. 80 of 20,080 faces is 0.4%, 4 of 10,004 is 0.04%.
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(Grid("Deck", 100, -5), Tube("Davit", 10, 0.1f, 10)), new[] { 0, 1 }, 0.002);
+        Assert.Equal(20080, r.SourceTriangles);
+        Assert.Equal(80, r.FacesFlattened);
+        Assert.Equal(10004.0, r.SurfaceBefore, 2); Assert.Equal(10000.0, r.SurfaceAfter, 2);
+        Assert.Equal(2, r.PartsMeasured); Assert.Equal(new[] { "Davit" }, r.PartsFlattened);
+        Assert.True(r.WeldDamaged);
+        Assert.Contains(r.Warnings, w => w.Contains("flattened 80 of 20,080 face(s)") && w.Contains("1 of 2 part(s) lost at least half their faces or their surface ('Davit')"));
+
+        // the same pair at 0: nothing flattened, no part named
+        var exact = GlbDisconnectedParts.FuseNodes(BuildGlb(Grid("Deck", 100, -5), Tube("Davit", 10, 0.1f, 10)), new[] { 0, 1 }, 0.0);
+        Assert.Equal(0, exact.FacesFlattened); Assert.Empty(exact.PartsFlattened); Assert.False(exact.WeldDamaged);
+    }
+
+    [Fact]
+    public void Surface_lost_without_a_flattened_face_is_reported_too()
+    {
+        // two unit plates overlapping by 0.2 (A 0..1, B 0.8..1.8), weld 0.2 x 1.8 = 0.36: A's right edge and B's left meet at
+        // 0.9, each plate is 0.9 wide, 2.0 becomes 1.8 - a tenth of the surface gone and every face still has area
+        var r = GlbDisconnectedParts.FuseNodes(BuildGlb(Quad("A", 0, 1, 0, 1, 0), Quad("B", 0.8f, 1.8f, 0, 1, 0)), new[] { 0, 1 }, 0.2);
+        Assert.Equal(2.0, r.SurfaceBefore, 5); Assert.Equal(1.8, r.SurfaceAfter, 5);
+        Assert.Equal(0, r.FacesFlattened); Assert.Empty(r.PartsFlattened);   // each plate lost a tenth, not half
+        Assert.True(r.WeldDamaged);
+        Assert.Contains(r.Warnings, w => w.Contains("flattened 0 of 4 face(s)") && w.Contains("kept 90% of its surface"));
+    }
+
+    [Fact]
+    public void A_face_already_flat_at_weld_zero_is_not_the_dials_doing()
+    {
+        // a 5 x 5 plate and, above it, a sliver: two corners ONE FLOAT apart (2 and the next float, 2.4e-7), the third 0.7 away.
+        // The coincident weld of dial 0 (a millionth of the 5-long group = 5e-6) joins the two corners: the sliver is flat
+        // at 0. Review of the first cut: a dial typed at 0.0005 permille (5e-7 of the length, UNDER that millionth) wrote
+        // the bytes of weld 0 and was told the weld had damaged the group and to set it to 0.
+        float next = BitConverter.ToSingle(BitConverter.GetBytes(BitConverter.ToInt32(BitConverter.GetBytes(2f), 0) + 1), 0);
+        Assert.True(next > 2f && next - 2f < 1e-6f);
+        var sliver = new Part { Name = "Sliver", Positions = new[] { 2f, 2f, 1f,  next, 2f, 1f,  2.5f, 2.5f, 1f }, Indices = new[] { 0, 1, 2 } };
+        byte[] src = BuildGlb(Quad("Plate", 0, 5, 0, 5, 0), sliver);
+        var zero = GlbDisconnectedParts.FuseNodes(src, new[] { 0, 1 }, 0.0);
+        var tiny = GlbDisconnectedParts.FuseNodes(src, new[] { 0, 1 }, 5e-7);
+        var real = GlbDisconnectedParts.FuseNodes(src, new[] { 0, 1 }, 0.1);   // 0.5: still short of the sliver's third corner (0.707) and of the plate above which it sits (1)
+        Assert.Equal(zero.Bytes, tiny.Bytes);
+        foreach (var r in new[] { zero, tiny, real })
+        {
+            Assert.Equal(0, r.FacesFlattened); Assert.Empty(r.PartsFlattened); Assert.False(r.WeldDamaged);
+            Assert.DoesNotContain(r.Warnings, w => w.Contains("flattened"));
+        }
+    }
+
+    [Fact]
+    public void Baseline_slivers_do_not_count_as_area_lost_to_the_dial()
+    {
+        var sliver = new Part
+        {
+            Name = "Sliver",
+            Positions = new[] { 0f, 0f, 100f, 0.00005f, 0f, 100f, 0f, 1f, 100f },
+            Indices = new[] { 0, 1, 2 }
+        };
+        byte[] src = BuildGlb(Quad("Plate", 0, 0.0002f, 0, 1, 0), sliver);
+        var zero = GlbDisconnectedParts.FuseNodes(src, new[] { 0, 1 }, 0.0);
+        // Test both sides of the distance floor. Neither weld changes the baseline geometry.
+        foreach (double dial in new[] { 5e-7, 1.1e-6 })
+        {
+            var r = GlbDisconnectedParts.FuseNodes(src, new[] { 0, 1 }, dial);
+            Assert.Equal(zero.Bytes, r.Bytes);
+            Assert.False(r.WeldDamaged);
+            Assert.Equal(zero.SurfaceAfter, r.SurfaceBefore);
+            Assert.Equal(r.SurfaceBefore, r.SurfaceAfter);
+            Assert.Equal(2, r.FacesMeasured);
+            Assert.Equal(1, r.PartsMeasured);
+        }
+    }
+
+    [Fact]
+    public void The_weld_measurement_reaches_the_window_through_FuseGroups_one_distance_per_group()
+    {
+        // the window calls FuseGroups. Two groups at one dial (0.02): the tube is 100 long and welds within 2 (flattened);
+        // the unit plate welds within 0.02 (untouched) - the distance is each GROUP's, which is how one dial hit some groups only
+        byte[] src = BuildGlb(Tube("Davit", 100, 1, 10), Quad("Plate", 0, 1, 0, 1, 50));
+        GlbDisconnectedParts.FuseGroups(src, new List<GlbDisconnectedParts.FuseJob> {
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 0 }, Name = "Fused_A_Davit" },
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 1 }, Name = "Fused_B_Plate" } }, 0.02, out var results);
+        Assert.True(results[0].WeldDamaged); Assert.Equal(80, results[0].FacesFlattened); Assert.Equal(new[] { "Davit" }, results[0].PartsFlattened);
+        Assert.Equal(400.0, results[0].SurfaceBefore, 3); Assert.Equal(0.0, results[0].SurfaceAfter, 9);
+        Assert.False(results[1].WeldDamaged); Assert.Equal(0, results[1].FacesFlattened); Assert.Empty(results[1].PartsFlattened);
+        Assert.Equal(1.0, results[1].SurfaceBefore, 6); Assert.Equal(1.0, results[1].SurfaceAfter, 6);
+    }
+
+    [Fact]
+    public void Weld_damage_is_a_hundredth_of_the_faces_or_of_the_surface_and_never_at_weld_zero()
+    {
+        Assert.True(GlbDisconnectedParts.WeldDamaged(0.001, 20080, 80, 10004.0, 10000.0, 1));    // one part mostly gone decides, however small its share
+        Assert.False(GlbDisconnectedParts.WeldDamaged(0.001, 20080, 80, 10004.0, 10000.0, 0));
+        Assert.False(GlbDisconnectedParts.WeldDamaged(0.0, 20080, 80, 10004.0, 10000.0, 1));     // still never at weld 0
+        Assert.True(GlbDisconnectedParts.PartMostlyGone(80, 40, 4.0, 4.0));                       // half its faces
+        Assert.False(GlbDisconnectedParts.PartMostlyGone(80, 39, 4.0, 2.1));
+        Assert.True(GlbDisconnectedParts.PartMostlyGone(80, 0, 4.0, 2.0));                        // half its surface
+        Assert.False(GlbDisconnectedParts.PartMostlyGone(0, 0, 0.0, 0.0));                        // a part with no faces is not "gone"
+        Assert.False(GlbDisconnectedParts.PartMostlyGone(1, 0, 0.0, 0.0));                        // nor one whose only face never had area
+        Assert.False(GlbDisconnectedParts.WeldDamaged(0.0, 100, 100, 1.0, 0.0));        // weld 0: nothing to lower, never a warning
+        Assert.True(GlbDisconnectedParts.WeldDamaged(0.001, 100, 1, 1.0, 1.0));         // 1 face in 100
+        Assert.False(GlbDisconnectedParts.WeldDamaged(0.001, 101, 1, 1.0, 1.0));        // under a hundredth
+        Assert.True(GlbDisconnectedParts.WeldDamaged(0.001, 100, 0, 100.0, 99.0));      // a hundredth of the surface lost
+        Assert.False(GlbDisconnectedParts.WeldDamaged(0.001, 100, 0, 100.0, 99.5));
+        Assert.False(GlbDisconnectedParts.WeldDamaged(0.001, 100, 0, 100.0, 115.0));    // surface gained: a closed gap, not damage
+        Assert.False(GlbDisconnectedParts.WeldDamaged(0.001, 0, 0, 0.0, 0.0));          // nothing fused
     }
 
     [Fact]
@@ -335,6 +501,8 @@ public class GlbFuseTests
         var g = Read(r.Bytes);
         Assert.Equal(3, TriangleCount(g, g.Node("A_Fused")));
         Assert.Equal(5, VertexCount(g, g.Node("A_Fused")));                       // 4 plate corners + the rivet's one welded vertex
+        Assert.Equal(1, r.FacesFlattened); Assert.True(r.WeldDamaged);            // 1 face of 3 gone: the fuse warns
+        Assert.Contains(r.Warnings, w => w.Contains("flattened 1 of 3 face(s)"));
 
         var exact = GlbDisconnectedParts.FuseNodes(BuildGlb(Quad("A", 0, 1, 0, 1, 0), rivet), new[] { 0, 1 }, 0.0);
         Assert.Equal(2, exact.IslandsAfter);                                      // at 0 nothing collapses: the rivet is its own open sheet

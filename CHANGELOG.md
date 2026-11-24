@@ -128,6 +128,52 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     district registry, the pushed version 51); a remark that carries further keys or stands inside a model above
     its name; a quote lost in the last model, which still reads the arrays behind it; a file without line ends
     that lost two quotes in one district.
+- **Model Fuser: a weld that flattens parts says so (2026-11-24).** Reported by the user on the RSS Centurion, a
+  pre-dreadnought of 2,164 parts in 23 fuse groups: "something weird is going on with Group U after fusing, where it
+  gets all messed up", then "group K is missing", then "the chains are also missing".
+  - **The cause was a dial nobody had seen.** The fuse report's first lines: `weld: 2.288 permille`. The 23 fuse
+    reports before it on the same machine, Teutonic to Hunley, all say `weld: 0`. The slider sits below the 600-pixel
+    preview, is serialized with the window, and so carries from ship to ship. The user fused a second time while this
+    was being diagnosed and got the same file: the dial was still out of view.
+  - **Why it hit small parts hardest.** The weld distance is the dial times the **group's** longest extent (the
+    tooltip and the report said "the model's"). Group U is small parts spread along the whole ship: 5,252 long, so it
+    welded within 12.0, and its parts are 11.8 thick. Group K, the davits: 2.09 against tubes 5.5 across.
+  - **Measured, weld 0 against 2.288‰, same source, same groups** (surface = sum of triangle areas as written). C,
+    the chains: 156,344 to 0. K: 43,094 to 1,532. U, as grouped when reported (111 parts): 14,324,974 to 13,077,506
+    with 33,431 of 38,205 faces at zero area. Of the 23 groups, 20 lost faces, four kept no surface at all (C, J, R,
+    W), three were untouched (E, F, Z: 0 faces, 100.00%). Headless renders of both outputs: clean at 0; at 2.288‰ the
+    user's screenshot, shards along the casemates and no railings, davits or rigging. The fuse at 0 took 4 s for the
+    23 groups, at 2.288‰ 143 s. The user then fused at 0 (report: `weld: 0`, 0 faces collapsed) and confirmed the
+    ship.
+  - **The count that was there understated it.** The summary's "face(s) smaller than the weld kept collapsed" said 652
+    for K. It counts a face whose three corners weld into one class; a face has no area as soon as two do, and that was
+    7,148 of K's 7,212.
+  - **The change** does not alter what a fuse writes. `GlbDisconnectedParts` measures each group's surface on the
+    authored positions and on the welded ones (the positions the writer uses) and counts the faces that had area and
+    have none, per group and per part; faces two corners of which coincide already (flat at dial 0) are left out.
+    `WeldDamaged` is true for a non-zero dial when a hundredth of the faces are flattened, a hundredth of the surface
+    is lost, or one part lost half its faces or half its surface, and the group then carries a warning naming up to
+    five such parts. Surface gained is not a sign: two plates pulled together across a real gap both grow. The window
+    shows a warning box with **Set to 0** under the dial whenever it is above 0, names the weld on the Fuse button, and
+    leads the status with the groups concerned, the six worst first (worst = the smaller of surface kept and faces
+    kept).
+  - **A review by a second agent changed it before the push.** The first cut judged by shares of the group only: a
+    davit of 80 faces beside a 20,000-face deck was flattened whole and passed in silence (0.4% of the faces, 0.04%
+    of the surface) - hence the per-part rule. It blamed the dial for faces flat at weld 0, so a dial typed below a
+    millionth wrote weld 0's bytes and was told to set the weld to 0 - hence the coincident exclusion. It sorted
+    "worst" by surface alone, which put a group stretched into shards last. And its wording said parts "thinner than
+    the distance", which K contradicts (2.09 against 5.5 across): what matters is the spacing of a part's vertices.
+  - **Proved by:** the final guard on the real ship, on the groups as the user had left them by then (U 117 parts):
+    20 groups flagged at 2.288‰ with a warning each, 409,086 of 472,105 faces flattened, parts mostly gone in 17 of
+    them (all 239 of C, all 14 of K, 116 of 117 of U); none flagged at 0, no face and no part. Fixtures: a tube
+    welded wider than itself (80 of 80 faces where "collapsed" says 0), narrower than itself and at 0; the davit
+    beside the deck; two overlapping plates (a tenth of the surface, no face); a sliver flat at 0; the gap test
+    (surface 2.0 to 2.3, no warning); two groups through `FuseGroups`, one distance each. Three planted defects (a
+    mostly-gone part not deciding, coincident faces counted, the surface branch removed) fail two tests each.
+    **Not done:** the dial still scales with the group and still persists between ships; a per-group or absolute
+    distance, or a reset on a new file, would be a change to the fuse's inputs and is left for a decision. The window
+    itself was compiled against Unity's assemblies, not opened; its dial label is longer than the label column and is
+    probably cut off there, as the old one was.
 - **The regex readers take a number however it is spelled, and the fallback's `idleAltInterval` default is the
   schema's (2026-11-23).** Found by the review of the culture PR, whose fraction test passes because a plain decimal
   was always read right.
@@ -4728,6 +4774,54 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   [docs/District-Visuals.md](docs/District-Visuals.md).
 
 ## Authoring tools
+
+- **A definition made in the editor is in the Pick lists at once, and a new Model Factory entry starts on Keep
+  Model (2026-11-24).** Reported from the Model Factory: a pawn definition made that session
+  (`Era5_Common_SemiSubmersibleTorpedoBoats_01`, added to `PresentationPawnDefinition_Era5_ENC.asset`) was in the
+  Pawn description **Pick** list only after Unity was restarted.
+  - **The defect:** the list was read from the databases once and kept in a static field until the next script
+    reload or restart. Four more kept reads had the same life: the Resize Lab's pawn list, the Sound window's pawn
+    list, the District Factory's district list, and the per-pawn "is this a boat" answer. A pawn whose profile was
+    set to Boat after the first ask kept the first answer. The pre-bake check and **Validate pack** read the same
+    pawn list, so a new pawn drew the warning "matches no known unit descriptor".
+  - **The fix:** a kept read is valid for one generation (`editor/DefinitionCaches.cs`). The generation moves when
+    Unity imports, deletes or moves an `.asset` (saving an edited database is an import), and on every Pick click,
+    pre-bake check and Validate pack, so a definition that is added but not saved yet is known too. The Formation
+    Override window was never affected: it reads its unit list on every repaint.
+  - **Who asks the boat answer when:** the Animation Lab on every draw, so its ground plane follows a saved change.
+    The Model Factory's preview asks when a preview is loaded (an entry selected, a bake), so its water follows at
+    the next one. That timing is older than this change and was left.
+  - **Review fixes (same day, two reviews by execution and by reading):**
+    - The asset hook first judged a file by its name. `AssetDatabase.FindAssets` also matches the names of
+      sub-assets, so the scans read a database whose file name lacks the word; the hook did not see it saved, and
+      its lists stayed as they were until a Pick click. No file in the ENC project has that shape (all 31 carry the
+      word in the name). The hook now counts every `.asset`, and the five scans filter their hits with the same
+      function, so the hook sees every file a scan reads. The price: a bake's own `.asset` files move the generation
+      too, and the next read scans again.
+    - The pre-bake check and Validate pack kept the old list for a pawn that was added and not saved when no Pick
+      click had happened. They now read the databases as the Pick click does.
+    - The boat answers were stored under case-insensitive keys while the scan compares names exactly: a name asked
+      in the wrong case first got "no boat", and the right spelling was then handed that answer. Older than this
+      change; the keys are exact now.
+    - Each Pick button now reads through one function per window, and the drill calls that function.
+  - **Cost:** the asset hook implements only `OnPostprocessAllAssets`. Adding such a hook to a scratch project with
+    one texture and one native asset reimported neither; a control hook with `OnPreprocessTexture` reimported the
+    texture. One Pick click's re-read took 11 to 21 ms over some forty drill runs on 1,404 stand-in definitions in
+    26 databases. The ENC project holds 1,361 pawn definitions in 26 databases, and its definitions are far larger
+    than the stand-ins; the re-read was not timed there.
+  - **Keep Model:** a new entry and **Reset** start with Normals on `KeepModel`; it was `Recalculate`. Every window
+    that makes a new unit entry uses the Factory's new-entry seam: the Model Factory, the Animation Lab (an animated
+    bake ignores the setting, "Make static" brings it back), and the Retexture and Sound windows when they create an
+    entry. A registry entry stored without `normalsMode` still reads `Recalculate`, the setting it was baked with,
+    and saved entries keep their value. A form that is already open on `<New>` keeps what it shows until **Reset**.
+    The District Factory still starts on Recalculate.
+  - **Held by:** `bash tools/definition_caches_unity_drill.sh` (the real readers in a temporary Unity project, see
+    [Testing](docs/Testing.md)) and `Tests/DefinitionCachesTests.cs` for the path rule. Not driven: the click on a
+    Pick button, and that the button, the pre-bake check and Validate pack name the fresh-read function (four
+    buttons and two checks, read in the source). Left open: [Review-Backlog](docs/Review-Backlog.md).
+  - **District Factory:** Pick stays available when the kept list is empty, so a fresh read can find the first
+    unsaved definition. Health checks now find definitions in suffixed database assets such as
+    `ConstructibleCommonExtensionDefinitionENC.asset`, including their visual-level and affinity checks.
 
 - **FUSION KEEPS EXPOSED VERTICAL JOINS FACING OUTWARD (2026-10-04).** The Protected Cruiser's starboard wall
   beside the stairs retained all its triangles but the parity pass reversed 21 faces of `Material2_2006_Part_004`
