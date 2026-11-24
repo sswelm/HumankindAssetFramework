@@ -3076,6 +3076,25 @@ The `EXPORTS` line counts them (`pixelImages`), a `PIXELS <job>` line names the 
 both images by pixel and channel. NOT modelled, left by name: Rigid links (`treadmode=links`), and the stage 5 passes on a
 polygon tread. NOT checked: nothing ran in Unity or in the game - the Bradley's C# rig has not been looked at there.
 
+**Wheel centre (2026-11-23, `wheelcentre=area`, PR #314).** Eight fixtures: `fx_r_wheel_centre` (a three-bladed screw whose
+box centre lies 0.19 off its shaft; a fan whose 1 x 1 hub is the anchor with one small blade beside it, the blade listed
+twice and weighed once; a main rotor of a triangular plate that must keep its hub), `fx_r_wheel_centre_box` (the same model
+without the tag: no line, the anchors' box centres), `fx_r_wheel_centre_x` and `_z` (the axle forced: the pivot keeps the box
+centre along it), `fx_r_wheel_centre_flat` (a wheel of one zero-area triangle: the `*** WARNING`, the box centre kept); and
+three with the tag on LIVE TRACKS, where the four wheels the tread's wrap bones copy (sprocket, idler, first and last road
+wheel; all four wheels of the pitched belts) each carry an off-centre shard so the bone leaves its anchor's box centre:
+`fx_r_tracks_centre` (the nine carriers), `fx_r_tracks_hybrid_centre` (the conveyor's link bones), `fx_links_centre` (rigid
+links). The drill requires all eight equal through the export and the C#'s own note of the branch. It states parity only -
+that the port repeats the script. That the bone lands ON the shaft is held by `Tests/VehicleRigWheelCentreTests.cs` (the C#
+stages on a screw of 2, 3, 4, 5 and 7 blades); `WheelCentreTests` in `Tests/test_vehicle_rig_math.py` holds the script's
+helper (its centroid). The Blender drill executes the bone block. A separate batch-mode Unity check loaded the saved
+Hunley recipe with `wheelCentre: 1` through `VehicleLabWindow.GenerateHeadless`. The window and recipe reader produced
+the same arguments, and the C# export reported (0.005, 6.006, 0.312) in the status box.
+
+The concave-face cases use an L-shaped polygon with an area centroid of (1.5, 0, 1) in the wheel's plane. Both
+winding orders give that centroid. The original triangle fan gave (1.75, 0, 1.167) by counting area in the notch.
+A native Blender rig of a `.blend` containing the L-shaped wheel exported at the corrected pivot.
+
 Review of PR #291 (2026-11-17): composition provenance follows both source imports through material gathering, including an FBX
 merged into a GLB job. Ordinary source PNGs still require identical bytes; the job's filename does not grant a pixel-only exception.
 Five regression cases cover source-byte preservation, alternate composition encodings, a merged FBX, one changed pixel channel,

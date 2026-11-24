@@ -1130,6 +1130,18 @@ tracks_static = len(argv) > 16 and argv[16].strip() == "1"
 # between links (every face belongs to one link, the boundary edges are split), every link owns a bone (no shuttles),
 # and the clip runs one full circuit, so every link ends where it began and nothing snaps.
 tread_links = (not tracks_static) and any(a.strip() == "treadmode=links" for a in argv)
+# WHEEL CENTRE (tagged, 2026-11-23): "wheelcentre=area" = each wheel bone sits at its cluster's SURFACE CENTROID across
+# the axle instead of the anchor's box centre (absent = the box centre, as before). The H.L. Hunley's three-bladed
+# screw, marked Wheel, spun about a point 0.072 off its shaft - more than the hub's radius of 0.067: the box of a
+# shape with an ODD number of blades is not centred on its axis (one blade points up, two point down and out). The
+# area-weighted centroid of a shape that maps onto itself under a turn about its axle lies ON that axle whatever the
+# blade count, and does not depend on how finely the surface is cut into faces (measured on the Hunley: 0.006 off).
+# Only the bone's pivot moves: the clustering, the axle direction, the rolling-contact radius and the tread's wheel
+# geometry keep reading the box. What reads the BONE follows it: the tread's wrap bones (copies of wheel bones) and the
+# spoke-symmetry snap of a ground wheel's or idler's degrees (_wheel_symmetry measures the rim about the bone's head).
+# The centroid is per CLUSTER and the clustering is unchanged: a propeller cut into separate blades is one wheel per
+# blade (the biggest part anchors, the other blades' boxes lie outside its reach) - fuse it into one part first.
+wheel_centre_area = any(a.strip() == "wheelcentre=area" for a in argv)
 # WAVE ROCK (argv[17] amplitude in degrees, argv[18] cycle length in frames; canoe finding 2026-07-31): a slow
 # idle sway for FLOATING units. Authored on a dedicated "Hull" bone (child of Root, carrying every part that
 # would otherwise skin to Root) so the engine's root anchor stays identity. Rotation-only by construction —
@@ -1658,6 +1670,40 @@ for grp, is_tail in ((rotor_names, False), (tailrotor_names, True)):
           % ("tail" if is_tail else "main", len(grp), hub_c.x, hub_c.y, hub_c.z, axle.x, axle.y, axle.z, axle_src))
     print("VEHICLE rotor hub: %d part(s) -> bone at hub (%.2f,%.2f,%.2f), axle=%s (least-spread of centres)" % (len(grp), hub_c.x, hub_c.y, hub_c.z, tuple(axle)))
 
+def _area_centroid(names):
+    # The area-weighted centroid of the named parts' surfaces in world space, as three Python floats; None when the
+    # surface has no area (or a non-finite one). Use Blender's loop triangles, as the exporter does, so concave faces
+    # count only the area inside their boundary. The C# port uses the same tessellation and double sums.
+    _sa = 0.0; _sx = 0.0; _sy = 0.0; _sz = 0.0
+    _seen = set()
+    for _n in names:
+        if _n in _seen:     # a part listed twice is ONE surface (review 2026-11-23: it weighed double and moved the pivot)
+            continue
+        _seen.add(_n)
+        _o = find(_n)
+        _mw = _o.matrix_world
+        _pts = [_mw @ _v.co for _v in _o.data.vertices]
+        _o.data.calc_loop_triangles()
+        for _tri in _o.data.loop_triangles:
+            _ia, _ib, _ic = _tri.vertices
+            _a, _b, _c = _pts[_ia], _pts[_ib], _pts[_ic]
+            _ax, _ay, _az = _a.x, _a.y, _a.z
+            _bx, _by, _bz = _b.x, _b.y, _b.z
+            _cx, _cy, _cz = _c.x, _c.y, _c.z
+            _ux = _bx - _ax; _uy = _by - _ay; _uz = _bz - _az
+            _vx = _cx - _ax; _vy = _cy - _ay; _vz = _cz - _az
+            _nx = _uy * _vz - _uz * _vy
+            _ny = _uz * _vx - _ux * _vz
+            _nz = _ux * _vy - _uy * _vx
+            _w = math.sqrt(_nx * _nx + _ny * _ny + _nz * _nz)   # twice the triangle's area: the factor cancels
+            _sa = _sa + _w
+            _sx = _sx + _w * (_ax + _bx + _cx)
+            _sy = _sy + _w * (_ay + _by + _cy)
+            _sz = _sz + _w * (_az + _bz + _cz)
+    if not (_sa > 0.0) or math.isinf(_sa):
+        return None
+    return (_sx / (3.0 * _sa), _sy / (3.0 * _sa), _sz / (3.0 * _sa))
+
 # armature: Root at origin + ONE bone per wheel cluster (tail along the axle => local Y IS the axle) + Turret
 arm_data = bpy.data.armatures.new("VehicleRig")
 arm = bpy.data.objects.new("VehicleRig", arm_data)
@@ -1707,7 +1753,20 @@ for i, cl in enumerate(clusters):
         # helicopters turn COUNTER-clockwise, so the main-rotor bone takes the NEGATED axle — flips the donor
         # spin (and the own-clip spin with it). Statics unaffected (binds compensate). Wheels keep +axle.
         _dirn = -1.0 if cl.get("is_rotor") else 1.0
-        eb.tail = cl["c"] + ax * _dirn * max(0.05, max(cl["s"]) * 0.25)
+        _wpiv = cl["c"]
+        if wheel_centre_area and not cl.get("is_rotor"):
+            # WHEEL CENTRE = area: the pivot leaves the box centre for the cluster's surface centroid, ACROSS the axle
+            # only - along the axle the box centre stays (a turn about the axle does not care where on it the bone sits).
+            _wac = _area_centroid(cl["names"])
+            if _wac is None:
+                # "*** WARNING": the shape the Lab's status box surfaces - a setting that silently did nothing is the line to read
+                print("VEHICLE *** WARNING: wheel centre: Wheel_%02d has no surface area - the box centre kept" % i)
+            else:
+                _wpiv = Vector(tuple(cl["c"][_k] if ax[_k] != 0.0 else _wac[_k] for _k in range(3)))
+                print("VEHICLE wheel centre: Wheel_%02d at its surface centroid (%.3f,%.3f,%.3f), %.3f from the box centre"
+                      % (i, _wpiv.x, _wpiv.y, _wpiv.z, (_wpiv - cl["c"]).length))
+                eb.head = _wpiv
+        eb.tail = _wpiv + ax * _dirn * max(0.05, max(cl["s"]) * 0.25)
     eb.parent = eb_body
     cluster_bones.append(eb.name)
     wheel_axes[eb.name] = tuple(ax)
