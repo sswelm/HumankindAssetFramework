@@ -56,7 +56,7 @@ namespace HumankindAssetFramework
                         foreach (Match rm in Regex.Matches(arr.Groups[1].Value, "\\{[^{}]*\\}", RegexOptions.Singleline))
                         {
                             var mm = Regex.Match(rm.Value, "\"match\"\\s*:\\s*\"([^\"]*)\"");
-                            var ms = Regex.Match(rm.Value, "\"scale\"\\s*:\\s*(-?[\\d.eE+]+)");
+                            var ms = Regex.Match(rm.Value, "\"scale\"\\s*:\\s*" + JsonFloat);
                             if (!mm.Success || !ms.Success) continue;
                             var key = mm.Groups[1].Value.Trim();
                             if (key.Length == 0) continue;

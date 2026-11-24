@@ -15,8 +15,7 @@ namespace HumankindAssetFramework.Tests
     //
     // NOTE ON WHAT THESE CAN ASSERT: every GUID field routes through MakeGuid, which needs the live game, so
     // outside it every guid is null. That is why the accept/reject gate (`Usable`) is deliberately separate from
-    // the two extractors — tests exercise what each path EXTRACTS. The fragile part of the fallback is the
-    // index alignment of its fields, and that is exactly what the parity test below covers.
+    // the two extractors. Tests compare what each path extracts and check that missing values stay in their own entry.
     public class DistrictRegistryParseTests
     {
         public DistrictRegistryParseTests()
@@ -42,9 +41,7 @@ namespace HumankindAssetFramework.Tests
 
         // ---- THE PARITY ORACLE: the fallback must recover what the object parse extracts ----
 
-        // The regex path is index-aligned, which is the one thing that can silently go wrong in it — a field
-        // matched in the wrong order attributes entry B's settings to entry A. Comparing the two extractors on the
-        // same document is the only check that actually pins that.
+        // Both extractors should agree on the values from a well-formed document.
         [Fact]
         public void RegexRecovery_MatchesTheObjectParse_FieldForField()
         {
@@ -105,6 +102,70 @@ namespace HumankindAssetFramework.Tests
         {
             Assert.Equal(new[] { "Extension_A", "Extension_B" },
                          DistrictInject.ParseDistrictsRaw(BrokenDoc).Select(e => e.district).ToArray());   // 0 before the fallback existed
+        }
+
+        [Fact]
+        public void RegexRecovery_MissingFieldsStayAtTheirDefaultsAndLaterEntriesKeepTheirValues()
+        {
+            const string doc = @"{ ""districts"": [
+                { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"" },
+                { ""footprintMeshFlatHeight"": 5e-1, ""district"": ""B"", ""footprintMesh"": true, ""groundMaterial"": ""Stone }"" },
+                { ""district"": ""C"", ""footprintMeshFlatHeight"": 0.75";
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var districts = DistrictInject.ParseDistrictsRaw(doc);
+            Assert.Equal(new[] { "A", "B", "C" }, districts.Select(d => d.district));
+            Assert.Equal(new[] { 0.17f, 0.5f, 0.75f }, districts.Select(d => d.footprintMeshFlatHeight));
+            Assert.Equal(new[] { false, true, false }, districts.Select(d => d.footprintMesh));
+            Assert.Equal(new[] { "", "Stone }", "" }, districts.Select(d => d.groundMaterial));
+        }
+
+        // WHEN THE BRACES CANNOT BE TRUSTED. One object per district is found by counting braces outside strings, so a
+        // closing quote or brace missing in ONE district swallowed every district after it, and a damaged wrapper left
+        // nothing to count: 1 of 3 and 0 of 3 districts recovered (measured 2026-11-24), where the reader before it
+        // named all three. Each row is one such damage; all three districts must come back, each with its own values.
+        public static IEnumerable<object[]> DamagedStructures()
+        {
+            const string a = @"{ ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"", ""hexSculpt"": ""Raised"", ""footprintMeshFlatHeight"": 0.3 }";
+            const string b = @"{ ""district"": ""B"", ""fxMeshGuid"": ""1,2,3,4"", ""footprintMeshFlatHeight"": 0.5 }";   // no hexSculpt: it must stay empty
+            const string c = @"{ ""district"": ""C"", ""fxMeshGuid"": ""1,2,3,4"", ""hexSculpt"": ""Sunk"", ""footprintMeshFlatHeight"": 0.7 }";
+            yield return new object[] { "a closing quote missing in the first district",
+                @"{ ""districts"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"", ""groundMaterial"": ""Grass, ""hexSculpt"": ""Raised"", ""footprintMeshFlatHeight"": 0.3 }, " + b + ", " + c + " ] }" };
+            yield return new object[] { "a closing brace missing on the first district",
+                @"{ ""districts"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"", ""hexSculpt"": ""Raised"", ""footprintMeshFlatHeight"": 0.3, " + b + ", " + c + " ] }" };
+            yield return new object[] { "the wrapper lost its colon", @"{ ""districts"" [ " + a + ", " + b + ", " + c + " ] }" };
+            yield return new object[] { "the wrapper lost its bracket", @"{ ""districts"": " + a + ", " + b + ", " + c + " }" };
+            yield return new object[] { "the wrapper key is misspelled, and a comma is missing", @"{ ""Districts"": [ " + a + " " + b + ", " + c + " ] }" };
+            yield return new object[] { "no wrapper at all", "[ " + a + ",, " + b + ", " + c + " ]" };
+        }
+
+        [Theory]
+        [MemberData(nameof(DamagedStructures))]
+        public void RegexRecovery_ADamagedStructure_StillYieldsEveryDistrictWithItsOwnValues(string damage, string doc)
+        {
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var districts = DistrictInject.ParseDistrictsRaw(doc);
+            Assert.True(new[] { "A", "B", "C" }.SequenceEqual(districts.Select(d => d.district)), damage + ": " + string.Join(",", districts.Select(d => d.district)));
+            Assert.Equal(new[] { 0.3f, 0.5f, 0.7f }, districts.Select(d => d.footprintMeshFlatHeight));
+            Assert.Equal(new[] { "Raised", "", "Sunk" }, districts.Select(d => d.hexSculpt));
+        }
+
+        // The structure intact, the entry texts are the objects themselves (keys in any order are the entry's own).
+        [Fact]
+        public void EntryTexts_OfAnIntactArray_AreItsObjects()
+        {
+            var texts = DistrictInject.DistrictEntryTexts(@"{ ""districts"": [ { ""hexSculpt"": ""Raised"", ""district"": ""A"" },, { ""district"": ""B"" } ] }");
+            Assert.Equal(new[] { @"{ ""hexSculpt"": ""Raised"", ""district"": ""A"" }", @"{ ""district"": ""B"" }" }, texts);
+        }
+
+        [Fact]
+        public void RegexRecovery_ReadsOnlyTheDistrictsArray()
+        {
+            const string doc = @"{ ""notes"": { ""district"": ""example"", ""footprintMeshFlatHeight"": 99 },
+                ""districts"": [ { ""district"": ""Actual"", ""footprintMeshFlatHeight"": 0.25 } ]";
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var entry = Assert.Single(DistrictInject.ParseDistrictsRaw(doc));
+            Assert.Equal("Actual", entry.district);
+            Assert.Equal(0.25f, entry.footprintMeshFlatHeight);
         }
 
         // ...and a WELL-FORMED document must still go through the object path, not quietly rely on the fallback.
