@@ -1824,6 +1824,13 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
   dials the value came back as the default, and a number of `position` as 0) and, on eleven dials (`moveTilt`,
   `turnRate`, `turnBank`, the `gunElev*` and `hug*` dials, `combatZ`, `rotorSpinSpeed`), `-?[0-9.]+` (no exponent at
   all: `1.5e+2` and `1.5e-2` both read 1.5, and `9.999999747378752e-6` read 10, a million times too large).
+- **The model fallback loses every entry after one with a missing closing quote or brace (2026-11-24, measured on
+  the district reader, which had the same limit for a day; NOT fixed for models).** `ParseModels`' fallback finds one
+  object per model by counting braces outside strings (`UniversalInject.RegistryEntryChunks`), since 2026-08-23. An
+  unclosed string or a missing `}` in one model swallows the models after it into that one (executed: 1 of 3
+  models recovered), and a damaged `"models": [` yields none (0 of 3). The district reader got a second way in for that case (`DistrictEntryTexts`: from each
+  `"district"` key to the next); a model has no key that is always written first and never repeated in `overrides`,
+  so the same trick needs a design of its own.
 - **Neither path clamps a float dial (2026-11-23, read in the review of PR #315; NOT fixed).** A value the registry
   gives is used as given. Three consumers that an extreme value reaches: a unit-scale rule of `1e-30` (the guard is
   only `> 0`) into the shared mesh buffer (`UniversalInject.ScaleEra.cs:346-364`); an entry `scale` of `1e-30` into

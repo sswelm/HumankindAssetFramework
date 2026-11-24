@@ -119,6 +119,44 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(new[] { "", "Stone }", "" }, districts.Select(d => d.groundMaterial));
         }
 
+        // WHEN THE BRACES CANNOT BE TRUSTED. One object per district is found by counting braces outside strings, so a
+        // closing quote or brace missing in ONE district swallowed every district after it, and a damaged wrapper left
+        // nothing to count: 1 of 3 and 0 of 3 districts recovered (measured 2026-11-24), where the reader before it
+        // named all three. Each row is one such damage; all three districts must come back, each with its own values.
+        public static IEnumerable<object[]> DamagedStructures()
+        {
+            const string a = @"{ ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"", ""hexSculpt"": ""Raised"", ""footprintMeshFlatHeight"": 0.3 }";
+            const string b = @"{ ""district"": ""B"", ""fxMeshGuid"": ""1,2,3,4"", ""footprintMeshFlatHeight"": 0.5 }";   // no hexSculpt: it must stay empty
+            const string c = @"{ ""district"": ""C"", ""fxMeshGuid"": ""1,2,3,4"", ""hexSculpt"": ""Sunk"", ""footprintMeshFlatHeight"": 0.7 }";
+            yield return new object[] { "a closing quote missing in the first district",
+                @"{ ""districts"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"", ""groundMaterial"": ""Grass, ""hexSculpt"": ""Raised"", ""footprintMeshFlatHeight"": 0.3 }, " + b + ", " + c + " ] }" };
+            yield return new object[] { "a closing brace missing on the first district",
+                @"{ ""districts"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"", ""hexSculpt"": ""Raised"", ""footprintMeshFlatHeight"": 0.3, " + b + ", " + c + " ] }" };
+            yield return new object[] { "the wrapper lost its colon", @"{ ""districts"" [ " + a + ", " + b + ", " + c + " ] }" };
+            yield return new object[] { "the wrapper lost its bracket", @"{ ""districts"": " + a + ", " + b + ", " + c + " }" };
+            yield return new object[] { "the wrapper key is misspelled, and a comma is missing", @"{ ""Districts"": [ " + a + " " + b + ", " + c + " ] }" };
+            yield return new object[] { "no wrapper at all", "[ " + a + ",, " + b + ", " + c + " ]" };
+        }
+
+        [Theory]
+        [MemberData(nameof(DamagedStructures))]
+        public void RegexRecovery_ADamagedStructure_StillYieldsEveryDistrictWithItsOwnValues(string damage, string doc)
+        {
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var districts = DistrictInject.ParseDistrictsRaw(doc);
+            Assert.True(new[] { "A", "B", "C" }.SequenceEqual(districts.Select(d => d.district)), damage + ": " + string.Join(",", districts.Select(d => d.district)));
+            Assert.Equal(new[] { 0.3f, 0.5f, 0.7f }, districts.Select(d => d.footprintMeshFlatHeight));
+            Assert.Equal(new[] { "Raised", "", "Sunk" }, districts.Select(d => d.hexSculpt));
+        }
+
+        // The structure intact, the entry texts are the objects themselves (keys in any order are the entry's own).
+        [Fact]
+        public void EntryTexts_OfAnIntactArray_AreItsObjects()
+        {
+            var texts = DistrictInject.DistrictEntryTexts(@"{ ""districts"": [ { ""hexSculpt"": ""Raised"", ""district"": ""A"" },, { ""district"": ""B"" } ] }");
+            Assert.Equal(new[] { @"{ ""hexSculpt"": ""Raised"", ""district"": ""A"" }", @"{ ""district"": ""B"" }" }, texts);
+        }
+
         [Fact]
         public void RegexRecovery_ReadsOnlyTheDistrictsArray()
         {

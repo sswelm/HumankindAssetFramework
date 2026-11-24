@@ -28,13 +28,21 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     In `position`, a suffix on x or y no longer costs the whole vector. District recovery now reads one object at a
     time from the `districts` array. Omitted or unreadable fields use that district's defaults, and later values
     stay with their own districts.
+  - **District recovery when the braces cannot be trusted (2026-11-24):** one object per district is found by
+    counting braces, so a closing quote or brace missing in one district swallowed every district after it, and a
+    damaged `"districts": [` left nothing to count. Measured on three districts: 1 and 0 recovered, where the reader
+    before it (values paired by position) still named all three. The reader now notices (fewer
+    named objects than names in the text) and reads each district from its `"district"` key to the next one: all
+    three come back, each with its own values. Six such damages are held by
+    `Tests/DistrictRegistryParseTests.cs`; four plants in the new code are caught. On the live registry, its backup
+    and the corrupt backup of 2026-08-20 the three versions of the reader give the same result.
   - **A second fix in the same lines:** a pack that needed the fallback and left `idleAltInterval` out got 0 (the
     idle-alt one-shots off) where the JSON path gives the schema's 25. Reviews carried it from 2026-10-12 on; the Review-Backlog had
     marked it fixed on the strength of the JSON path alone. A quoted `"0"` still reads 0.
   - **The first version of this fix was wrong, and the review caught it:** it refused any token that was not wholly
     a number. `+1.5` and `0.5f`, which the old patterns read, came back as defaults, and in the district reader an
     unread height shifted every later district's height by one. It was never merged.
-  - **Tests (`Tests/RegexFallbackNumberTests.cs`, 59 cases; the suite is 2,986):** every float a pack can set, and
+  - **Tests (`Tests/RegexFallbackNumberTests.cs`, 59 cases; the suite is 2,993):** every float a pack can set, and
     `position`, in fourteen spellings against the runtime's own parse and the JSON parser; six spellings that are not
     JSON; four things that are not numbers; quoted numbers on both paths; `idleAltInterval` with a value that is not
     a number; a parseable document that still takes the fallback; every float dial left out; the district fallback,

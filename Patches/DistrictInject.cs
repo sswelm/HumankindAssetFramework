@@ -180,12 +180,44 @@ namespace HumankindAssetFramework
             selectorGuid = ParseGuid4((string)d["selectorGuid"] ?? ""),   // baked scoped CityMapSelector -> the scoped rendering path
         };
 
-        // Recover each object independently so omitted fields leave their own defaults and do not shift later values.
+        // THE TEXT OF EACH DISTRICT, for the recovery below. Two ways to find it, and the damage decides which.
+        //
+        // BY BRACES, when the array's structure survived (the usual damage: a comma too many or too few, a value that
+        // is not JSON): one object per district, whatever the order of its keys.
+        //
+        // BY NAME, when it did not. A closing quote or brace missing in one district makes the brace counter swallow
+        // every district after it into that one, and a damaged `"districts": [` gives it nothing to count: measured
+        // on 2026-11-24, the braces alone recovered 1 of 3 districts and 0 of 3 there, where the reader before them
+        // (which paired values by position over the whole text) still named all three. The tell is exact: fewer
+        // objects with a name than names in the text. Then each district is the text from its `"district"` key to the
+        // next one - what the Factory writes, the key first - so every district is still found, and a field left out
+        // still cannot hand its place to a neighbour. Keys written BEFORE the name belong to the district above in
+        // this mode; that is the price of reading a file whose braces cannot be trusted.
+        const string DistrictNameKey = "\"district\"\\s*:\\s*\"[^\"]*\"";
+        internal static List<string> DistrictEntryTexts(string text)
+        {
+            text = text ?? "";
+            var byBraces = UniversalInject.RegistryEntryChunks(text, "districts");
+            var array = Regex.Match(text, "\"districts\"\\s*:\\s*\\[");
+            string region = array.Success ? text.Substring(array.Index + array.Length) : text;
+            var names = Regex.Matches(region, DistrictNameKey);
+            int named = 0;
+            foreach (var chunk in byBraces) if (Regex.IsMatch(chunk, DistrictNameKey)) named++;
+            if (named == names.Count) return byBraces;
+
+            Plugin.Log?.LogWarning($"[District] the structure of the districts array is damaged too ({names.Count} district name(s), {named} readable object(s)): reading each district from its name to the next name.");
+            var byName = new List<string>();
+            for (int i = 0; i < names.Count; i++)
+                byName.Add(region.Substring(names[i].Index, (i + 1 < names.Count ? names[i + 1].Index : region.Length) - names[i].Index));
+            return byName;
+        }
+
+        // Recover each district from its own text so omitted fields leave their own defaults and do not shift later values.
         internal static List<DistrictModel> RegexDistricts(string text)
         {
             var outp = new List<DistrictModel>();
             const string quoted = "\"([^\"]*)\"";
-            foreach (var chunk in UniversalInject.RegistryEntryChunks(text, "districts"))
+            foreach (var chunk in DistrictEntryTexts(text))
             {
                 Match FindField(string key, string pattern) => Regex.Match(chunk, "\"" + key + "\"\\s*:\\s*" + pattern);
                 string ReadString(string key) => FindField(key, quoted).Groups[1].Value;
