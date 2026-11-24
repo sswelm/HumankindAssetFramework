@@ -1653,7 +1653,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // a weld that took the detail out of a group leads the status: it is the one line that says "fuse again" (2026-11-24)
             var weldDamaged = new List<(string letter, int flattened, int faces, double before, double after, int partsGone, int parts)>();
             if (results != null) for (int gi = 0; gi < groups.Count; gi++)
-                if (results[gi].WeldDamaged) weldDamaged.Add((groups[gi].Key, results[gi].FacesFlattened, results[gi].SourceTriangles, results[gi].SurfaceBefore, results[gi].SurfaceAfter, results[gi].PartsFlattened.Count, results[gi].PartsMeasured));
+                if (results[gi].WeldDamaged) weldDamaged.Add((groups[gi].Key, results[gi].FacesFlattened, results[gi].FacesMeasured, results[gi].SurfaceBefore, results[gi].SurfaceAfter, results[gi].PartsFlattened.Count, results[gi].PartsMeasured));
             string weldLead = WorkshopRules.WeldDamageSummary(weldPermille, weldDamaged);
             // ...and so do mirrored parts the fuse turned inward with "Check mirrored parts" off (2026-11-24)
             var mirroredInward = new List<(string letter, int parts, int faces)>();

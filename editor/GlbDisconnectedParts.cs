@@ -35,11 +35,10 @@ public static partial class GlbDisconnectedParts
         public int VerticesBefore, VerticesAfter, IslandsBefore, IslandsAfter, FacesRewound;
         public readonly List<string> IslandLines = new List<string>();   // EVERY sheet's verdict, largest first (the report; Details keeps the largest six for the status)
         public int FusedNodeIndex = -1; public string FusedNodeName;   // the appended shell (a fuse only): the output sidecar names it with its group's letter
-        // what the weld cost (a fuse only): the group's surface on the authored positions and on the welded ones; the
-        // faces that had area and have none left BECAUSE OF THE DIAL (a face flat under the coincident weld of dial 0 is
-        // not counted); the parts that carried faces and, of those, the ones mostly gone (see PartMostlyGone);
+        // what the weld cost (a fuse only): the group's surface at dial 0 and at the selected distance; the
+        // faces and parts with area at dial 0, and how many faces and parts were lost (see PartMostlyGone);
         // WeldDamaged = a non-zero dial took enough for a warning (see WeldDamaged)
-        public double SurfaceBefore, SurfaceAfter; public int FacesFlattened, PartsMeasured; public bool WeldDamaged;
+        public double SurfaceBefore, SurfaceAfter; public int FacesMeasured, FacesFlattened, PartsMeasured; public bool WeldDamaged;
         public readonly List<string> PartsFlattened = new List<string>();
         // a fuse with "Check mirrored parts" OFF on a file that stores its mirrored parts already facing outward (0 = not
         // such a file, or the box is on): the parts of this group whose glTF reversal the box would undo; and, of those,
@@ -1838,7 +1837,14 @@ public static partial class GlbDisconnectedParts
         }
         int[] coincident = WeldClasses(rounding);   // coincident positions only: what the source already connects (kept: the weld's cost below is counted against it)
         result.IslandsBefore = Islands(coincident, out _, out _, out _, out _).Count;
-        int[] classes = WeldClasses(weld);
+        int[] classes = weld == rounding ? (int[])coincident.Clone() : WeldClasses(weld);
+        List<Vec3> baseline = null;
+        if (weld != rounding && !coincident.SequenceEqual(classes))
+        {
+            baseline = new List<Vec3>(pos);
+            SplitTwins(coincident, null);
+            MoveToCentroids(baseline, coincident);
+        }
         // DOUBLE-SIDED BY DUPLICATION (2026-09-24, SMS Wespe's gun). A part that carries every face TWICE, wound both
         // ways, each copy with its own vertices - 6,000 of the gun's 6,053 faces. Welded by position, the two copies
         // share every class, so every edge becomes a FOUR-face edge, no face has a partner, the sheet walk pairs nothing
@@ -1853,8 +1859,10 @@ public static partial class GlbDisconnectedParts
         // importer dropping one of those loses nothing. A vertex used by BOTH a second-copy face and an unpaired face
         // stays welded, so a copy that shares vertices with its neighbour is not torn from it.
         var twinFace = new bool[faceCount];   // BOTH copies of every opposite-wound coincident pair: authored two-sided, never turned (see the flip stage)
+        SplitTwins(classes, twinFace);
+        void SplitTwins(int[] weldClasses, bool[] pairedFaces)
         {
-            var byTriple = new TripleIndex(classes, tris, faceCount);   // flat: no List per face (GlbDisconnectedParts.Weld.cs); a collapsed or needle face has no triple and pairs with nothing
+            var byTriple = new TripleIndex(weldClasses, tris, faceCount);   // flat: no List per face (GlbDisconnectedParts.Weld.cs); a collapsed or needle face has no triple and pairs with nothing
             // ...and COINCIDE (review of PR #82, P2): the classes say "within the weld radius", which at a non-zero weld
             // is not the same thing - a thin plate's two skins 0.05 apart under a 0.08 weld share every class, wound the
             // opposite way, and are not a doubled face but the very seam the weld was asked to close. A twin is a copy
@@ -1885,12 +1893,14 @@ public static partial class GlbDisconnectedParts
                 for (int gi = 1; gi < group.Count; gi++)
                 {
                     int g = group[gi]; if (secondFace[g]) continue;
-                    bool og = ClassOrientation(classes, tris, g);
+                    bool og = ClassOrientation(weldClasses, tris, g);
                     for (int fi = 0; fi < gi; fi++)
                     {
                         int f = group[fi];
-                        if (secondFace[f] || ClassOrientation(classes, tris, f) == og || !Coincident(f, g)) continue;
-                        secondFace[g] = true; twinFace[g] = true; twinFace[f] = true; twinFaces++; break;
+                        if (secondFace[f] || ClassOrientation(weldClasses, tris, f) == og || !Coincident(f, g)) continue;
+                        secondFace[g] = true;
+                        if (pairedFaces != null) { pairedFaces[g] = true; pairedFaces[f] = true; }
+                        twinFaces++; break;
                     }
                 }
             }
@@ -1904,12 +1914,13 @@ public static partial class GlbDisconnectedParts
                     else if (!secondFace[f]) onlySecond[v] = false;
                 }
                 int split = 0;
-                for (int v = 0; v < pos.Count; v++) if (onlySecond[v]) { classes[v] += pos.Count; split++; }
-                plan.TwinsLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                    "twins: {0} face(s) coincide with another face wound the other way (a part double-sided by duplication); the second copy keeps its own {1} vertices, so each copy is judged and emitted whole", twinFaces, split);
+                for (int v = 0; v < pos.Count; v++) if (onlySecond[v]) { weldClasses[v] += pos.Count; split++; }
+                if (pairedFaces != null)
+                    plan.TwinsLine = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "twins: {0} face(s) coincide with another face wound the other way (a part double-sided by duplication); the second copy keeps its own {1} vertices, so each copy is judged and emitted whole", twinFaces, split);
             }
         }
-        Mark("weld");   // both weld passes (the coincident-only count above and the real one) are charged here, where they run
+        Mark("weld");   // charge the weld classes and the baseline geometry here
         // ONE position per welded class. Connectivity is by class, but output vertices are emitted separately wherever
         // UV, normal or material differ, and each kept its own authored position: two plates 0.01 apart across a UV
         // seam reported one island and still rendered the 0.01 gap (review of 4e748c1). Every vertex of a class now
@@ -1921,36 +1932,45 @@ public static partial class GlbDisconnectedParts
         // 11.8-thick parts. Group C (anchor chains) kept 0 of 156,344 square units, K (davits) 1,532 of 43,094, and the
         // summary's "collapsed" count said 652 of K's 7,212 faces where 7,148 had no area left: it counts a face whose
         // THREE corners weld together, and a face is gone as soon as TWO do. So the surface is measured here, on the
-        // positions the judgements below and the writer use, before the move and after it.
+        // actual positions the writer uses at each weld distance.
         // PER PART as well (review of the first cut): both thresholds are shares of the GROUP, and one davit of 80 faces
-        // beside a 20,000-face deck vanished without a word. And against the COINCIDENT weld: a face two corners of which
-        // already sit within a millionth of the group's length is flat at dial 0 too, and is not the dial's doing - a dial
-        // typed so small that its distance IS that millionth wrote the bytes of weld 0 and was told to "set the weld to 0".
-        var areaBefore = new double[faceCount];
-        double FaceArea(int f) => 0.5 * FLen(FCross(FSub(pos[tris[f * 3 + 1]], pos[tris[f * 3]]), FSub(pos[tris[f * 3 + 2]], pos[tris[f * 3]])));
-        for (int f = 0; f < faceCount; f++) areaBefore[f] = FaceArea(f);
+        // beside a 20,000-face deck vanished without a word. Compare with dial 0, whose coincident weld already
+        // moves vertices, and use only faces with baseline area in the face-loss percentages.
+        double FaceArea(int f, List<Vec3> positions)
+        {
+            Vec3 a = positions[tris[f * 3]], b = positions[tris[f * 3 + 1]], c = positions[tris[f * 3 + 2]];
+            return 0.5 * FLen(FCross(FSub(b, a), FSub(c, a)));
+        }
+        MoveToCentroids(pos, classes);
+        void MoveToCentroids(List<Vec3> positions, int[] weldClasses)
         {
             var sum = new Dictionary<int, Vec3>(); var count = new Dictionary<int, int>();
-            for (int v = 0; v < pos.Count; v++)
+            for (int v = 0; v < positions.Count; v++)
             {
-                if (sum.TryGetValue(classes[v], out Vec3 s)) { sum[classes[v]] = FAdd(s, pos[v]); count[classes[v]]++; }
-                else { sum.Add(classes[v], pos[v]); count.Add(classes[v], 1); }
+                int weldClass = weldClasses[v];
+                if (sum.TryGetValue(weldClass, out Vec3 s)) { sum[weldClass] = FAdd(s, positions[v]); count[weldClass]++; }
+                else { sum.Add(weldClass, positions[v]); count.Add(weldClass, 1); }
             }
-            for (int v = 0; v < pos.Count; v++) if (count[classes[v]] > 1) pos[v] = FScale(sum[classes[v]], 1.0 / count[classes[v]]);
+            for (int v = 0; v < positions.Count; v++)
+            {
+                int weldClass = weldClasses[v];
+                if (count[weldClass] > 1) positions[v] = FScale(sum[weldClass], 1.0 / count[weldClass]);
+            }
         }
         {
             int measuredParts = partNames.Count;
             var partFaces = new int[measuredParts]; var partFlat = new int[measuredParts]; var partBefore = new double[measuredParts]; var partAfter = new double[measuredParts];
             for (int f = 0; f < faceCount; f++)
             {
-                double after = FaceArea(f); int p = partOf[tris[f * 3]];
-                result.SurfaceBefore += areaBefore[f]; result.SurfaceAfter += after;
+                double after = FaceArea(f, pos), before = baseline == null ? after : FaceArea(f, baseline);
+                int p = partOf[tris[f * 3]];
+                result.SurfaceBefore += before; result.SurfaceAfter += after;
+                partBefore[p] += before; partAfter[p] += after;
+                if (!(before > 0)) continue;   // already flat at dial 0
+                result.FacesMeasured++;
                 partFaces[p]++;
-                int ca = coincident[tris[f * 3]], cb = coincident[tris[f * 3 + 1]], cc = coincident[tris[f * 3 + 2]];
-                if (ca == cb || cb == cc || ca == cc) continue;   // flat at dial 0 already: not the dial's, and no part is "gone" for a sliver it never showed
-                partBefore[p] += areaBefore[f]; partAfter[p] += after;
                 // two corners in one class sit on one centroid: exactly zero, no tolerance to choose
-                if (areaBefore[f] > 0 && after == 0) { result.FacesFlattened++; partFlat[p]++; }
+                if (after == 0) { result.FacesFlattened++; partFlat[p]++; }
             }
             for (int p = 0; p < measuredParts; p++)
             {
@@ -1959,7 +1979,7 @@ public static partial class GlbDisconnectedParts
                 if (PartMostlyGone(partFaces[p], partFlat[p], partBefore[p], partAfter[p])) result.PartsFlattened.Add(partNames[p]);
             }
         }
-        result.WeldDamaged = WeldDamaged(weldFraction, faceCount, result.FacesFlattened, result.SurfaceBefore, result.SurfaceAfter, result.PartsFlattened.Count);
+        result.WeldDamaged = WeldDamaged(weldFraction, result.FacesMeasured, result.FacesFlattened, result.SurfaceBefore, result.SurfaceAfter, result.PartsFlattened.Count);
         if (result.WeldDamaged)
         {
             const int named = 5;
@@ -1968,7 +1988,7 @@ public static partial class GlbDisconnectedParts
                 string.Join(", ", result.PartsFlattened.Take(named).Select(n => "'" + n + "'")), result.PartsFlattened.Count > named ? ", +" + (result.PartsFlattened.Count - named) + " more" : "");
             result.Warnings.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
                 "The weld flattened {0:N0} of {1:N0} face(s) to nothing and the group kept {2:0.#}% of its surface{6}: its weld distance, {3:0.####} ({4:0.###}‰ of the group's length {5:0.#}), is wider than the spacing of the vertices in these parts. Set the weld to 0 (or lower it) and fuse again.",
-                result.FacesFlattened, faceCount, result.SurfaceBefore > 0 ? 100.0 * result.SurfaceAfter / result.SurfaceBefore : 100.0, weld, weldFraction * 1000.0, longest, partsGone));
+                result.FacesFlattened, result.FacesMeasured, result.SurfaceBefore > 0 ? 100.0 * result.SurfaceAfter / result.SurfaceBefore : 100.0, weld, weldFraction * 1000.0, longest, partsGone));
         }
         List<List<int>> allIslands = Islands(classes, out long[] fEdgeKeys, out bool[] fEdgeDir, out Dictionary<long, List<int>> fEdgeFaces, out int collapsedFaces);
         result.IslandsAfter = allIslands.Count;
@@ -3129,7 +3149,7 @@ public static partial class GlbDisconnectedParts
             for (int f = 0; f < faceCount; f++)
             {
                 int pp = partOf[tris[f * 3]];
-                if (!boxWouldUnreverse[pp] || twinFace[f] || !(FaceArea(f) > 0)) continue;
+                if (!boxWouldUnreverse[pp] || twinFace[f] || !(FaceArea(f, pos) > 0)) continue;
                 facesOfPart[pp]++; if (!flip[f]) stillOfPart[pp]++;
             }
             for (int pp = 0; pp < facesOfPart.Length; pp++)

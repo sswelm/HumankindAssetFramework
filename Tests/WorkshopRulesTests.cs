@@ -213,20 +213,20 @@ public class WorkshopRulesTests
         // the RSS Centurion's U and C at 2.288 permille: faces and surface as the fuse measured them, the part counts this test's
         string two = WorkshopRules.WeldDamageSummary(2.288, new List<(string, int, int, double, double, int, int)> { ("U", 33431, 38205, 14324973.7, 13077506.4, 0, 111), ("C", 76940, 76940, 156343.9, 0.0, 239, 239) });
         var lines = two.Split('\n');
-        Assert.Equal("⚠ THE WELD FLATTENED FACES IN 2 GROUPS: the weld dial is at 2.288‰, not 0. Unless you raised it to close gaps, set \"Fuse — weld seams closer than\" (below the preview) to 0 and Fuse again.", lines[0]);
+        Assert.Equal("⚠ WELD DAMAGE IN 2 GROUPS: the weld dial is at 2.288‰, not 0. Unless you raised it to close gaps, set \"Fuse — weld seams closer than\" (below the preview) to 0 and Fuse again.", lines[0]);
         Assert.Equal("   ⊕C: 76,940 of 76,940 faces flattened to nothing, 0% of its surface kept, 239 of 239 parts mostly gone", lines[1]);    // the worst first, whatever its letter
         Assert.Equal("   ⊕U: 33,431 of 38,205 faces flattened to nothing, 91.3% of its surface kept", lines[2]);                               // no part mostly gone: nothing said about parts
         Assert.Equal("", lines[3]); Assert.Equal(4, lines.Length);                                                // ends on a newline: the status's own first line follows
 
         string one = WorkshopRules.WeldDamageSummary(0.5, new List<(string, int, int, double, double, int, int)> { ("K", 80, 20080, 10004.0, 10000.0, 1, 2) });
-        Assert.StartsWith("⚠ THE WELD FLATTENED FACES IN 1 GROUP: the weld dial is at 0.5‰, not 0.", one);
+        Assert.StartsWith("⚠ WELD DAMAGE IN 1 GROUP: the weld dial is at 0.5‰, not 0.", one);
         Assert.Contains("⊕K: 80 of 20,080 faces flattened to nothing, 100% of its surface kept, 1 of 2 parts mostly gone", one);   // a davit beside a deck
 
         // seven damaged groups: the six worst are named, the seventh is counted (the Centurion had twenty)
         var seven = new List<(string, int, int, double, double, int, int)>();
         for (int i = 0; i < 7; i++) seven.Add((((char)('A' + i)).ToString(), 10, 100, 100.0, 10.0 * i, 0, 1));   // A keeps 0%, G keeps 60%
         var many = WorkshopRules.WeldDamageSummary(1, seven).Split('\n');
-        Assert.StartsWith("⚠ THE WELD FLATTENED FACES IN 7 GROUPS", many[0]);
+        Assert.StartsWith("⚠ WELD DAMAGE IN 7 GROUPS", many[0]);
         Assert.StartsWith("   ⊕A: ", many[1]); Assert.StartsWith("   ⊕F: ", many[6]);
         Assert.Equal("   … and 1 more (each group's line is in the report)", many[7]);
         Assert.DoesNotContain(many, l => l.Contains("⊕G"));
