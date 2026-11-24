@@ -1540,14 +1540,14 @@ public static partial class GlbDisconnectedParts
                 {
                     if (pl == null || pl.CheckMirrored || pl.Empty || pl.MirroredParts == 0) continue;
                     int own = pl.MirroredJudgedUndo + pl.MirroredJudgedKeep;
-                    if (own >= 3 && pl.MirroredJudgedUndo * 10 >= own * 9) continue;   // it saw the answer itself, and has said so
+                    if (own >= 3 && pl.MirroredJudgedUndo * 10 >= own * 9) continue;   // it already used its own verdict
                     if (pl.MirroredJudgedKeep > 0) continue;                            // contrary evidence of its own: the box would leave it alone
                     pl.Result.MirroredCheckWouldUndo = pl.MirroredParts;
                     pl.Result.MirroredStillReversedParts = pl.MirroredStillParts; pl.Result.MirroredStillReversedFaces = pl.MirroredStillFaces;
                     if (pl.MirroredStillFaces > 0)
                         pl.Result.Warnings.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                            "The groups of this fuse together show that this file stores its mirrored parts already facing outward ({0} of {1} judged mirrored parts say so). The glTF reversal turned {2} mirrored part(s) of this group, and {3} of them ({4} face(s)) are still reversed in the output (see-through). Tick 'Check mirrored parts' and fuse again.",
-                            undoOff, judgedOff, pl.MirroredParts, pl.MirroredStillParts, pl.MirroredStillFaces));
+                            "The groups of this fuse together show that this file stores its mirrored parts already facing outward ({0} of {1} judged mirrored parts say so). {2} mirrored face(s) are still reversed in this group's output (see-through), and {3} part(s) have a majority of reversed faces. Try 'Check mirrored parts' and fuse again.",
+                            undoOff, judgedOff, pl.MirroredStillFaces, pl.MirroredStillParts));
                 }
         }
         Document document = Parse(source);
@@ -1989,7 +1989,6 @@ public static partial class GlbDisconnectedParts
         {
             int nParts = partNames.Count;
             var decided = new bool[nParts]; var undo = new bool[nParts];
-            var conflictAll = new long[nParts];
             int Part(int face) => partOf[tris[face * 3]];
             bool Walk(int face, long key) { for (int e = 0; e < 3; e++) if (fEdgeKeys[face * 3 + e] == key) return fEdgeDir[face * 3 + e]; return false; }
             bool progress = true;
@@ -2024,7 +2023,7 @@ public static partial class GlbDisconnectedParts
                 }
                 for (int p = 0; p < nParts; p++)
                     if (partMirrored[p] && !decided[p] && agree[p] + conflict[p] >= 3)
-                    { decided[p] = true; undo[p] = conflict[p] > agree[p]; conflictAll[p] = conflict[p]; progress = true; }
+                    { decided[p] = true; undo[p] = conflict[p] > agree[p]; progress = true; }
             }
             // A VERDICT ONLY WHEN THE GROUP GIVES A CLEAR ONE. How mirrored parts are stored is a property of the program
             // that exported the file, not of each part: on the frigate all 5 mirrored parts with plain neighbours already
@@ -2052,13 +2051,13 @@ public static partial class GlbDisconnectedParts
             // rendered see-through. FuseGroups pools the run's evidence and hands the verdict back here; a group fused
             // on its own still decides for itself.
             bool clear = runVerdict ?? (judgedAll >= 3 && judgedUndo * 10 >= judgedAll * 9);
-            var undoSet = new HashSet<int>(); var undoNames = new List<string>(); int byConvention = 0; long undoConflicts = 0;
+            var undoSet = new HashSet<int>(); var undoNames = new List<string>(); int byConvention = 0;
             if (clear)
                 for (int p = 0; p < nParts; p++)
                 {
                     if (!partMirrored[p] || (decided[p] && !undo[p])) continue;   // a judged dissenter keeps the glTF rule
                     undoSet.Add(p); undoNames.Add(partNames[p]);
-                    if (decided[p]) undoConflicts += conflictAll[p]; else byConvention++;
+                    if (!decided[p]) byConvention++;
                 }
             int mirroredCount = partMirrored.Count(m => m);
             if (undoSet.Count > 0 && checkMirrored)
@@ -2088,9 +2087,6 @@ public static partial class GlbDisconnectedParts
             {
                 ownVerdictOff = true;
                 result.MirroredCheckWouldUndo = undoSet.Count;   // the parts the box would un-reverse (FuseGroups sets it for the groups that cannot see the answer themselves)
-                result.Warnings.Add(string.Format(inv3,
-                    "{0} of {1} mirrored part(s) that touch plain parts disagree with them ({2} seam edges run the same way): this file stores its mirrored parts already facing outward, so the glTF reversal turns {3} part(s) inward (see-through). Tick 'Check mirrored parts' and fuse again.",
-                    judgedUndo, judgedAll, undoConflicts, undoSet.Count));
             }
         }
 
@@ -3125,22 +3121,31 @@ public static partial class GlbDisconnectedParts
         // un-reverse said "846 parts face inward" for parts the passes above had already turned back: two mirrored closed
         // boxes were announced as see-through in an output byte-identical to the box-on one. What can be see-through is a
         // face the gather reversed and nothing turned back - flip false - on a part the box would un-reverse. A doubled
-        // pair shows from both sides whatever its winding and is left out. A part counts when most of its faces stand so.
+        // pair shows from both sides whatever its winding and a flat face has no visible side. A part counts when most
+        // of its measured faces are reversed.
         if (boxWouldUnreverse != null)
         {
             var facesOfPart = new int[partNames.Count]; var stillOfPart = new int[partNames.Count];
             for (int f = 0; f < faceCount; f++)
             {
                 int pp = partOf[tris[f * 3]];
-                if (!boxWouldUnreverse[pp] || twinFace[f]) continue;
+                if (!boxWouldUnreverse[pp] || twinFace[f] || !(FaceArea(f) > 0)) continue;
                 facesOfPart[pp]++; if (!flip[f]) stillOfPart[pp]++;
             }
             for (int pp = 0; pp < facesOfPart.Length; pp++)
             {
                 plan.MirroredStillFaces += stillOfPart[pp];
-                if (stillOfPart[pp] * 2 > facesOfPart[pp]) plan.MirroredStillParts++;
+                if ((long)stillOfPart[pp] * 2 > facesOfPart[pp]) plan.MirroredStillParts++;
             }
-            if (ownVerdictOff) { result.MirroredStillReversedParts = plan.MirroredStillParts; result.MirroredStillReversedFaces = plan.MirroredStillFaces; }
+            if (ownVerdictOff)
+            {
+                result.MirroredStillReversedParts = plan.MirroredStillParts;
+                result.MirroredStillReversedFaces = plan.MirroredStillFaces;
+                if (plan.MirroredStillFaces > 0)
+                    result.Warnings.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "{0} of {1} mirrored part(s) that touch plain parts disagree with them: this file stores its mirrored parts already facing outward. {2} mirrored face(s) are still reversed in the output (see-through), and {3} part(s) have a majority of reversed faces. Try 'Check mirrored parts' and fuse again.",
+                        plan.MirroredJudgedUndo, plan.MirroredJudgedUndo + plan.MirroredJudgedKeep, plan.MirroredStillFaces, plan.MirroredStillParts));
+            }
         }
         // per PART: how many of its faces were turned — the reader's question after "why does my port side still render
         // inside out" is which part the pass left alone (2026-09-18, the Romanic's group D)

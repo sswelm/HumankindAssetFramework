@@ -1450,9 +1450,9 @@ public static class WorkshopRules
         int parts = groups.Sum(g => g.parts), faces = groups.Sum(g => g.faces);
         var sb = new System.Text.StringBuilder();
         sb.Append("⚠ MIRRORED PARTS STILL REVERSED IN ").Append(groups.Count).Append(groups.Count == 1 ? " GROUP" : " GROUPS").Append(" (")
-          .Append(faces.ToString("N0", inv)).Append(faces == 1 ? " face" : " faces").Append(", ").Append(parts.ToString("N0", inv)).Append(parts == 1 ? " part" : " parts")
+          .Append(faces.ToString("N0", inv)).Append(faces == 1 ? " face" : " faces").Append(", ").Append(parts.ToString("N0", inv)).Append(parts == 1 ? " part" : " parts").Append(" mostly reversed")
           .Append("): this file stores its mirrored parts already facing outward, the fuse reversed them as glTF asks, and these were not turned back. They face inward: see-through in the Vehicle Lab and in game, ")
-          .Append("while the preview here draws the source and looks right. Tick \"Check mirrored parts\" and Fuse again.\n   ");
+          .Append("while the preview here draws the source and looks right. Try \"Check mirrored parts\" and Fuse again.\n   ");
         const int shown = 12;
         sb.Append(string.Join("  ", groups.OrderByDescending(g => g.faces).ThenBy(g => g.letter, StringComparer.Ordinal).Take(shown).Select(g => "⊕" + g.letter + "×" + g.faces.ToString(inv))));
         if (groups.Count > shown) sb.Append("  … and ").Append(groups.Count - shown).Append(" more");

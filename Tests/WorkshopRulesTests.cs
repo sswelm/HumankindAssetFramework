@@ -249,15 +249,15 @@ public class WorkshopRulesTests
         Assert.Null(WorkshopRules.MirroredCheckSummary(new List<(string, int, int)>()));
 
         var one = WorkshopRules.MirroredCheckSummary(new List<(string, int, int)> { ("A", 1, 1) }).Split('\n');
-        Assert.StartsWith("⚠ MIRRORED PARTS STILL REVERSED IN 1 GROUP (1 face, 1 part): this file stores its mirrored parts already facing outward", one[0]);
-        Assert.EndsWith("Tick \"Check mirrored parts\" and Fuse again.", one[0]);
+        Assert.StartsWith("⚠ MIRRORED PARTS STILL REVERSED IN 1 GROUP (1 face, 1 part mostly reversed): this file stores its mirrored parts already facing outward", one[0]);
+        Assert.EndsWith("Try \"Check mirrored parts\" and Fuse again.", one[0]);
         Assert.Equal("   ⊕A×1", one[1]); Assert.Equal("", one[2]); Assert.Equal(3, one.Length);
 
         // fourteen groups: the twelve with the most faces are named, most first, equal counts by letter; two are counted
         var many = new List<(string, int, int)>();
         for (int i = 0; i < 14; i++) many.Add((((char)('A' + i)).ToString(), 1, 100 * (i / 2 + 1)));   // A,B 100; C,D 200; ... M,N 700
         var lines = WorkshopRules.MirroredCheckSummary(many).Split('\n');
-        Assert.StartsWith("⚠ MIRRORED PARTS STILL REVERSED IN 14 GROUPS (5,600 faces, 14 parts):", lines[0]);
+        Assert.StartsWith("⚠ MIRRORED PARTS STILL REVERSED IN 14 GROUPS (5,600 faces, 14 parts mostly reversed):", lines[0]);
         Assert.Equal("   ⊕M×700  ⊕N×700  ⊕K×600  ⊕L×600  ⊕I×500  ⊕J×500  ⊕G×400  ⊕H×400  ⊕E×300  ⊕F×300  ⊕C×200  ⊕D×200  … and 2 more", lines[1]);
     }
 
