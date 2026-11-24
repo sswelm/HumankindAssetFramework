@@ -3522,7 +3522,9 @@ scans search for (they find it by a sub-asset's name). The unsaved pawn and dist
 each Pick button reads through; a saved change must be listed with no click. Control rows show that the lists are
 kept between changes; without them a reader that kept nothing would pass. It also holds the boat answer to the exact
 name asked, a new entry (plain and animated) on Keep Model, and a stored entry without `normalsMode` on Recalculate.
-All 47 checks pass. Sixteen planted defects, each run through the drill, each fail rows:
+The drill also confirms that a fresh read finds the first unsaved district when the kept list is empty and that
+the health panel reports visual-level and affinity problems from a suffixed database. All 52 checks pass. Sixteen planted defects,
+each run through the drill, each fail rows:
 the asset hook off; the generation never moving; the hook judging by file name; the hook counting every path; each
 of the four lists kept for the session (the reported defect is the Model Factory's); the boat answer kept; the boat
 keys ignoring case; each of the four Pick functions without its re-read; the new entry back on Recalculate; and

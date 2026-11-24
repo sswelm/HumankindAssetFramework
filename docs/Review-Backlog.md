@@ -2000,17 +2000,9 @@ Recorded at the review of the feature (`Patches/TechRequireAllPatch.cs`).
 Found by the two reviews of the fix that made the Pick lists follow the databases (CHANGELOG, Authoring tools,
 2026-11-24). Each line says how it was established.
 
-- **District health checks may skip ENC's district databases** (read in the source and the file names, NOT
-  executed). `DistrictFactoryWindow.FindDistrictDefinition` requires `path.EndsWith("Definition.asset")`. ENC's
-  files are `ConstructibleCommonExtensionDefinitionENC.asset`, `…DeepSea`, `…Modified`, `…Villages`. If that reading
-  holds, the definition of an ENC district is never found and the Additional Visual Levels and affinity checks do
-  not run for it. First step: open the District Factory on `Extension_Base_BreederReactor` and see whether the
-  health panel reports on its definition.
 - **Windows that need their own Reload for a definition made in the session** (read): Tech Requires All (its
   "+ Add technology" list is read at open or by Reload, and Reload discards unsaved list edits after asking), the
   Tech Tree viewer (Reload keeps staged edits), the Database Browser (Refresh).
-- **The District Factory's Pick is disabled while its kept list is empty** (read), so a click cannot list a first
-  district that is not saved yet. Saving it does.
 - **`DistrictFactoryWindow` ground colours** (read): `groundColorsTried` is set even when `haf_ground_colors.json`
   is missing, so the true tints of a first game dump appear only after a script reload.
 - **The Model Factory's preview water** follows a changed boat answer at the next preview load, not at once (read;

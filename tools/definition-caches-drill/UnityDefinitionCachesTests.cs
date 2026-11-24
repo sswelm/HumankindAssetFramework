@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -11,7 +12,12 @@ using UnityEngine;
 namespace DefinitionCachesDrill
 {
     public class PresentationPawnDefinition : ScriptableObject { public int AnimationCapabilityProfile; }
-    public class ExtensionDistrictDefinition : ScriptableObject { }
+    public class ExtensionDistrictDefinition : ScriptableObject
+    {
+        public int[] AdditionalVisualLevels = Array.Empty<int>();
+        public Affinity ConstructibleVisualAffinity = new Affinity();
+        [Serializable] public class Affinity { public string serializableElementName = ""; }
+    }
     public class DrillCollection : ScriptableObject { }
 }
 
@@ -35,6 +41,21 @@ public static class UnityDefinitionCachesTests
     static string[] ResizeClick() => Private(typeof(ResizeLabWindow), "FreshScalablePawnNames");
     static string[] SoundClick() => Private(typeof(SoundWindow), "FreshPawnCatalog");
     static string[] DistrictClick() => Private(typeof(DistrictFactoryWindow), "FreshDistrictNames");
+
+    static (MessageType sev, string msg)[] DistrictHealth(string name)
+    {
+        var window = ScriptableObject.CreateInstance<DistrictFactoryWindow>();
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        var type = typeof(DistrictFactoryWindow);
+        try
+        {
+            type.GetField("selected", flags).SetValue(window, 1);
+            type.GetField("cur", flags).SetValue(window, new DistrictDef { district = name });
+            type.GetMethod("RunHealthChecks", flags).Invoke(window, null);
+            return ((List<(MessageType sev, string msg)>)type.GetField("health", flags).GetValue(window)).ToArray();
+        }
+        finally { UnityEngine.Object.DestroyImmediate(window); }
+    }
 
     static DefinitionCachesDrill.PresentationPawnDefinition AddPawn(string name, int profile = 0, string asset = PawnAsset)
     {
@@ -62,9 +83,19 @@ public static class UnityDefinitionCachesTests
             AssetDatabase.CreateAsset(ScriptableObject.CreateInstance<DefinitionCachesDrill.DrillCollection>(), PawnAsset);
             AssetDatabase.CreateAsset(ScriptableObject.CreateInstance<DefinitionCachesDrill.DrillCollection>(), DistrictAsset);
             AddPawn("Era5_Common_Riflemen_01");
-            var district = ScriptableObject.CreateInstance<DefinitionCachesDrill.ExtensionDistrictDefinition>();
-            district.name = "Extension_Base_Harbour"; AssetDatabase.AddObjectToAsset(district, DistrictAsset);
             Save();
+            Check("first district: waiting for a definition caches an empty list", DistrictNames().Length == 0);
+            var district = ScriptableObject.CreateInstance<DefinitionCachesDrill.ExtensionDistrictDefinition>();
+            district.AdditionalVisualLevels = new[] { 1 };
+            district.name = "Extension_Base_Harbour"; AssetDatabase.AddObjectToAsset(district, DistrictAsset);
+            Check("first district: the unsaved definition leaves the cached list empty", DistrictNames().Length == 0);
+            Check("first district: a fresh read finds the unsaved definition", DistrictClick().SequenceEqual(new[] { district.name }));
+            Save();
+            var health = DistrictHealth(district.name);
+            Check("district health: the suffixed database reports additional visual levels",
+                health.Any(h => h.sev == MessageType.Error && h.msg.Contains("Additional Visual Level")));
+            Check("district health: the suffixed database reports a missing visual affinity",
+                health.Any(h => h.sev == MessageType.Warning && h.msg.Contains("NO ConstructibleVisualAffinity")));
 
             // ---- the session's first read fills every list
             const string made = "Era5_Common_SemiSubmersibleTorpedoBoats_01";   // the reported pawn

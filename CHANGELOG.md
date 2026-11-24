@@ -4653,6 +4653,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     [Testing](docs/Testing.md)) and `Tests/DefinitionCachesTests.cs` for the path rule. Not driven: the click on a
     Pick button, and that the button, the pre-bake check and Validate pack name the fresh-read function (four
     buttons and two checks, read in the source). Left open: [Review-Backlog](docs/Review-Backlog.md).
+  - **District Factory:** Pick stays available when the kept list is empty, so a fresh read can find the first
+    unsaved definition. Health checks now find definitions in suffixed database assets such as
+    `ConstructibleCommonExtensionDefinitionENC.asset`, including their visual-level and affinity checks.
 
 - **FUSION KEEPS EXPOSED VERTICAL JOINS FACING OUTWARD (2026-10-04).** The Protected Cruiser's starboard wall
   beside the stairs retained all its triangles but the parity pass reversed 21 faces of `Material2_2006_Part_004`
