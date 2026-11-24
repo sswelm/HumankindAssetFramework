@@ -32,8 +32,8 @@ ours_dir() {
   # A ten-character extension can also be an ordinary word (haf-manual.checkpoint). Only real producers qualify.
   [[ "$name" =~ ^haf-(animationlab|backup-dedup|bake_commit|bake-kernels|blender-exit|buffer-hook|check-docs|decimate|deploy|editor-compile|fbx|fbx-model|gate|glb-reader|glb-writer|goldens|max-unity|native-build|native-kernels|parity-row|parity-stamp|prep|probe-perf|reader-gates|registry-engine|rig-import|riganim|tech-all|unit-table|vehicle-generate|vehicle-probe|vehicle_source_guard|vehiclelab-filter|vehiclerig|workshop-compact|workshop-golden)\.[A-Za-z0-9]{10}$ ]] ||
   [[ "$name" =~ ^haf-riganim-connected\.[A-Za-z0-9]{8}$ ]] ||
-  [[ "$name" =~ ^haf-(gate-test|oracle|oracle-sh|sweep-test|fbx-verdict|missing-mono)-[a-z0-9_]{8}$ ]] ||
-  [[ "$name" =~ ^haf-(deploy-inproc|export-evidence|fbxmat|gitstamp|glbwriter|image-parity|gltf|material-evidence|loosefile|source-guard|names|parity-selftest)-[[:xdigit:]]{32}$ ]] ||
+  [[ "$name" =~ ^haf-(gate-test|oracle|oracle-sh|sweep-test|fbx-verdict|missing-mono|techall-test)-[a-z0-9_]{8}$ ]] ||
+  [[ "$name" =~ ^haf-(deploy-inproc|export-evidence|fbxmat|gitstamp|glbwriter|image-parity|gltf|material-evidence|loosefile|source-guard|names|parity-selftest|techall-drill)-[[:xdigit:]]{32}$ ]] ||
   [[ "$name" =~ ^haf_checkedreplace_[[:xdigit:]]{32}$ ]]
 }
 

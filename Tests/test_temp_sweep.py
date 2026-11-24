@@ -68,6 +68,7 @@ class TempSweepTests(unittest.TestCase):
             self.d("haf-vehiclerig.abcdefghij", "Newtonsoft.Json.dll", "jobs.txt"),   # a killed vehicle rig drill (vr.* until 2026-11-08)
             self.d("haf-deploy.0123456789", sub=["export"]),                        # a killed standalone drill (an anonymous tmp.* until then)
             self.f("riganim_inproc_" + "b" * 32 + ".glb"),
+            self.d("haf-techall-drill-" + "e" * 32, "haf_tech_requires_all.json"),   # a killed TechRequireAll game drill (the push gate runs it since 2026-11-23)
         ]
         decoys = [
             self.d("tmp.aaaaaaaaaa"),
@@ -79,6 +80,8 @@ class TempSweepTests(unittest.TestCase):
             self.d("haf-deploy.012345678"),        # nine characters: not mktemp's suffix
             self.d("haf-oracle-sh-near-miss"),
             self.d("haf_checkedreplace_notes"),
+            self.d("haf-techall-drill-notes"),
+            self.d("haf-techall-drill-" + "f" * 31),   # 31 hex digits: not a Guid
             self.f("riganim_inproc_notes.glb"),
             self.d("0003c9ad-db78-4b51-bff6-aa4f9ea39202"),
             self.d("Microsoft.NET.Workload_1_2", "x.json"),

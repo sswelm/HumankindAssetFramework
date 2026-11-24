@@ -57,7 +57,9 @@ namespace HumankindAssetFramework.Tests
             new object[] { "{\"unitScales\":[{\"match\":\"Neg\",\"scale\":-1}]}" },              // inside-out
             new object[] { "{\"unitScales\":[{\"match\":\"NegSmall\",\"scale\":-0.0001}]}" },
             new object[] { "{\"unitScales\":[{\"match\":\"Tiny\",\"scale\":0.0001}]}" },         // positive: must survive
-            new object[] { "{\"unitScales\":[{\"match\":\"Sci\",\"scale\":1e-3}]}" },
+            new object[] { "{\"unitScales\":[{\"match\":\"SciUp\",\"scale\":1.5e+1}]}" },       // an exponent the legacy pattern took whole
+            // "scale": 1e-3 stood here until 2026-11-23 and held the parser to the legacy loop's DEFECT: its pattern has
+            // no '-' inside, so it stopped at the 'e' and dropped the rule. Now the second intended divergence, below.
             new object[] { "{\"unitScales\":[{\"match\":\"  Padded  \",\"scale\":1.2}]}" },      // trimmed key
             new object[] { "{\"unitScales\":[{\"match\":\"\",\"scale\":1.2}]}" },                // empty key: dropped
             new object[] { "{\"unitScales\":[{\"match\":\"NoScale\"}]}" },                       // no scale: dropped
@@ -108,6 +110,17 @@ namespace HumankindAssetFramework.Tests
             Assert.Contains("Zero", w);
             Assert.Contains("enc", w);
             Assert.Contains("IGNORED", w);
+        }
+
+        [Theory]
+        [InlineData("1e-3", 0.001f)]
+        [InlineData("2.5e-1", 0.25f)]
+        public void TheSecondIntendedDivergence_ANegativeExponent_IsRead_WhereTheLegacyLoopDroppedTheRule(string spelling, float want)
+        {
+            string pack = "{\"unitScales\":[{\"match\":\"Sci\",\"scale\":" + spelling + "}]}";
+            Assert.Empty(LegacyScaleRules(pack));   // the oracle really dropped it: this is a divergence, not a typo in the corpus
+            var got = UniversalInject.PackTuning.Parse(new List<KeyValuePair<string, string>> { new KeyValuePair<string, string>("p", pack) });
+            Assert.Equal(want, Assert.Single(got.ScaleRules).scale);
         }
 
         [Fact]

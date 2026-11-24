@@ -4,7 +4,7 @@ HAF is verified in **three tiers**, each a machine, each at the level where its 
 
 | Tier | Runs | Guards |
 |---|---|---|
-| **Unit tests** — **2,515 as of 2026-11-05** (`dotnet test` prints the live number; this one drifts) | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
+| **Unit tests** — **2,993 as of 2026-11-24** (`dotnet test` prints the live number; this one drifts) | `dotnet test`, the pre-push gate, CI | the pure logic: registry/parse/era, pack resolution + merge + tuning tables, pose math, dial config, the session-state rule, the smoke **verdict and classifiers**, and since 09-14 the kernels behind the game-touching code: the descriptor repoint, the multi-mesh quad estimator + partition, the district density boost, the Vehicle Lab's probe-row parser |
 | **Headless game checks** | `tools/check-catalog.sh` in the push gate; `tools/check-bindings.sh` on demand / after a game update | **two halves of one claim**: `check-catalog.sh` proves the catalog **covers the code** (every by-name literal at a reflection site is catalogued or allowlisted with a reason), `bindcheck` proves it **resolves** against the real DLLs; `typeprobe --find` / `--exact` locate a seam or a member's owner before a binding is written |
 | **In-game smoke test** — `[load]` automatic, `[full]` on the F8 button | every load (a few ms, once), and on request | the injecting half, read from the **engine**: bindings, registry, roles, assets, sounds, files, GPU budget, district tiles and textures, patched seams — and, on the button, every live pawn on *our* skeleton, pose-hook liveness, the sub-pawn walk vs a scene scan, the write-back self-test |
 
@@ -13,6 +13,36 @@ HAF is verified in **three tiers**, each a machine, each at the level where its 
 > [Shared-Schema.md](Shared-Schema.md) already fences off for the field count, caught here by a review rather than by a
 > guard. Re-check with `dotnet test Tests/HumankindAssetFramework.Tests.csproj -c Release` and read the `Total:`.
 > The number counts expanded `[Theory]` cases, so it moves faster than the count of test *methods*.
+
+**The unit suite runs under one culture on every machine (2026-11-23).** `Tests/TestBootstrap.cs` sets `nl-NL` as the
+culture of every test thread before the first test: a decimal comma, and a `.` that groups thousands, so a parse or a
+format that lost its `InvariantCulture` reads `1.5` as 15 or not at all, and a test sees it. Before this date the suite
+took the machine's culture: the author's machine is Dutch and CI's runner is en-US, where such a defect is right by
+accident. Setting the environment variable `HAF_TEST_CULTURE` to a culture name runs the suite under that culture
+(`tr-TR` for the dotless i, `en-US` to see what a dot-decimal machine hides). The name must be one the runtime lists,
+spelled as it lists it: Windows makes up a dot-decimal culture for any well-formed tag (`xx-YY`, `en-UK`), so any other
+name fails every test that touches the test assembly's code; the sentence that says why is in the output at
+`dotnet test`'s default verbosity (under `-v q` only the failures show). The push gate removes the variable, in any
+spelling of its name, before its own run of the suite.
+`Tests/TestCultureTests.cs` holds that the forced culture, the instance itself and not only its name, is in force on
+the test thread and on worker threads, and gives every float a pack can set (the shared schema's, the plugin-only
+`rotorSpinSpeed`, and `position`) a fraction that must read the same through the regex fallback of `ParseModels` as
+through the JSON parser. Not held by any test: the `muzzleOffset` and `handPropAngles` strings, which are parsed
+inside the injection code; what the code formats (a config value the F8 window writes back, a cache key, warnings,
+reports and log lines); and culture-sensitive casing (the default culture is not Turkish).
+`Tests/test_culture_override.py` checks the default and named overrides by reading VSTest's TRX result for the
+test thread's active culture. A made-up name fails the run and names the refused value. How a number
+may be SPELLED is held beside it, in `Tests/RegexFallbackNumberTests.cs`: every float dial and `position` read
+fourteen spellings (plain, negative, and exponent forms with either sign and either case) as the JSON parser and the
+runtime's own parse do, and the district fallback's flat height and a unit-scale rule read exponent forms too;
+spellings that are not JSON (`+1.5`, `0.5f`)
+read as the number they start with; a quoted number reads on both paths; and a dial left out of an entry defaults
+the same through the fallback as through the parser. District recovery tests cover omitted and unreadable fields,
+a truncated final entry, lookalike objects outside the `districts` array, and six damages to the array's own
+structure (a missing closing quote or brace, a damaged or missing wrapper) after which every district must still
+come back with its own values.
+The recovery's string, boolean and numeric fields also matched the JSON reader on the live registry, its valid backup,
+and the 2026-08-20 backup after repairing its missing comma for the comparison.
 
 The unit suite is a deliberate, bounded suite, not a coverage target: it guards the functions where bugs have actually
 hidden, and stops there on purpose. What it cannot reach — the ~18k lines that reflect into a running game — is not
@@ -38,7 +68,11 @@ rules: the list parser (a broken file is no names plus a reason, never an empty 
 The planner also refuses a locked technology whose prerequisite names are all unknown and uses the vanilla route
 for a listed technology with only one prerequisite. Three cases hold the tech screen's hint: the marked title, the
 tooltip line (a config text with a stray brace must not throw) and that the line is added once.
-`bash tools/tech_requires_all_game_drill.sh` runs the hooks against the **installed game's own assemblies**. The
+`bash tools/tech_requires_all_game_drill.sh` runs the hooks against the **installed game's own assemblies**. The push
+gate runs it since 2026-11-23 (the step *TechRequireAll game drill*, last on the lane; it SKIPs on a machine without
+the game, and CI, which has no game, does not run it): the unit suite holds the pure rules only, and a planted
+`names.Length < 2` → `< 3` in `StillLocked` passed all 2,908 unit tests while this drill failed four checks. A game
+update that changes a hooked method fails this step, and with it every push, until the hooks follow. The
 35 checks cover state updates, locked enqueue, cascading removal and the tech screen's mark. For the mark the game's
 own `TechnologyItem.RefreshTooltips` runs on items built without Unity, with three UI leaves stubbed (the description
 builder and the two widget setters): a listed technology gets the mark and the tooltip line, first with internal
@@ -57,7 +91,8 @@ cascade takes T before B and nothing is visited twice). The script then runs a s
 (12 checks): the feature is inactive, the game's ANY rule is back, the tech screen's title is plain, and the same
 saved queue is still removed cleanly, because the removal guard is not gated on the list. With the old list-gated guard planted back, that run fails with
 the game's `ArgumentOutOfRangeException`. Leaf queue mutations that need the live Sandbox are replaced by list
-operations.
+operations. Both stages must exit zero and finish with `DRILL PASS`. The wrapper tests reject a stage that exits
+zero after only loading the assemblies.
 Set `HAF_DRILL_MONO` to run the checks under the Unity editor's Mono as well. That Mono crashes while exiting, and the
 script compares its exit code with a load-only control (139). On 2026-11-21, with the push gate and the game running
 beside it, one run of three exited 127 after `DRILL PASS` and was reported as a failure; two reruns exited 139. A
@@ -294,7 +329,7 @@ also exercises the edited gate.
 
 | Surface | `tools/check.sh` (pre-push hook) | also in CI | ~time |
 |---|---|---|---|
-| **Runtime + shared contract** | `dotnet build` · `dotnet test` · the gate's own tests · GPU buffer hook drill · docs guard · binding-catalog surface · hot path · parse shape · member shape · worker thread · reader-gate drill · schema parity · parity stamp and its drill | all source-only checks (the stamp's drill; the stamp itself is the push's) | the build and tests first (seconds); the guards on a lane beside the drills |
+| **Runtime + shared contract** | `dotnet build` · `dotnet test` · the gate's own tests · GPU buffer hook drill · TechRequireAll game drill (the hooks against the installed game's assemblies; SKIP without the game) · docs guard · binding-catalog surface · hot path · parse shape · member shape · worker thread · reader-gate drill · schema parity · parity stamp and its drill | all source-only checks (the stamp's drill; the stamp itself is the push's) | the build and tests first (seconds); the guards on a lane beside the drills |
 | **Editor package** | Roslyn editor compile-check · registry engine drill · backup dedup drill · FBX reader drill (the binary record tree against an independent reader) · native kernels drill · hand-list gate · package meta · golden checksums | hand-list; compile check and drills stay local | the drills AT ONCE, the lane beside them: a few minutes |
 | **Blender parity** (`HAF_GATE=parity`: `tools/blender_parity.sh`, the Bake Tests row *Do the C# ports still match Blender?*) | GLB reader drill · GLB writer drill · Workshop compaction drill · vehicle probe drill · mesh layout, prep and deploy drills · rig_anim and vehicle_rig drills · blender exit drill · the oracle tests | never (Blender) | about twenty minutes, NOT in the push |
 

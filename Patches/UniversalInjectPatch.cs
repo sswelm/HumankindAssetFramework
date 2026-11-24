@@ -711,16 +711,12 @@ namespace HumankindAssetFramework
             return keys;
         }
 
-        // The `models` array split into one text per entry, for the regex fallback. STRING-AWARE brace counting, not
-        // a regex: a model field legitimately contains braces and brackets (`position` is an object, `hideMeshes` is
-        // free text), and a `}` inside a quoted value would split an entry in half. Escapes are honoured so a
-        // trailing backslash cannot swallow the closing quote. Returns empty when there is no `models` array at all,
-        // which is the correct answer for a wrapper-only file — and, importantly, means an `overrides` array can no
-        // longer contribute entries: it is outside the scanned region entirely.
-        internal static List<string> ModelChunks(string text)
+        // Split a registry array into entry objects for the regex fallbacks. Count braces outside strings so quoted
+        // braces and nested objects stay inside their own entry. Entries from sibling arrays cannot contribute fields.
+        internal static List<string> RegistryEntryChunks(string text, string arrayName)
         {
             var outp = new List<string>();
-            var key = Regex.Match(text ?? "", "\"models\"\\s*:\\s*\\[");
+            var key = Regex.Match(text ?? "", "\"" + Regex.Escape(arrayName) + "\"\\s*:\\s*\\[");
             if (!key.Success) return outp;
             int i = key.Index + key.Length, depth = 0, start = -1;
             bool inStr = false, esc = false;
@@ -741,13 +737,33 @@ namespace HumankindAssetFramework
                     if (--depth == 0 && start >= 0) { outp.Add(text.Substring(start, i - start + 1)); start = -1; }
                     continue;
                 }
-                if (c == ']' && depth == 0) break;   // the models array closed
+                if (c == ']' && depth == 0) break;   // the registry array closed
             }
             // An unterminated final entry (a truncated file — the shape the fallback exists for) still yields what
             // it has: better a recovered entry missing its tail than an entry silently dropped.
             if (depth > 0 && start >= 0) outp.Add(text.Substring(start));
             return outp;
         }
+
+        // ONE PATTERN FOR A NUMBER, for the three regex readers that had the defect below (2026-11-23: this fallback, the
+        // district fallback's flat height, the tuning table's unit scale). Until this date the fallback had
+        // two, copied from dial to dial: `-?[\d.eE+]+` (no `-` inside, so 1.5e-2 stopped at the `e`, the parse of "1.5e"
+        // failed and the dial came back as its DEFAULT) and, on eleven dials, `-?[0-9.]+` (no exponent at all, so 1.5e+2
+        // and 1.5e-2 both read 1.5). Plain decimals were right, which is all a test had ever given them.
+        //
+        // LENIENT ON PURPOSE. These readers exist for a file a hand has damaged, and the token that damaged it is often
+        // the number itself: `+1.5` and `0.5f` are not JSON, so they are what sends the file here. The pattern reads the
+        // number a token STARTS with - a sign of either kind, digits and points, an exponent when it is complete - and
+        // leaves the rest. The first version of this constant refused a token that was not wholly a number (a
+        // lookahead): `+1.5` and `0.5f`, which both old patterns or one of them had read, came back as defaults, and in
+        // the district reader, which pairs values by position, every later district took its neighbour's height (the
+        // review of PR #315). float.TryParse still decides what is a number: 1.2.3 is matched whole and refused.
+        internal const string JsonNumber = @"[+-]?[0-9.]+(?:[eE][+-]?[0-9]+)?";
+
+        // What a reader appends after `"key"\s*:\s*`: the number as ONE capture group, in quotes or not. The JSON parser
+        // takes "0.5" for a float field, so the fallback does too; before, a quoted number was never matched and the
+        // dial fell to its default.
+        internal const string JsonFloat = "\"?(" + JsonNumber + ")\"?";
 
         internal static List<ModelEntry> ParseModels(string doc)
         {
@@ -850,7 +866,7 @@ namespace HumankindAssetFramework
                 // an entry didn't write simply isn't in its chunk, so it falls to the same default the object path uses.
                 // This path runs exactly when the document is already damaged, which is when being right matters most.
                 const string i4 = @"\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]";
-                foreach (var chunk in ModelChunks(doc))
+                foreach (var chunk in RegistryEntryChunks(doc, "models"))
                 {
                     var text = chunk;   // every Regex.Matches below reads THIS entry's object, not the document
                 var rn = Regex.Matches(text, "\"resourceName\"\\s*:\\s*\"([^\"]*)\"");
@@ -867,11 +883,13 @@ namespace HumankindAssetFramework
                 var cidR = Regex.Matches(text, "\"clipIdle\"\\s*:\\s*" + i4);   // parity: STATE-DRIVEN idle-override ClipCollection guid
                 var calR = Regex.Matches(text, "\"clipIdleAlt\"\\s*:\\s*" + i4);   // parity: idle-alt flavor one-shot ClipCollection guid
                 var ca2R = Regex.Matches(text, "\"clipIdleAlt2\"\\s*:\\s*" + i4);  // parity: second idle-alt flavor ClipCollection guid
-                var iai = Regex.Matches(text, "\"idleAltInterval\"\\s*:\\s*(-?[\\d.eE+]+)");   // parity: avg seconds between idle-alt one-shots
-                var aps = Regex.Matches(text, "\"animPhaseSpread\"\\s*:\\s*(-?[\\d.eE+]+)");  // parity: per-instance animation phase spread
+                var iai = Regex.Matches(text, "\"idleAltInterval\"\\s*:\\s*" + JsonFloat);   // parity: avg seconds between idle-alt one-shots
+                var aps = Regex.Matches(text, "\"animPhaseSpread\"\\s*:\\s*" + JsonFloat);  // parity: per-instance animation phase spread
                 var asd = Regex.Matches(text, "\"animStateDriven\"\\s*:\\s*(true|false)");   // parity: state-driven mode flag
                 // position object {x,y,z} — JsonUtility writes Vector3 in x,y,z order. Applied as a runtime world offset for animated models.
-                var po = Regex.Matches(text, "\"position\"\\s*:\\s*\\{\\s*\"x\"\\s*:\\s*(-?[\\d.eE+]+)\\s*,\\s*\"y\"\\s*:\\s*(-?[\\d.eE+]+)\\s*,\\s*\"z\"\\s*:\\s*(-?[\\d.eE+]+)");
+                // `[^,}]*` after x and y: what trails a number before its comma (0.5f, 2.5em) is skipped, so one hand-typed
+                // suffix does not cost the whole vector. Until 2026-11-23 it did, for x and y (z, the last, was read).
+                var po = Regex.Matches(text, "\"position\"\\s*:\\s*\\{\\s*\"x\"\\s*:\\s*" + JsonFloat + "[^,}]*,\\s*\"y\"\\s*:\\s*" + JsonFloat + "[^,}]*,\\s*\"z\"\\s*:\\s*" + JsonFloat);
                 var ra = Regex.Matches(text, "\"respawnAfterLoad\"\\s*:\\s*(true|false)");   // parity with the Newtonsoft path (line ~77) — else the first-instance rotor fix silently defaults off here
                 var fz = Regex.Matches(text, "\"freezeDonorAnim\"\\s*:\\s*(true|false)");   // parity with the Newtonsoft path — else the donor-animation freeze silently defaults off here
                 var cal = Regex.Matches(text, "\"clearAimLayer\"\\s*:\\s*(true|false)");    // parity: per-model aim-layer clear (state-driven artillery)
@@ -880,53 +898,53 @@ namespace HumankindAssetFramework
                 var dos = Regex.Matches(text, "\"deployOnStop\"\\s*:\\s*(true|false)");     // parity: hold deployed when idle, undeploy while moving
                 var eng = Regex.Matches(text, "\"engineSound\"\\s*:\\s*(true|false)");      // parity: fire the per-ship engine move sound on our units
                 var hsp = Regex.Matches(text, "\"hideSubPawns\"\\s*:\\s*(true|false)");    // parity: strip the donor's secondary sub-pawns (the "GPU rotor")
-                var mtl = Regex.Matches(text, "\"moveTilt\"\\s*:\\s*(-?[0-9.]+)");         // parity: nose-down pitch while moving (helicopter attitude)
-                var trt = Regex.Matches(text, "\"turnRate\"\\s*:\\s*(-?[0-9.]+)");         // parity: eased facing, deg/s
-                var tbk = Regex.Matches(text, "\"turnBank\"\\s*:\\s*(-?[0-9.]+)");         // parity: bank into the turn, degrees
-                var gem = Regex.Matches(text, "\"gunElevMax\"\\s*:\\s*(-?[0-9.]+)");       // parity: distance-proportional barrel elevation, max degrees
+                var mtl = Regex.Matches(text, "\"moveTilt\"\\s*:\\s*" + JsonFloat);         // parity: nose-down pitch while moving (helicopter attitude)
+                var trt = Regex.Matches(text, "\"turnRate\"\\s*:\\s*" + JsonFloat);         // parity: eased facing, deg/s
+                var tbk = Regex.Matches(text, "\"turnBank\"\\s*:\\s*" + JsonFloat);         // parity: bank into the turn, degrees
+                var gem = Regex.Matches(text, "\"gunElevMax\"\\s*:\\s*" + JsonFloat);       // parity: distance-proportional barrel elevation, max degrees
                 var gea = Regex.Matches(text, "\"gunElevAxis\"\\s*:\\s*(-?[0-9]+)");       // parity: elevation local axis index
-                var ger = Regex.Matches(text, "\"gunElevRise\"\\s*:\\s*(-?[0-9.]+)");      // parity: seconds to raise (0 = track the turn)
-                var geh = Regex.Matches(text, "\"gunElevHold\"\\s*:\\s*(-?[0-9.]+)");      // parity: seconds the barrel holds its firing angle after the shot
-                var gef = Regex.Matches(text, "\"gunElevFall\"\\s*:\\s*(-?[0-9.]+)");      // parity: seconds to ease back to the resting elevation
-                var hgd = Regex.Matches(text, "\"hugDrop\"\\s*:\\s*(-?[0-9.]+)");          // parity: terrain hug drop, units
-                var hgl = Regex.Matches(text, "\"hugLookahead\"\\s*:\\s*(-?[0-9.]+)");     // parity: terrain hug probe lead, units
-                var cbz = Regex.Matches(text, "\"combatZ\"\\s*:\\s*(-?[0-9.]+)");          // parity: combat height offset, units (− submerges)
+                var ger = Regex.Matches(text, "\"gunElevRise\"\\s*:\\s*" + JsonFloat);      // parity: seconds to raise (0 = track the turn)
+                var geh = Regex.Matches(text, "\"gunElevHold\"\\s*:\\s*" + JsonFloat);      // parity: seconds the barrel holds its firing angle after the shot
+                var gef = Regex.Matches(text, "\"gunElevFall\"\\s*:\\s*" + JsonFloat);      // parity: seconds to ease back to the resting elevation
+                var hgd = Regex.Matches(text, "\"hugDrop\"\\s*:\\s*" + JsonFloat);          // parity: terrain hug drop, units
+                var hgl = Regex.Matches(text, "\"hugLookahead\"\\s*:\\s*" + JsonFloat);     // parity: terrain hug probe lead, units
+                var cbz = Regex.Matches(text, "\"combatZ\"\\s*:\\s*" + JsonFloat);          // parity: combat height offset, units (− submerges)
                 var sda = Regex.Matches(text, "\"silenceDonorAudio\"\\s*:\\s*(true|false)"); // parity: suppress the borrowed donor's Wwise sound (idle + combat)
                 var svx = Regex.Matches(text, "\"silenceDonorVfx\"\\s*:\\s*(true|false)");   // parity: suppress the donor's MecanimEvent VFX (misplaced muzzle flashes)
                 var udc = Regex.Matches(text, "\"useDonorClip\"\\s*:\\s*(true|false)");   // parity: donor clip drives the unit
                 var rsb = Regex.Matches(text, "\"rotorSpinBones\"\\s*:\\s*\"([^\"]*)\"");  // parity: reclaimed rotor bones
-                var rss = Regex.Matches(text, "\"rotorSpinSpeed\"\\s*:\\s*(-?[0-9.]+)");   // parity: rotor spin deg/s
+                var rss = Regex.Matches(text, "\"rotorSpinSpeed\"\\s*:\\s*" + JsonFloat);   // parity: rotor spin deg/s
                 var esa = Regex.Matches(text, "\"engineStartEvent\"\\s*:\\s*\"([^\"]*)\"");  // parity: Wwise event name posted on move-start
                 var eso = Regex.Matches(text, "\"engineStopEvent\"\\s*:\\s*\"([^\"]*)\"");    // parity: Wwise event name posted on move-stop
                 var sf = Regex.Matches(text, "\"soundFile\"\\s*:\\s*\"([^\"]*)\"");           // parity: custom WAV loop in haf_sounds/
                 var sfa = Regex.Matches(text, "\"soundStartFile\"\\s*:\\s*\"([^\"]*)\"");     // parity: custom WAV one-shot on move-start
                 var sfo = Regex.Matches(text, "\"soundStopFile\"\\s*:\\s*\"([^\"]*)\"");      // parity: custom WAV one-shot on move-stop
-                var svl = Regex.Matches(text, "\"soundVolume\"\\s*:\\s*(-?[\\d.eE+]+)");       // parity: travel-loop volume
-                var svs = Regex.Matches(text, "\"soundStartVolume\"\\s*:\\s*(-?[\\d.eE+]+)");  // parity: start one-shot volume
-                var svp = Regex.Matches(text, "\"soundStopVolume\"\\s*:\\s*(-?[\\d.eE+]+)");   // parity: stop one-shot volume
+                var svl = Regex.Matches(text, "\"soundVolume\"\\s*:\\s*" + JsonFloat);       // parity: travel-loop volume
+                var svs = Regex.Matches(text, "\"soundStartVolume\"\\s*:\\s*" + JsonFloat);  // parity: start one-shot volume
+                var svp = Regex.Matches(text, "\"soundStopVolume\"\\s*:\\s*" + JsonFloat);   // parity: stop one-shot volume
                 var sif = Regex.Matches(text, "\"soundIdleFile\"\\s*:\\s*\"([^\"]*)\"");      // parity: custom WAV growl played occasionally while idle
-                var siv = Regex.Matches(text, "\"soundIdleVolume\"\\s*:\\s*(-?[\\d.eE+]+)");   // parity: idle-growl one-shot volume
-                var sii = Regex.Matches(text, "\"soundIdleInterval\"\\s*:\\s*(-?[\\d.eE+]+)"); // parity: avg seconds between idle growls
-                var sig = Regex.Matches(text, "\"soundIdleGroupRadius\"\\s*:\\s*(-?[\\d.eE+]+)"); // parity: group de-dup radius for idle growls
+                var siv = Regex.Matches(text, "\"soundIdleVolume\"\\s*:\\s*" + JsonFloat);   // parity: idle-growl one-shot volume
+                var sii = Regex.Matches(text, "\"soundIdleInterval\"\\s*:\\s*" + JsonFloat); // parity: avg seconds between idle growls
+                var sig = Regex.Matches(text, "\"soundIdleGroupRadius\"\\s*:\\s*" + JsonFloat); // parity: group de-dup radius for idle growls
                 var saf = Regex.Matches(text, "\"soundAttackFile\"\\s*:\\s*\"([^\"]*)\"");        // parity: custom WAV one-shot on attack
-                var sav = Regex.Matches(text, "\"soundAttackVolume\"\\s*:\\s*(-?[\\d.eE+]+)");    // parity: attack one-shot volume
-                var sao = Regex.Matches(text, "\"soundAttackOffset\"\\s*:\\s*(-?[\\d.eE+]+)");    // parity: attack one-shot start offset (s into the WAV)
+                var sav = Regex.Matches(text, "\"soundAttackVolume\"\\s*:\\s*" + JsonFloat);    // parity: attack one-shot volume
+                var sao = Regex.Matches(text, "\"soundAttackOffset\"\\s*:\\s*" + JsonFloat);    // parity: attack one-shot start offset (s into the WAV)
                 var sdf = Regex.Matches(text, "\"soundDeathFile\"\\s*:\\s*\"([^\"]*)\"");         // parity: custom WAV one-shot on death
-                var sdv = Regex.Matches(text, "\"soundDeathVolume\"\\s*:\\s*(-?[\\d.eE+]+)");     // parity: death one-shot volume
-                var sdo = Regex.Matches(text, "\"soundDeathOffset\"\\s*:\\s*(-?[\\d.eE+]+)");     // parity: death one-shot start offset
+                var sdv = Regex.Matches(text, "\"soundDeathVolume\"\\s*:\\s*" + JsonFloat);     // parity: death one-shot volume
+                var sdo = Regex.Matches(text, "\"soundDeathOffset\"\\s*:\\s*" + JsonFloat);     // parity: death one-shot start offset
                 var sbf = Regex.Matches(text, "\"soundBattleFile\"\\s*:\\s*\"([^\"]*)\"");        // parity: custom WAV war cry on battle start
-                var sbv = Regex.Matches(text, "\"soundBattleVolume\"\\s*:\\s*(-?[\\d.eE+]+)");    // parity: war-cry volume
-                var sbo = Regex.Matches(text, "\"soundBattleOffset\"\\s*:\\s*(-?[\\d.eE+]+)");    // parity: war-cry start offset
-                var dpt = Regex.Matches(text, "\"deployPoseTime\"\\s*:\\s*(-?[\\d.eE+]+)"); // parity: normalized clip time of the deployed pose (default 1)
-                var arp = Regex.Matches(text, "\"attackRepeats\"\\s*:\\s*(-?[\\d.eE+]+)");  // parity: STATE-DRIVEN attack clip replay count per trigger (default 1)
-                var dsp = Regex.Matches(text, "\"deploySpeed\"\\s*:\\s*(-?[\\d.eE+]+)");    // parity: gradual-deploy ramp speed multiplier (default 1)
-                var rsp = Regex.Matches(text, "\"recoilSpeed\"\\s*:\\s*(-?[\\d.eE+]+)");   // parity: recoil-on-fire playback speed multiplier (default 1)
-                var sc = Regex.Matches(text, "\"scale\"\\s*:\\s*(-?[\\d.eE+]+)");           // runtime ObjectSpace scale multiplier (default 1)
-                var bri = Regex.Matches(text, "\"brightness\"\\s*:\\s*(-?[\\d.eE+]+)");     // universal skin brightness gamma (default 1 = unchanged)
-                var des = Regex.Matches(text, "\"desaturate\"\\s*:\\s*(-?[\\d.eE+]+)");     // texture-only grey strength (default 0 = off)
-                var tR = Regex.Matches(text, "\"tintR\"\\s*:\\s*(-?[\\d.eE+]+)");           // universal skin colour offset R (-255..255)
-                var tG = Regex.Matches(text, "\"tintG\"\\s*:\\s*(-?[\\d.eE+]+)");           // ... G
-                var tB = Regex.Matches(text, "\"tintB\"\\s*:\\s*(-?[\\d.eE+]+)");           // ... B
+                var sbv = Regex.Matches(text, "\"soundBattleVolume\"\\s*:\\s*" + JsonFloat);    // parity: war-cry volume
+                var sbo = Regex.Matches(text, "\"soundBattleOffset\"\\s*:\\s*" + JsonFloat);    // parity: war-cry start offset
+                var dpt = Regex.Matches(text, "\"deployPoseTime\"\\s*:\\s*" + JsonFloat); // parity: normalized clip time of the deployed pose (default 1)
+                var arp = Regex.Matches(text, "\"attackRepeats\"\\s*:\\s*" + JsonFloat);  // parity: STATE-DRIVEN attack clip replay count per trigger (default 1)
+                var dsp = Regex.Matches(text, "\"deploySpeed\"\\s*:\\s*" + JsonFloat);    // parity: gradual-deploy ramp speed multiplier (default 1)
+                var rsp = Regex.Matches(text, "\"recoilSpeed\"\\s*:\\s*" + JsonFloat);   // parity: recoil-on-fire playback speed multiplier (default 1)
+                var sc = Regex.Matches(text, "\"scale\"\\s*:\\s*" + JsonFloat);           // runtime ObjectSpace scale multiplier (default 1)
+                var bri = Regex.Matches(text, "\"brightness\"\\s*:\\s*" + JsonFloat);     // universal skin brightness gamma (default 1 = unchanged)
+                var des = Regex.Matches(text, "\"desaturate\"\\s*:\\s*" + JsonFloat);     // texture-only grey strength (default 0 = off)
+                var tR = Regex.Matches(text, "\"tintR\"\\s*:\\s*" + JsonFloat);           // universal skin colour offset R (-255..255)
+                var tG = Regex.Matches(text, "\"tintG\"\\s*:\\s*" + JsonFloat);           // ... G
+                var tB = Regex.Matches(text, "\"tintB\"\\s*:\\s*" + JsonFloat);           // ... B
                 var txf = Regex.Matches(text, "\"textureFile\"\\s*:\\s*\"([^\"]*)\"");      // texture-only retexture: PNG filename in haf_skins/
                 var hpn = Regex.Matches(text, "\"handPropName\"\\s*:\\s*\"([^\"]*)\"");     // parity: hand-prop resource name
                 var hpg = Regex.Matches(text, "\"handPropGuid\"\\s*:\\s*\"([^\"]*)\"");     // parity: hand-prop collection guid csv
@@ -959,7 +977,7 @@ namespace HumankindAssetFramework
                         sa = i < sk.Count ? G(sk[i], 1) : 0, sb = i < sk.Count ? G(sk[i], 2) : 0, sc = i < sk.Count ? G(sk[i], 3) : 0, sd = i < sk.Count ? G(sk[i], 4) : 0,
                         ta = i < at.Count ? G(at[i], 1) : 0, tb = i < at.Count ? G(at[i], 2) : 0, tc = i < at.Count ? G(at[i], 3) : 0, td = i < at.Count ? G(at[i], 4) : 0,
                         animStateDriven = i < asd.Count && asd[i].Groups[1].Value == "true",
-                        idleAltInterval = i < iai.Count && float.TryParse(iai[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _iai) ? _iai : 0f,
+                        idleAltInterval = i < iai.Count && float.TryParse(iai[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _iai) ? _iai : 25f,   // the schema's default, as the JSON path leaves it: 0 switched the idle-alt one-shots off (2026-11-23)
                         animPhaseSpread = i < aps.Count && float.TryParse(aps[i].Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var _aps) ? _aps : 0.5f,
                         position = i < po.Count ? new UnityEngine.Vector3(F(po[i], 1), F(po[i], 2), F(po[i], 3)) : UnityEngine.Vector3.zero,
                         respawnAfterLoad = i < ra.Count && ra[i].Groups[1].Value == "true",

@@ -56,6 +56,134 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     distance, or a reset on a new file, would be a change to the fuse's inputs and is left for a decision. The window
     itself was compiled against Unity's assemblies, not opened; its dial label is longer than the label column and is
     probably cut off there, as the old one was.
+- **The regex readers take a number however it is spelled, and the fallback's `idleAltInterval` default is the
+  schema's (2026-11-23).** Found by the review of the culture PR, whose fraction test passes because a plain decimal
+  was always read right.
+  - **The defect:** the fallback of `ParseModels` read floats with two patterns copied from dial to dial.
+    `-?[\d.eE+]+` has no `-` inside: on 23 dials `1.5e-2` stopped at the `e`, the parse of `1.5e` failed, and the dial
+    came back as its default. `-?[0-9.]+`, on eleven dials, has no exponent: `1.5e+2` and `1.5e-2` both read 1.5. The
+    first pattern also sat in the district fallback (`footprintMeshFlatHeight`) and in the pack tuning table's
+    `scale`, which is read by pattern on the main path: a rule with `"scale": 2.5e-1` was dropped without a word.
+  - **When the fallback runs:** when the document does not parse as JSON, and also when it parses and no entry can be
+    mapped (a one-model pack with one refused value), or when `models` sits under a wrapper key.
+  - **The fix:** one pattern, `UniversalInject.JsonNumber`, in those three readers (40 captures, 38 of them in
+    `ParseModels`: 39 floats and the integer `attackRepeats`, which shared the first pattern). It is lenient on purpose: these readers exist for a file a hand has damaged, and the number is
+    often the damage. It reads the number a token starts with: a sign of either kind, digits and points, an exponent
+    when it is complete. `+1.5` reads 1.5, `0.5f` reads 0.5, `2.5em` reads 2.5.
+  - **Also:** a number in quotes is read (the JSON parser takes `"0.5"` for a float; the fallback never matched one).
+    In `position`, a suffix on x or y no longer costs the whole vector. District recovery now reads one object at a
+    time from the `districts` array. Omitted or unreadable fields use that district's defaults, and later values
+    stay with their own districts.
+  - **District recovery when the braces cannot be trusted (2026-11-24):** one object per district is found by
+    counting braces, so a closing quote or brace missing in one district swallowed every district after it, and a
+    damaged `"districts": [` left nothing to count. Measured on three districts: 1 and 0 recovered, where the reader
+    before it (values paired by position) still named all three. The reader now notices (fewer
+    named objects than names in the text) and reads each district from its `"district"` key to the next one: all
+    three come back, each with its own values. Six such damages are held by
+    `Tests/DistrictRegistryParseTests.cs`; four plants in the new code are caught. On the live registry, its backup
+    and the corrupt backup of 2026-08-20 the three versions of the reader give the same result.
+  - **A second fix in the same lines:** a pack that needed the fallback and left `idleAltInterval` out got 0 (the
+    idle-alt one-shots off) where the JSON path gives the schema's 25. Reviews carried it from 2026-10-12 on; the Review-Backlog had
+    marked it fixed on the strength of the JSON path alone. A quoted `"0"` still reads 0.
+  - **The first version of this fix was wrong, and the review caught it:** it refused any token that was not wholly
+    a number. `+1.5` and `0.5f`, which the old patterns read, came back as defaults, and in the district reader an
+    unread height shifted every later district's height by one. It was never merged.
+  - **Tests (`Tests/RegexFallbackNumberTests.cs`, 59 cases; the suite is 2,993):** every float a pack can set, and
+    `position`, in fourteen spellings against the runtime's own parse and the JSON parser; six spellings that are not
+    JSON; four things that are not numbers; quoted numbers on both paths; `idleAltInterval` with a value that is not
+    a number; a parseable document that still takes the fallback; every float dial left out; the district fallback,
+    its spellings and its alignment over three districts; the unit-scale rule; `attackRepeats`; one unreadable
+    number of `position`. `PackTuningLegacyParityTests` loses
+    its `1e-3` row, which held the parser to the legacy loop's defect, and gains it as a second intended divergence.
+  - **Old against new, token by token:** over 602,118 tokens (floats over the whole range in five spellings, and
+    about 4,500 hand-made shapes) all 597,675 valid numbers read right, where the first old pattern was wrong on
+    151,207 and the second on 270,819. Nothing an old pattern read correctly is lost. The one class that went from
+    a read to the default: a number past a float's range (`1e39`), which the second old pattern read as 1.
+  - **Planted in the fixed code, fourteen defects, all caught:** the lookahead back, the leading `+` removed, either
+    sign of the exponent removed, a lower-case `e` only, an exponent without digits accepted, the quotes removed,
+    `position`'s comma strict again, `turnRate` and `soundVolume` back on their old patterns, the default back to 0,
+    the district capture not optional, the district reader and the tuning table back on the old pattern.
+  - **On the real data:** nothing changes. ENC's `pack.json` (50 models) holds no number in exponent form and names
+    `idleAltInterval` on every entry. The old and the new readers were run over the source pack, the deployed pack,
+    the live district registry, its backup, and a corrupt district backup of 2026-08-20 that only the fallback can
+    read: the dump of all five is byte for byte the same. Through the fallback (forced by breaking a copy) the pack
+    reads as through the JSON parser: 1,700 dial floats, 150 numbers of `position` and 150 integers, none different
+    (a reviewer's count, on 50 models).
+  - **Not fixed, recorded in the Review-Backlog:** neither path clamps an extreme value (a `scale` of `1e-30` is now
+    read by the fallback as the JSON path always read it); the JSON path reads `1e39` as Infinity where the fallback
+    gives the default; the integer dials read `3.0` as their default.
+  - **Needs a plugin build and deploy** to reach the game (`tools/deploy-plugin.sh`); not done by this PR.
+
+- **The unit suite runs under a comma-decimal culture on every machine (2026-11-23).** From the critical review of
+  that day: the suite took the machine's culture, so a dropped `InvariantCulture` failed on the author's Dutch machine
+  and passed on CI's en-US runner.
+  - **Measured by the review:** of 15 production files whose `InvariantCulture` → `CurrentCulture` plant failed the
+    suite under nl-NL, 12 passed it under en-US.
+  - **The change:** `Tests/TestBootstrap.cs` (the module initializer that already seeds `Plugin.Log`) sets `nl-NL` as
+    the default culture of every thread in the test domain. The environment variable `HAF_TEST_CULTURE` runs the
+    suite under another culture. Its name must be one the runtime lists, as written: Windows makes up a dot-decimal
+    culture for any well-formed tag, and under `xx-YY` or `en-UK` the first version of this change ran the whole
+    suite green (the PR's review). Any other name now fails the run, and the output says why at `dotnet test`'s
+    default verbosity. The push gate removes the variable, in any spelling of its name (PowerShell's
+    `$env:haf_test_culture` reaches bash in lower case), before its own run of the suite.
+  - **From outside (`Tests/test_culture_override.py`, in the gate and in CI):** a run of `dotnet test` with a listed
+    name passes under it, and with `en-UK`, `xx-YY` or `nl_NL` fails and prints the sentence. A module initializer
+    that swallowed the refusal passed all 2,923 tests (the PR's second review); no test inside the assembly can
+    see that.
+  - **New tests (`Tests/TestCultureTests.cs`, 15 cases; the suite is 2,923):** the forced culture, the instance and
+    not only its name, is in force on the test thread, a new thread, a thread-pool worker and a parallel loop; the
+    default is comma-decimal; an unlisted or misspelled name is refused; and every float a pack can set (the shared
+    schema's, the plugin-only `rotorSpinSpeed`, and `position`) reads a fraction the same through the regex fallback
+    of `ParseModels` as through the JSON parser. Until now no test gave the fallback a fraction.
+  - **Planted:** `CurrentCulture` in the fallback's `scale`, `turnRate`, `rotorSpinSpeed` and `position` reads: each
+    fails the suite under the default culture and passes under `HAF_TEST_CULTURE=en-US` (what CI saw before). With
+    the bootstrap's culture line removed, the two thread tests fail on the author's Dutch machine too (the first
+    version compared names, and both cultures are called nl-NL there). With the listed-name check removed, the five
+    refusal cases fail.
+  - **The whole suite passes** under nl-NL (the default), en-US and tr-TR, and in the PR's CI. CI now prints the
+    runner's own culture before the tests, so that a pass on a dot-decimal machine is in the log.
+  - **Found by the review, not fixed here (a runtime defect, in the Review-Backlog):** the regex fallback does not
+    read a number in exponent form whole. On 23 float dials `1.5e-2` comes back as the default; on the other
+    eleven it reads 1.5, as `1.5e+2` does.
+  - **Not covered:** the `muzzleOffset` and `handPropAngles` strings (parsed inside the injection code, not in a
+    function a test can call); what the code FORMATS (five `InvariantCulture` plants in formats passed the suite:
+    the roughness value the F8 window writes back to the config, a cache key of the `.max` reader, a validator
+    warning, a report's size and a log line); and culture-sensitive casing: the default culture is not Turkish.
+
+- **The push gate runs the TechRequireAll game drill (2026-11-23).** From the critical review of that day: the unit
+  suite holds the pure rules (`TechRequireAllRules`), and the hook bodies in `Patches/TechRequireAllPatch.cs` (the ALL
+  rule in the state update, the locked enqueue, the cascading removal's guard) were run by
+  `tools/tech_requires_all_game_drill.sh` alone, which no gate ran.
+  - **Measured on master 3149f65:** with `names.Length < 2` changed to `< 3` in `StillLocked` (a technology with two
+    prerequisites unlocks on either one), 2,908 of 2,908 unit tests pass and the drill fails four checks.
+  - **The step:** `tools/check.sh` runs the drill in the push mode, last on the lane. It reads the installed game's
+    `Managed` folder (`HK_MANAGED`, default the Steam path) and needs neither Unity nor Blender. Without the game it
+    SKIPs, and a SKIP fails the push unless `HAF_ALLOW_SKIP=1` (the gate's rule for every missing prerequisite). CI
+    has no game and does not run it.
+  - **Why last on the lane:** the script builds the plugin itself, so it judges the tree being pushed. The buffer
+    hook drill builds the same project the moment the drills start; the two builds at once, with a recompile forced
+    in every round, failed one round in ten on each other's files (measured in the PR's review). At the end of the
+    lane nothing else builds the plugin. The lane is the gate's longest path, so the gate is about 5 s longer.
+  - **A wrong folder is named:** `HK_MANAGED` pointing at a folder without one of the three game assemblies the
+    drill loads by name (the game's root, an empty folder) fails with a sentence that says so. Before, the drill died
+    on its first load with a `FileNotFoundException`; a folder that holds those three and lacks the rest still does.
+  - **The stage is the script's:** the first pass runs with `HAF_DRILL_STAGE=full` whatever the shell exports. With
+    `load` or `nolist` left over from a hand run the script printed PASS on 12 or 24 checks instead of 47 (the PR's
+    second review).
+  - **A game update can fail the push:** if an update changes a hooked method, this step fails on every push until
+    the hooks follow. That is also when the feature is broken in the game.
+  - **The temp sweeper owns the drill's config folder** (`haf-techall-drill-<guid>` under `%TEMP%`): the drill
+    removes it at exit, and a killed drill left it for good.
+  - **Checked:** the drill passes on master and fails (rc 1, four checks) with the plant; `HK_MANAGED` pointed at a
+    missing folder exits 3 (SKIP), at an empty folder and at the game's root exits 1 with the sentence;
+    `Tests/test_parallel_gate.py` requires the step in the push and all modes, on the lane and last, with exactly
+    its command, and its absence in the parity mode, and fails with the step removed, started beside the drills or
+    its command replaced. `Tests/test_tech_drill_script.py` (5 tests, in the gate and in CI) holds the script's
+    statuses without the game; `Tests/test_temp_sweep.py` holds the sweeper's new name.
+  - **What the drill itself does not hold** (planted in the PR's review: 11 of 18 hook plants fail the drill, 7
+    pass it, 5 of those matter in the game): see [Review-Backlog](docs/Review-Backlog.md), *Five hook behaviours
+    the game drill does not hold*. The gate now runs the drill as it is; widening it is separate work.
+  - **Not checked:** the Mono run of the drill (`HAF_DRILL_MONO`) is not part of the gate.
 - **Vehicle Lab: Wheel centre, for a screw that wobbles (2026-11-23, PR #314).** Reported by the user on the H.L. Hunley
   submarine: "there is a problem making the screw rotate correctly, the middle of the axis is way off when rotating".
   - **Measured first.** The Lab puts a wheel bone at the middle of the wheel's bounding box. The Hunley's screw has
