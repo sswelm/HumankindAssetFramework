@@ -30,7 +30,8 @@ the test thread and on worker threads, and gives every float a pack can set (the
 through the JSON parser. Not held by any test: the `muzzleOffset` and `handPropAngles` strings, which are parsed
 inside the injection code; what the code formats (a config value the F8 window writes back, a cache key, warnings,
 reports and log lines); and culture-sensitive casing (the default culture is not Turkish).
-`Tests/test_culture_override.py` holds the override from outside the suite: a made-up name fails the run. How a number
+`Tests/test_culture_override.py` checks the default and named overrides by reading VSTest's TRX result for the
+test thread's active culture. A made-up name fails the run and names the refused value. How a number
 may be SPELLED is held beside it, in `Tests/RegexFallbackNumberTests.cs`: every float dial and `position` read
 fourteen spellings (plain, negative, and exponent forms with either sign and either case) as the JSON parser and the
 runtime's own parse do, and the district fallback's flat height and a unit-scale rule read exponent forms too;
@@ -85,7 +86,8 @@ cascade takes T before B and nothing is visited twice). The script then runs a s
 (12 checks): the feature is inactive, the game's ANY rule is back, the tech screen's title is plain, and the same
 saved queue is still removed cleanly, because the removal guard is not gated on the list. With the old list-gated guard planted back, that run fails with
 the game's `ArgumentOutOfRangeException`. Leaf queue mutations that need the live Sandbox are replaced by list
-operations.
+operations. Both stages must exit zero and finish with `DRILL PASS`. The wrapper tests reject a stage that exits
+zero after only loading the assemblies.
 Set `HAF_DRILL_MONO` to run the checks under the Unity editor's Mono as well. That Mono crashes while exiting, and the
 script compares its exit code with a load-only control (139). On 2026-11-21, with the push gate and the game running
 beside it, one run of three exited 127 after `DRILL PASS` and was reported as a failure; two reruns exited 139. A

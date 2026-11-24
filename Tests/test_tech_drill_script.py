@@ -1,10 +1,4 @@
-"""tools/tech_requires_all_game_drill.sh before it builds or loads anything: what it says about the game's folder.
-
-The push gate reads this script's exit status: 0 PASS, 3 SKIP (the game is not installed: its claim was NOT tested),
-anything else FAIL. Until 2026-11-23 no test read those statuses, and the plants of the second review of PR #312 passed
-every check: a missing game exiting 0 (the gate would print [PASS] on a machine that drilled nothing), a wrong folder
-exiting 3. The folder checks run before the first build, so these tests need neither the game nor dotnet.
-"""
+"""Verify the TechRequireAll drill's prerequisite and completion checks without installing the game or building the plugin."""
 import os
 from pathlib import Path
 import shutil
@@ -73,14 +67,49 @@ class TechDrillScriptTests(unittest.TestCase):
         for name in NAMED:
             self.assertIn('Path.Combine(Managed, "' + name + '")', source, name)
 
-    def test_every_pass_of_the_drill_sets_its_own_stage(self):
-        # An exported HAF_DRILL_STAGE=load made the first pass run that stage: PASS on 12 checks instead of 47.
-        text = DRILL.read_text(encoding="utf-8")
-        runs = [line.strip() for line in text.splitlines() if '"$EXE"' in line and not line.lstrip().startswith("#")]
-        self.assertGreaterEqual(len(runs), 4, runs)   # with a list, without one, and the two Mono runs
-        self.assertEqual([], [line for line in runs if "HAF_DRILL_STAGE=" not in line], "a run of the drill without a stage of its own")
-        self.assertIn('HAF_DRILL_STAGE=full "$EXE" "$WMANAGED"; rc=$?', text)
-        self.assertIn('HAF_DRILL_STAGE=nolist "$EXE" "$WMANAGED"; rc=$?', text)
+    def stub_native_drill(self, full_record, nolist_record):
+        root = self.root / "fixture"
+        tools = root / "tools"
+        managed = root / "managed"
+        bin_dir = root / "bin"
+        exe_dir = tools / "tech-requires-all-drill/bin/Release"
+        for directory in (managed, bin_dir, exe_dir):
+            directory.mkdir(parents=True, exist_ok=True)
+        for name in NAMED:
+            (managed / name).touch()
+        script = tools / DRILL.name
+        shutil.copyfile(DRILL, script)
+        dotnet = bin_dir / "dotnet"
+        dotnet.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8", newline="\n")
+        dotnet.chmod(0o755)
+        exe = exe_dir / "HumankindAssetFramework.Tests.exe"
+        exe.write_text("""#!/usr/bin/env bash
+printf 'stage %s\\n' "$HAF_DRILL_STAGE"
+case "$HAF_DRILL_STAGE" in
+    full) printf '%s\\r\\n' "$TECH_TEST_FULL_RECORD";;
+    nolist) printf '%s\\r\\n' "$TECH_TEST_NOLIST_RECORD";;
+    *) exit 1;;
+esac
+""", encoding="utf-8", newline="\n")
+        exe.chmod(0o755)
+        env = dict(os.environ)
+        env.pop("HAF_DRILL_MONO", None)
+        env.update(HAF_DRILL_STAGE="load", TECH_TEST_FULL_RECORD=full_record, TECH_TEST_NOLIST_RECORD=nolist_record)
+        launcher = 'dir=$1; shift; if command -v cygpath >/dev/null; then dir=$(cygpath -u "$dir"); fi; PATH="$dir:$PATH" bash "$@"'
+        return subprocess.run([BASH, "-c", launcher, "test-drill", bin_dir.as_posix(), script.as_posix(), managed.as_posix()],
+                              env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+
+    def test_zero_exit_requires_a_completion_record_in_both_native_stages(self):
+        r = self.stub_native_drill("DRILL PASS", "DRILL PASS")
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn("stage full", r.stdout)
+        self.assertIn("stage nolist", r.stdout)
+        for stage, full, nolist in (("full", "LOADED", "DRILL PASS"), ("nolist", "DRILL PASS", "LOADED")):
+            with self.subTest(stage=stage):
+                r = self.stub_native_drill(full, nolist)
+                self.assertEqual(1, r.returncode, r.stdout + r.stderr)
+                self.assertIn(f"stage {stage}", r.stdout)
+                self.assertIn("without DRILL PASS", r.stdout)
 
 
 if __name__ == "__main__":
