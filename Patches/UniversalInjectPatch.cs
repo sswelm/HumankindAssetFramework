@@ -711,16 +711,12 @@ namespace HumankindAssetFramework
             return keys;
         }
 
-        // The `models` array split into one text per entry, for the regex fallback. STRING-AWARE brace counting, not
-        // a regex: a model field legitimately contains braces and brackets (`position` is an object, `hideMeshes` is
-        // free text), and a `}` inside a quoted value would split an entry in half. Escapes are honoured so a
-        // trailing backslash cannot swallow the closing quote. Returns empty when there is no `models` array at all,
-        // which is the correct answer for a wrapper-only file — and, importantly, means an `overrides` array can no
-        // longer contribute entries: it is outside the scanned region entirely.
-        internal static List<string> ModelChunks(string text)
+        // Split a registry array into entry objects for the regex fallbacks. Count braces outside strings so quoted
+        // braces and nested objects stay inside their own entry. Entries from sibling arrays cannot contribute fields.
+        internal static List<string> RegistryEntryChunks(string text, string arrayName)
         {
             var outp = new List<string>();
-            var key = Regex.Match(text ?? "", "\"models\"\\s*:\\s*\\[");
+            var key = Regex.Match(text ?? "", "\"" + Regex.Escape(arrayName) + "\"\\s*:\\s*\\[");
             if (!key.Success) return outp;
             int i = key.Index + key.Length, depth = 0, start = -1;
             bool inStr = false, esc = false;
@@ -741,7 +737,7 @@ namespace HumankindAssetFramework
                     if (--depth == 0 && start >= 0) { outp.Add(text.Substring(start, i - start + 1)); start = -1; }
                     continue;
                 }
-                if (c == ']' && depth == 0) break;   // the models array closed
+                if (c == ']' && depth == 0) break;   // the registry array closed
             }
             // An unterminated final entry (a truncated file — the shape the fallback exists for) still yields what
             // it has: better a recovered entry missing its tail than an entry silently dropped.
@@ -870,7 +866,7 @@ namespace HumankindAssetFramework
                 // an entry didn't write simply isn't in its chunk, so it falls to the same default the object path uses.
                 // This path runs exactly when the document is already damaged, which is when being right matters most.
                 const string i4 = @"\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]";
-                foreach (var chunk in ModelChunks(doc))
+                foreach (var chunk in RegistryEntryChunks(doc, "models"))
                 {
                     var text = chunk;   // every Regex.Matches below reads THIS entry's object, not the document
                 var rn = Regex.Matches(text, "\"resourceName\"\\s*:\\s*\"([^\"]*)\"");

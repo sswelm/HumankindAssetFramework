@@ -25,16 +25,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     often the damage. It reads the number a token starts with: a sign of either kind, digits and points, an exponent
     when it is complete. `+1.5` reads 1.5, `0.5f` reads 0.5, `2.5em` reads 2.5.
   - **Also:** a number in quotes is read (the JSON parser takes `"0.5"` for a float; the fallback never matched one).
-    In `position`, a suffix on x or y no longer costs the whole vector. The district reader, which pairs values with
-    districts by position, now matches every occurrence of the key: a height that is not a number takes its place
-    with the default and does not hand its place to the next district's.
+    In `position`, a suffix on x or y no longer costs the whole vector. District recovery now reads one object at a
+    time from the `districts` array. Omitted or unreadable fields use that district's defaults, and later values
+    stay with their own districts.
   - **A second fix in the same lines:** a pack that needed the fallback and left `idleAltInterval` out got 0 (the
     idle-alt one-shots off) where the JSON path gives the schema's 25. Reviews carried it from 2026-10-12 on; the Review-Backlog had
     marked it fixed on the strength of the JSON path alone. A quoted `"0"` still reads 0.
   - **The first version of this fix was wrong, and the review caught it:** it refused any token that was not wholly
     a number. `+1.5` and `0.5f`, which the old patterns read, came back as defaults, and in the district reader an
     unread height shifted every later district's height by one. It was never merged.
-  - **Tests (`Tests/RegexFallbackNumberTests.cs`, 59 cases; the suite is 2,984):** every float a pack can set, and
+  - **Tests (`Tests/RegexFallbackNumberTests.cs`, 59 cases; the suite is 2,986):** every float a pack can set, and
     `position`, in fourteen spellings against the runtime's own parse and the JSON parser; six spellings that are not
     JSON; four things that are not numbers; quoted numbers on both paths; `idleAltInterval` with a value that is not
     a number; a parseable document that still takes the fallback; every float dial left out; the district fallback,

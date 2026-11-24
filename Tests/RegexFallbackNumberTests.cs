@@ -237,10 +237,7 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(want, Assert.Single(DistrictInject.JsonDistricts(doc)).footprintMeshFlatHeight);
         }
 
-        // THE DISTRICT READER PAIRS VALUES BY POSITION, so a height it cannot read must still take its place. With the
-        // first version of the one pattern an unreadable first height vanished from the matches and every later district
-        // took its neighbour's: 0.5, 0.7 and the default where the file says x, 0.5 and 0.7 (the review of PR #315).
-        // Each first value is given with what it reads as; the two after it must stay their own in every row.
+        // Each spelling affects only the first district. The two heights after it must stay with their own entries.
         [Theory]
         [InlineData("0.3", 0.3f)]
         [InlineData("+0.3", 0.3f)]         // not JSON: this token is what sends the file to the fallback

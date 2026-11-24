@@ -15,8 +15,7 @@ namespace HumankindAssetFramework.Tests
     //
     // NOTE ON WHAT THESE CAN ASSERT: every GUID field routes through MakeGuid, which needs the live game, so
     // outside it every guid is null. That is why the accept/reject gate (`Usable`) is deliberately separate from
-    // the two extractors — tests exercise what each path EXTRACTS. The fragile part of the fallback is the
-    // index alignment of its fields, and that is exactly what the parity test below covers.
+    // the two extractors. Tests compare what each path extracts and check that missing values stay in their own entry.
     public class DistrictRegistryParseTests
     {
         public DistrictRegistryParseTests()
@@ -42,9 +41,7 @@ namespace HumankindAssetFramework.Tests
 
         // ---- THE PARITY ORACLE: the fallback must recover what the object parse extracts ----
 
-        // The regex path is index-aligned, which is the one thing that can silently go wrong in it — a field
-        // matched in the wrong order attributes entry B's settings to entry A. Comparing the two extractors on the
-        // same document is the only check that actually pins that.
+        // Both extractors should agree on the values from a well-formed document.
         [Fact]
         public void RegexRecovery_MatchesTheObjectParse_FieldForField()
         {
@@ -105,6 +102,32 @@ namespace HumankindAssetFramework.Tests
         {
             Assert.Equal(new[] { "Extension_A", "Extension_B" },
                          DistrictInject.ParseDistrictsRaw(BrokenDoc).Select(e => e.district).ToArray());   // 0 before the fallback existed
+        }
+
+        [Fact]
+        public void RegexRecovery_MissingFieldsStayAtTheirDefaultsAndLaterEntriesKeepTheirValues()
+        {
+            const string doc = @"{ ""districts"": [
+                { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"" },
+                { ""footprintMeshFlatHeight"": 5e-1, ""district"": ""B"", ""footprintMesh"": true, ""groundMaterial"": ""Stone }"" },
+                { ""district"": ""C"", ""footprintMeshFlatHeight"": 0.75";
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var districts = DistrictInject.ParseDistrictsRaw(doc);
+            Assert.Equal(new[] { "A", "B", "C" }, districts.Select(d => d.district));
+            Assert.Equal(new[] { 0.17f, 0.5f, 0.75f }, districts.Select(d => d.footprintMeshFlatHeight));
+            Assert.Equal(new[] { false, true, false }, districts.Select(d => d.footprintMesh));
+            Assert.Equal(new[] { "", "Stone }", "" }, districts.Select(d => d.groundMaterial));
+        }
+
+        [Fact]
+        public void RegexRecovery_ReadsOnlyTheDistrictsArray()
+        {
+            const string doc = @"{ ""notes"": { ""district"": ""example"", ""footprintMeshFlatHeight"": 99 },
+                ""districts"": [ { ""district"": ""Actual"", ""footprintMeshFlatHeight"": 0.25 } ]";
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var entry = Assert.Single(DistrictInject.ParseDistrictsRaw(doc));
+            Assert.Equal("Actual", entry.district);
+            Assert.Equal(0.25f, entry.footprintMeshFlatHeight);
         }
 
         // ...and a WELL-FORMED document must still go through the object path, not quietly rely on the fallback.
