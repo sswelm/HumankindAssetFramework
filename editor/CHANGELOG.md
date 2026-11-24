@@ -5,6 +5,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser: the status says when mirrored parts were turned inward** (2026-11-24, user report, the RSS
+  Centurion: casemate walls solid in the Fuser, see-through in the Vehicle Lab). Some files store their mirrored
+  parts already facing outward; the fuse reverses mirrored parts as glTF asks, and those then face inward. **Check
+  mirrored parts** cures it, and the fuse already warned, but only in the console and the report and only for a
+  group that holds the evidence itself (2 of the 18 groups concerned on that ship). With the box off, every group
+  the box would change now carries the warning with its part count, and the status after a fuse leads with them:
+  "MIRRORED PARTS FACE INWARD IN 18 GROUPS (846 parts) ... Tick Check mirrored parts and Fuse again". The Fuser's
+  preview draws the source as stored and so looks right either way. Nothing a fuse writes changes.
 - **Model Fuser: a weld that flattens parts now says so** (2026-11-24, user report, the RSS Centurion: "Group U gets
   all messed up", "group K is missing", "the chains are also missing"). The **Fuse — weld seams closer than** dial
   stood at 2.288‰ instead of 0. It sits below the preview and keeps its value from one ship to the next, and its

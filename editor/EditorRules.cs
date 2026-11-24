@@ -1436,6 +1436,28 @@ public static class WorkshopRules
     }
 
     /// <summary>
+    /// The lines of the Fuser's status that say "tick Check mirrored parts" (2026-11-24, RSS Centurion: the casemate
+    /// walls were solid in the Fuser's preview, which draws the source as stored, and see-through in the Vehicle Lab;
+    /// the fuse had said so in the console and in the report, for two groups of the eighteen concerned). Null when no
+    /// group needs it. One entry per group: its letter and the parts the glTF reversal turned inward.
+    /// </summary>
+    public static string MirroredCheckSummary(IList<(string letter, int parts)> groups)
+    {
+        if (groups == null || groups.Count == 0) return null;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        int total = groups.Sum(g => g.parts);
+        var sb = new System.Text.StringBuilder();
+        sb.Append("⚠ MIRRORED PARTS FACE INWARD IN ").Append(groups.Count).Append(groups.Count == 1 ? " GROUP" : " GROUPS").Append(" (")
+          .Append(total.ToString("N0", inv)).Append(total == 1 ? " part" : " parts")
+          .Append("): this file stores its mirrored parts already facing outward, and the fuse reversed them as glTF asks. They are see-through in the Vehicle Lab and in game; ")
+          .Append("the preview here draws the source and looks right. Tick \"Check mirrored parts\" and Fuse again.\n   ");
+        const int shown = 12;
+        sb.Append(string.Join("  ", groups.OrderByDescending(g => g.parts).ThenBy(g => g.letter, StringComparer.Ordinal).Take(shown).Select(g => "⊕" + g.letter + "×" + g.parts.ToString(inv))));
+        if (groups.Count > shown) sb.Append("  … and ").Append(groups.Count - shown).Append(" more");
+        return sb.Append('\n').ToString();
+    }
+
+    /// <summary>
     /// The weld dial as text: three decimals, and as many as it takes for a dial typed smaller than that — "0‰, not 0"
     /// was what 0.0004 printed (review of the first cut).
     /// </summary>

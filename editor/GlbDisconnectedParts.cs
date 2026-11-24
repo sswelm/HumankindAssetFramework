@@ -41,6 +41,9 @@ public static partial class GlbDisconnectedParts
         // WeldDamaged = a non-zero dial took enough for a warning (see WeldDamaged)
         public double SurfaceBefore, SurfaceAfter; public int FacesFlattened, PartsMeasured; public bool WeldDamaged;
         public readonly List<string> PartsFlattened = new List<string>();
+        // a fuse with "Check mirrored parts" OFF on a file that stores its mirrored parts already facing outward: how many
+        // of this group's parts the glTF reversal turned inward, which ticking the box would turn back (0 = none, or the box is on)
+        public int MirroredCheckWouldUndo;
         public Compaction Compaction;   // what writing the output left out (never null on a written result); its line is the LAST of Details when it has one
     }
 
@@ -1516,6 +1519,30 @@ public static partial class GlbDisconnectedParts
                 }
             }
         }
+        // THE SAME VERDICT WITH THE CHECK OFF, SAID FOR EVERY GROUP IT WOULD CHANGE (2026-11-24, RSS Centurion; user: "in
+        // the fuser the space between the upper row of secondary guns and the lower is displayed correctly but in the
+        // vehicle lab it becomes partly transparent"). With the option off only a group that sees the answer ITSELF
+        // warned: two of that ship's 23 (9 and 8 parts), while ticking the box un-reversed 846 parts in 18 groups, the
+        // casemate walls among them - their group has no mirrored part welded to a plain one, so it said nothing. The
+        // evidence is pooled exactly as above and the same groups are named (no evidence of their own against the
+        // verdict); nothing is re-planned and no byte changes - each group learns how many of its parts the box would turn.
+        {
+            int undoOff = 0, keepOff = 0;
+            foreach (FusePlan pl in plans) if (pl != null && !pl.CheckMirrored) { undoOff += pl.MirroredJudgedUndo; keepOff += pl.MirroredJudgedKeep; }
+            int judgedOff = undoOff + keepOff;
+            if (judgedOff >= 3 && undoOff * 10 >= judgedOff * 9)
+                foreach (FusePlan pl in plans)
+                {
+                    if (pl == null || pl.CheckMirrored || pl.Empty || pl.MirroredParts == 0) continue;
+                    int own = pl.MirroredJudgedUndo + pl.MirroredJudgedKeep;
+                    if (own >= 3 && pl.MirroredJudgedUndo * 10 >= own * 9) continue;   // it saw the answer itself, and has said so
+                    if (pl.MirroredJudgedKeep > 0) continue;                            // contrary evidence of its own: the box would leave it alone
+                    pl.Result.MirroredCheckWouldUndo = pl.MirroredParts;
+                    pl.Result.Warnings.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "The other groups of this fuse show that this file stores its mirrored parts already facing outward ({0} of {1} judged), so the glTF reversal turns {2} part(s) of this group inward (see-through). Tick 'Check mirrored parts' and fuse again.",
+                        undoOff, judgedOff, pl.MirroredParts));
+                }
+        }
         Document document = Parse(source);
         JObject root = document.Root;
         JArray nodes = root["nodes"] as JArray ?? new JArray();
@@ -2042,9 +2069,12 @@ public static partial class GlbDisconnectedParts
                         "mirrored parts checked against their plain neighbours: {0} of {1} mirrored part(s) judged ({2} say already facing outward, {3} say the glTF reversal is right), not enough agreement to act on, nothing changed",
                         judgedAll, mirroredCount, judgedUndo, judgedKeep);
             else if (clear)
+            {
+                result.MirroredCheckWouldUndo = undoSet.Count;   // the window's status leads with it (see FuseGroups for the groups that cannot see it themselves)
                 result.Warnings.Add(string.Format(inv3,
                     "{0} of {1} mirrored part(s) that touch plain parts disagree with them ({2} seam edges run the same way): this file stores its mirrored parts already facing outward, so the glTF reversal turns {3} part(s) inward (see-through). Tick 'Check mirrored parts' and fuse again.",
                     judgedUndo, judgedAll, undoConflicts, undoSet.Count));
+            }
         }
 
         // LAP / TRIM STRIPS (2026-09-15, the Teutonic's Object_8): a part most of whose vertices coincide with OTHER parts'

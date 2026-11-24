@@ -243,6 +243,25 @@ public class WorkshopRulesTests
     }
 
     [Fact]
+    public void Mirrored_parts_turned_inward_lead_the_fuse_status_largest_group_first()
+    {
+        Assert.Null(WorkshopRules.MirroredCheckSummary(null));
+        Assert.Null(WorkshopRules.MirroredCheckSummary(new List<(string, int)>()));
+
+        var one = WorkshopRules.MirroredCheckSummary(new List<(string, int)> { ("A", 1) }).Split('\n');
+        Assert.StartsWith("⚠ MIRRORED PARTS FACE INWARD IN 1 GROUP (1 part): this file stores its mirrored parts already facing outward", one[0]);
+        Assert.EndsWith("Tick \"Check mirrored parts\" and Fuse again.", one[0]);
+        Assert.Equal("   ⊕A×1", one[1]); Assert.Equal("", one[2]); Assert.Equal(3, one.Length);
+
+        // the RSS Centurion with the box off: the eighteen groups and the parts the box un-reversed in each (846)
+        var ship = new List<(string, int)> { ("A", 9), ("B", 13), ("C", 81), ("D", 68), ("E", 8), ("F", 2), ("G", 8), ("I", 18), ("J", 14), ("K", 6), ("N", 9), ("Q", 41),
+                                             ("R", 280), ("S", 122), ("U", 60), ("V", 35), ("W", 48), ("X", 24) };
+        var lines = WorkshopRules.MirroredCheckSummary(ship).Split('\n');
+        Assert.StartsWith("⚠ MIRRORED PARTS FACE INWARD IN 18 GROUPS (846 parts):", lines[0]);
+        Assert.Equal("   ⊕R×280  ⊕S×122  ⊕C×81  ⊕D×68  ⊕U×60  ⊕W×48  ⊕Q×41  ⊕V×35  ⊕X×24  ⊕I×18  ⊕J×14  ⊕B×13  … and 6 more", lines[1]);
+    }
+
+    [Fact]
     public void The_weld_dial_prints_with_the_decimals_it_needs()
     {
         Assert.Equal("0", WorkshopRules.WeldText(0));

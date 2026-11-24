@@ -665,6 +665,62 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void With_the_option_off_every_group_the_box_would_change_says_how_many_parts()
+    {
+        // RSS Centurion, 2026-11-24: with the box off, 2 of 23 groups warned (9 and 8 parts); ticking it un-reversed 846
+        // parts in 18 groups. The casemate walls' group has no mirrored part welded to a plain one and said nothing.
+        // Group A: three plain strips each abutted by a pre-flipped mirrored one (the evidence). Group B: one mirrored
+        // strip on its own, pre-flipped too - it cannot see the answer.
+        var parts = MirrorPairs(true, true, true).ToList();
+        var lone = Strip("Lone", 0, 1, 40, inward: true); lone.Scale = new double[] { -1, 1, 1 };
+        parts.Add(lone);
+        byte[] glb = BuildGlb(parts.ToArray());
+        List<GlbDisconnectedParts.FuseJob> Jobs(bool check) => new List<GlbDisconnectedParts.FuseJob> {
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 0, 1, 2, 3, 4, 5 }, Name = "Fused_A", CheckMirrored = check },
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 6 }, Name = "Fused_B", CheckMirrored = check } };
+
+        GlbDisconnectedParts.FuseGroups(glb, Jobs(false), 0.0, out var off);
+        Assert.Equal(3, off[0].MirroredCheckWouldUndo);                                   // its three mirrored strips
+        Assert.Contains(off[0].Warnings, w => w.Contains("3 of 3 mirrored part(s)") && w.Contains("Check mirrored parts"));
+        Assert.Equal(1, off[1].MirroredCheckWouldUndo);                                   // the lone strip, by the run's verdict
+        Assert.Contains(off[1].Warnings, w => w.StartsWith("The other groups of this fuse", StringComparison.Ordinal) && w.Contains("(3 of 3 judged)") && w.Contains("turns 1 part(s) of this group inward") && w.Contains("Check mirrored parts"));
+
+        // what it announces is what the box does: 3 and 1 parts un-reversed, and then nothing left to announce
+        GlbDisconnectedParts.FuseGroups(glb, Jobs(true), 0.0, out var on);
+        Assert.Contains(on[0].Details, d => d.StartsWith("mirrored parts", StringComparison.Ordinal) && d.Contains("undone for 3 part(s)"));
+        Assert.Contains(on[1].Details, d => d.StartsWith("mirrored parts", StringComparison.Ordinal) && d.Contains("undone for 1 part(s)") && d.Contains("the verdict of the other groups"));
+        Assert.Equal(0, on[0].MirroredCheckWouldUndo); Assert.Equal(0, on[1].MirroredCheckWouldUndo);
+        Assert.DoesNotContain(on.SelectMany(r => r.Warnings), w => w.Contains("Check mirrored parts"));
+
+        // a file stored the standard way: nothing to announce, in either group
+        var std = MirrorPairs(false, false, false).ToList();
+        var loneStd = Strip("Lone", 0, 1, 40, inward: false); loneStd.Scale = new double[] { -1, 1, 1 };
+        std.Add(loneStd);
+        GlbDisconnectedParts.FuseGroups(BuildGlb(std.ToArray()), Jobs(false), 0.0, out var offStd);
+        Assert.Equal(0, offStd[0].MirroredCheckWouldUndo); Assert.Equal(0, offStd[1].MirroredCheckWouldUndo);
+        Assert.DoesNotContain(offStd.SelectMany(r => r.Warnings), w => w.Contains("Check mirrored parts"));
+    }
+
+    [Fact]
+    public void A_group_with_evidence_of_its_own_against_the_verdict_is_not_named()
+    {
+        // The box leaves such a group alone (the Romanic's group H), so the announcement must too. Group A: nine pre-flipped
+        // pairs. Group B: one pair stored the standard way - judged, and it says the glTF reversal is right. Pooled: 9 of
+        // 10 say pre-flipped, the verdict stands (nine in ten); B has contrary evidence of its own.
+        var parts = MirrorPairs(true, true, true, true, true, true, true, true, true).ToList();   // nodes 0..17
+        parts.Add(Strip("PB", 0, 1, 200, inward: false));
+        var mb = Strip("MB", 0, 1, 200, inward: false); mb.Scale = new double[] { -1, 1, 1 };
+        parts.Add(mb);
+        var jobs = new List<GlbDisconnectedParts.FuseJob> {
+            new GlbDisconnectedParts.FuseJob { NodeIndices = Enumerable.Range(0, 18).ToArray(), Name = "Fused_A" },
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 18, 19 }, Name = "Fused_B" } };
+        GlbDisconnectedParts.FuseGroups(BuildGlb(parts.ToArray()), jobs, 0.0, out var off);
+        Assert.Equal(9, off[0].MirroredCheckWouldUndo);
+        Assert.Equal(0, off[1].MirroredCheckWouldUndo);
+        Assert.DoesNotContain(off[1].Warnings, w => w.Contains("Check mirrored parts"));
+    }
+
+    [Fact]
     public void A_file_stored_the_standard_way_is_left_exactly_as_before()
     {
         // The Teutonic's case: the glTF reversal is RIGHT. The check must confirm it and change nothing, byte for byte.
