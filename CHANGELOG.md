@@ -42,7 +42,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     passes turn many of them back by themselves; two mirrored closed boxes were announced as see-through in an output
     the box would not have changed by a byte. Hence the second count, taken at the end of the passes.
   - **Proved by:** on the ship, the still-reversed count names eight groups and 21,076 faces against the seven
-    groups and 19,564 faces the box actually turns: equal in A and N (450, 66), within a fifth in D, S, U and E, 1,636
+    groups and 19,564 faces the box actually turns: equal in A and N (450, 66), within a quarter in D, S, U and E (7,406/7,003, 6,202/5,154, 5,246/5,726, 16/20), 1,636
     against 1,145 in B, and one group named that the box leaves as it is (W, 54 faces) - the passes run differently
     once the start changes, so the number is what is reversed in the file, not a promise of what the box turns. The
     parts the box would un-reverse equal the parts it does un-reverse in 23 of 23 groups; the outputs of the build
