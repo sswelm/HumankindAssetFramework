@@ -21,26 +21,41 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     tooltip and the report said "the model's"). Group U is small parts spread along the whole ship: 5,252 long, so it
     welded within 12.0, and its parts are 11.8 thick. Group K, the davits: 2.09 against tubes 5.5 across.
   - **Measured, weld 0 against 2.288‰, same source, same groups** (surface = sum of triangle areas as written). C,
-    the chains: 156,344 to 0. K: 43,094 to 1,532. U: 14,324,974 to 13,077,506 with 33,431 of 38,205 faces at zero
-    area. Of the 23 groups, 20 lost faces (408,282 of 472,105 in all), four kept no surface at all (C, J, R, W), three
-    were untouched (E, F, Z: 0 faces, 100.00%). Headless renders of both outputs: clean at 0; at 2.288‰ the user's
-    screenshot, shards along the casemates and no railings, davits or rigging. The fuse at 0 took 4 s for the 23
-    groups, at 2.288‰ 143 s.
+    the chains: 156,344 to 0. K: 43,094 to 1,532. U, as grouped when reported (111 parts): 14,324,974 to 13,077,506
+    with 33,431 of 38,205 faces at zero area. Of the 23 groups, 20 lost faces, four kept no surface at all (C, J, R,
+    W), three were untouched (E, F, Z: 0 faces, 100.00%). Headless renders of both outputs: clean at 0; at 2.288‰ the
+    user's screenshot, shards along the casemates and no railings, davits or rigging. The fuse at 0 took 4 s for the
+    23 groups, at 2.288‰ 143 s. The user then fused at 0 (report: `weld: 0`, 0 faces collapsed) and confirmed the
+    ship.
   - **The count that was there understated it.** The summary's "face(s) smaller than the weld kept collapsed" said 652
     for K. It counts a face whose three corners weld into one class; a face has no area as soon as two do, and that was
     7,148 of K's 7,212.
   - **The change** does not alter what a fuse writes. `GlbDisconnectedParts` measures each group's surface on the
     authored positions and on the welded ones (the positions the writer uses) and counts the faces that had area and
-    have none; `WeldDamaged` is true for a non-zero dial when a hundredth of the faces are flattened or a hundredth of
-    the surface is lost, and the group then carries a warning. Surface gained is not a sign: two plates pulled together
-    across a real gap both grow. The window shows a warning box with **Set to 0** under the dial whenever it is above
-    0, names the weld on the Fuse button, and leads the status with the damaged groups, worst first, six at most.
-  - **Proved by:** the guard on the real ship (20 groups flagged at 2.288‰ with a warning each, none at 0); a tube
-    fixture welded wider than itself (80 of 80 faces flattened where "collapsed" says 0), narrower than itself and at
-    0; the gap test (surface 2.0 to 2.3, no warning); a planted defect (the flattened count never rising) fails two
-    tests. **Not done:** the dial still scales with the group and still persists between ships; a per-group or
-    absolute distance, or a reset on a new file, would be a change to the fuse's inputs and is left for a decision.
-    The window itself was compiled against Unity's assemblies, not opened.
+    have none, per group and per part; faces two corners of which coincide already (flat at dial 0) are left out.
+    `WeldDamaged` is true for a non-zero dial when a hundredth of the faces are flattened, a hundredth of the surface
+    is lost, or one part lost half its faces or half its surface, and the group then carries a warning naming up to
+    five such parts. Surface gained is not a sign: two plates pulled together across a real gap both grow. The window
+    shows a warning box with **Set to 0** under the dial whenever it is above 0, names the weld on the Fuse button, and
+    leads the status with the groups concerned, the six worst first (worst = the smaller of surface kept and faces
+    kept).
+  - **A review by a second agent changed it before the push.** The first cut judged by shares of the group only: a
+    davit of 80 faces beside a 20,000-face deck was flattened whole and passed in silence (0.4% of the faces, 0.04%
+    of the surface) - hence the per-part rule. It blamed the dial for faces flat at weld 0, so a dial typed below a
+    millionth wrote weld 0's bytes and was told to set the weld to 0 - hence the coincident exclusion. It sorted
+    "worst" by surface alone, which put a group stretched into shards last. And its wording said parts "thinner than
+    the distance", which K contradicts (2.09 against 5.5 across): what matters is the spacing of a part's vertices.
+  - **Proved by:** the final guard on the real ship, on the groups as the user had left them by then (U 117 parts):
+    20 groups flagged at 2.288‰ with a warning each, 409,086 of 472,105 faces flattened, parts mostly gone in 17 of
+    them (all 239 of C, all 14 of K, 116 of 117 of U); none flagged at 0, no face and no part. Fixtures: a tube
+    welded wider than itself (80 of 80 faces where "collapsed" says 0), narrower than itself and at 0; the davit
+    beside the deck; two overlapping plates (a tenth of the surface, no face); a sliver flat at 0; the gap test
+    (surface 2.0 to 2.3, no warning); two groups through `FuseGroups`, one distance each. Three planted defects (a
+    mostly-gone part not deciding, coincident faces counted, the surface branch removed) fail two tests each.
+    **Not done:** the dial still scales with the group and still persists between ships; a per-group or absolute
+    distance, or a reset on a new file, would be a change to the fuse's inputs and is left for a decision. The window
+    itself was compiled against Unity's assemblies, not opened; its dial label is longer than the label column and is
+    probably cut off there, as the old one was.
 - **Vehicle Lab: Wheel centre, for a screw that wobbles (2026-11-23, PR #314).** Reported by the user on the H.L. Hunley
   submarine: "there is a problem making the screw rotate correctly, the middle of the axis is way off when rotating".
   - **Measured first.** The Lab puts a wheel bone at the middle of the wheel's bounding box. The Hunley's screw has

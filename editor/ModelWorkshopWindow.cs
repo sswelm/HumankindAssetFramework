@@ -682,15 +682,16 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 "position regardless). START AT 0 = only exactly coincident positions merge — the Teutonic's plates already touch exactly, and " +
                 "that alone found and fixed its hole. Raise it only for sources whose plates leave gaps, knowing that every triangle smaller " +
                 "than the distance collapses (kept, zero-area, no longer connecting anything): at 0.5‰ the Teutonic lost 1,564 rivet-sized " +
-                "faces AND its hull island broke apart. The result line reports the collapsed count."), weldPermille, 0f, 5f);
+                "faces AND its hull island broke apart. After a fuse the status names the groups a non-zero weld flattened faces in " +
+                "(the result line's \"collapsed\" count is smaller: it counts a face whose three corners became one, and a face is gone when two do)."), weldPermille, 0f, 5f);
             // NOT 0, IN PLAIN SIGHT (2026-11-24, RSS Centurion). The dial sits under the preview, keeps its value from one
             // ship to the next, and stood at 2.288‰ after 23 fuses at 0: chains, davits and a whole group of deck parts came
             // out flattened ("Group U gets all messed up", "group K is missing"), and nothing on screen said the dial had moved.
             if (weldPermille > 0f)
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    EditorGUILayout.HelpBox($"The weld is at {weldPermille.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}‰, not 0. Every ⊕ group welds within that share of its own length, " +
-                        "and parts thinner than that distance (chains, davits, rails, small deck fittings) are flattened to nothing. 0 joins plates that touch, which is what every hull so far needed.", MessageType.Warning);
+                    EditorGUILayout.HelpBox($"The weld is at {WorkshopRules.WeldText(weldPermille)}‰, not 0. Every ⊕ group welds within that share of its own length, " +
+                        "and parts whose vertices lie closer together than that distance (chains, davits, rails, small deck fittings) are flattened to nothing. 0 joins plates that touch, which is what every hull so far needed.", MessageType.Warning);
                     if (GUILayout.Button(new GUIContent("Set to 0", "Back to the default: only coincident positions weld."), GUILayout.Width(70), GUILayout.Height(38))) { weldPermille = 0f; GUI.FocusControl(null); }
                 }
             // GROUPS AT ONCE (2026-10-27, user: "8 sounds right for an 8-core CPU, make this configurable"). 0 = the default,
@@ -736,7 +737,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                             ? "Fuse — mark parts with a ⊕ letter first (popup per row, or keys A–Z on the highlighted row)"
                             : fusedRows == 0
                             ? $"Delete {deleted} marked part(s)  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}"
-                            : $"Fuse {fusedRows} marked part(s) in {fuseGroups.Count} group(s) ({string.Join(", ", fuseGroups.Select(g => "⊕" + g + "×" + rows.Count(r => r.fuse == g)))}) into one shell each{(weldPermille > 0f ? $", WELD {weldPermille.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}‰" : "")}{(deleted > 0 ? $" and delete {deleted} marked" : "")}  →{(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
+                            : $"Fuse {fusedRows} marked part(s) in {fuseGroups.Count} group(s) ({string.Join(", ", fuseGroups.Select(g => "⊕" + g + "×" + rows.Count(r => r.fuse == g)))}) into one shell each{(weldPermille > 0f ? $", WELD {WorkshopRules.WeldText(weldPermille)}‰" : "")}{(deleted > 0 ? $" and delete {deleted} marked" : "")}  →  {(string.IsNullOrEmpty(outGlb) ? "(set the Output GLB)" : Path.GetFileName(outGlb))}",
                         "Joins the parts of each ⊕ group into ONE mesh in the output GLB, welds their seams, makes the winding consistent by MAJORITY across each " +
                         "welded island (the minority of faces reversed to agree with the rest), and judges direction once where it can be judged: a shell, " +
                         "a thin solid or a convex plating region by its signed volume about its own centroid (inside-out = reversed whole), a FLAT sheet " +
@@ -1650,9 +1651,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
             foreach (var g in report) foreach (var w in g.Warnings) Debug.LogWarning($"[Workshop] ⊕{g.Letter}: " + w);
             Debug.Log($"[Workshop] fuse report: {reportPath}");
             // a weld that took the detail out of a group leads the status: it is the one line that says "fuse again" (2026-11-24)
-            var weldDamaged = new List<(string letter, int flattened, int faces, double before, double after)>();
+            var weldDamaged = new List<(string letter, int flattened, int faces, double before, double after, int partsGone, int parts)>();
             if (results != null) for (int gi = 0; gi < groups.Count; gi++)
-                if (results[gi].WeldDamaged) weldDamaged.Add((groups[gi].Key, results[gi].FacesFlattened, results[gi].SourceTriangles, results[gi].SurfaceBefore, results[gi].SurfaceAfter));
+                if (results[gi].WeldDamaged) weldDamaged.Add((groups[gi].Key, results[gi].FacesFlattened, results[gi].SourceTriangles, results[gi].SurfaceBefore, results[gi].SurfaceAfter, results[gi].PartsFlattened.Count, results[gi].PartsMeasured));
             string weldLead = WorkshopRules.WeldDamageSummary(weldPermille, weldDamaged);
             status = $"{weldLead}{verb} done ({done} step(s)):\n{string.Join("\n", lines)}\n{outGlb}\nReport (every group's islands, warnings and stitched-part numbers): {reportPath}\nNext: point Source GLB at this output and re-Probe to see each fused shell as one part, or open it in the Vehicle Lab.";
         }

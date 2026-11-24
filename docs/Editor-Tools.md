@@ -552,7 +552,8 @@ windows. **Deep dive:**
   and that alone found its hole; raise it only for plates that leave gaps, knowing that every triangle smaller
   than the distance collapses: at 0.5‰ the Teutonic lost 1,564 rivet-sized faces and its hull island broke apart.
   The distance is a share of each **group's** own length, the dial is below the preview and keeps its value between
-  ships; above 0 a warning box under it says so, and after a fuse the status names every group the weld flattened —
+  ships; above 0 a warning box under it says so, and after a fuse the status leads with the groups the weld flattened
+  faces in (the six worst; each such group has its own warning in the console and the report) —
   at 2.288‰ four of the RSS Centurion's 23 groups, the anchor chains among them, kept none of their surface),
   tick **Check mirrored parts** if one side of a symmetric hull comes out see-through (0.5.7: some files store their
   mirrored parts already facing outward, and the glTF reversal then turns them inward; the fuse checks them against

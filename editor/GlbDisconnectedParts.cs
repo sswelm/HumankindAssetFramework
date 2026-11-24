@@ -35,9 +35,12 @@ public static partial class GlbDisconnectedParts
         public int VerticesBefore, VerticesAfter, IslandsBefore, IslandsAfter, FacesRewound;
         public readonly List<string> IslandLines = new List<string>();   // EVERY sheet's verdict, largest first (the report; Details keeps the largest six for the status)
         public int FusedNodeIndex = -1; public string FusedNodeName;   // the appended shell (a fuse only): the output sidecar names it with its group's letter
-        // what the weld cost (a fuse only): the group's surface on the authored positions and on the welded ones, and the
-        // faces that had area and have none left; WeldDamaged = a non-zero dial took enough for a warning (see WeldDamaged)
-        public double SurfaceBefore, SurfaceAfter; public int FacesFlattened; public bool WeldDamaged;
+        // what the weld cost (a fuse only): the group's surface on the authored positions and on the welded ones; the
+        // faces that had area and have none left BECAUSE OF THE DIAL (a face flat under the coincident weld of dial 0 is
+        // not counted); the parts that carried faces and, of those, the ones mostly gone (see PartMostlyGone);
+        // WeldDamaged = a non-zero dial took enough for a warning (see WeldDamaged)
+        public double SurfaceBefore, SurfaceAfter; public int FacesFlattened, PartsMeasured; public bool WeldDamaged;
+        public readonly List<string> PartsFlattened = new List<string>();
         public Compaction Compaction;   // what writing the output left out (never null on a written result); its line is the LAST of Details when it has one
     }
 
@@ -1314,7 +1317,7 @@ public static partial class GlbDisconnectedParts
     // per-island facing test can see that a 1,609-face plate region is glued on the wrong way round along a
     // 26-edge seam — the hole in the hull — and any reduction opens gaps because the plates share no vertices.
     // Fusing at the SOURCE fixes every pipeline downstream: the chosen parts become one mesh; positions within
-    // `weldFraction` of the model's longest extent are one vertex (attributes permitting — a UV seam or a hard-edge
+    // `weldFraction` of the fused parts' longest extent (the GROUP's, not the model's) are one vertex (attributes permitting — a UV seam or a hard-edge
     // normal keeps its own vertex, while CONNECTIVITY is by position regardless); each welded island is made
     // consistent by MAJORITY (orientation parity propagated across every two-face edge, the minority reversed);
     // and direction is judged where it can be: an OPEN sheet (any boundary edge — a deck, a bulwark, a plating
@@ -1408,20 +1411,29 @@ public static partial class GlbDisconnectedParts
     }
 
     /// <summary>
-    /// Did a NON-ZERO weld take enough of a group to say so? A hundredth of its faces flattened to nothing, or a
-    /// hundredth of its surface lost. Surface GAINED is no sign: closing a real gap between two plates stretches both
+    /// Did a NON-ZERO weld take enough of a group to say so? A hundredth of its faces flattened to nothing, a
+    /// hundredth of its surface lost, or ONE part mostly gone (PartMostlyGone: the two shares are of the group, and
+    /// a davit beside a deck is far under a hundredth of it). Surface GAINED is no sign: closing a real gap between two plates stretches both
     /// (the gap test's two unit plates 0.3 apart end 15% larger, as asked). At weld 0 never: the faces that vanish there
     /// are within a millionth of the group's length of having no area already, and "lower the weld" would have
     /// nothing to lower. Measured 2026-11-24 on the RSS Centurion at 2.288‰, 23 groups: the three the weld left
     /// alone flattened 0 faces and kept 100.00% (E, F, Z); the least damaged of the other twenty flattened 4.1% (P,
     /// 99.94% kept — the faces decide there, the surface would have let it pass), the worst kept 0.00% (C, J, R, W).
     /// </summary>
-    public static bool WeldDamaged(double weldFraction, int faces, int facesFlattened, double surfaceBefore, double surfaceAfter)
+    public static bool WeldDamaged(double weldFraction, int faces, int facesFlattened, double surfaceBefore, double surfaceAfter, int partsFlattened = 0)
     {
         if (!(weldFraction > 0) || faces <= 0) return false;
+        if (partsFlattened > 0) return true;
         if ((long)facesFlattened * 100 >= faces) return true;
         return surfaceBefore > 0 && surfaceBefore - surfaceAfter >= 0.01 * surfaceBefore;
     }
+
+    /// <summary>
+    /// One fused part the weld took most of: at least half its faces flattened to nothing, or at least half its
+    /// surface lost. A part, not a group, is what the user misses ("group K is missing" was its davits).
+    /// </summary>
+    public static bool PartMostlyGone(int faces, int facesFlattened, double surfaceBefore, double surfaceAfter)
+        => faces > 0 && ((long)facesFlattened * 2 >= faces || (surfaceBefore > 0 && surfaceAfter * 2 <= surfaceBefore));
 
     /// <summary>
     /// Fuse several groups from ONE source in one output: every group is planned in parallel against the same source
@@ -1789,7 +1801,8 @@ public static partial class GlbDisconnectedParts
             }
             return islands;
         }
-        result.IslandsBefore = Islands(WeldClasses(rounding), out _, out _, out _, out _).Count;   // coincident positions only: what the source already connects
+        int[] coincident = WeldClasses(rounding);   // coincident positions only: what the source already connects (kept: the weld's cost below is counted against it)
+        result.IslandsBefore = Islands(coincident, out _, out _, out _, out _).Count;
         int[] classes = WeldClasses(weld);
         // DOUBLE-SIDED BY DUPLICATION (2026-09-24, SMS Wespe's gun). A part that carries every face TWICE, wound both
         // ways, each copy with its own vertices - 6,000 of the gun's 6,053 faces. Welded by position, the two copies
@@ -1874,6 +1887,10 @@ public static partial class GlbDisconnectedParts
         // summary's "collapsed" count said 652 of K's 7,212 faces where 7,148 had no area left: it counts a face whose
         // THREE corners weld together, and a face is gone as soon as TWO do. So the surface is measured here, on the
         // positions the judgements below and the writer use, before the move and after it.
+        // PER PART as well (review of the first cut): both thresholds are shares of the GROUP, and one davit of 80 faces
+        // beside a 20,000-face deck vanished without a word. And against the COINCIDENT weld: a face two corners of which
+        // already sit within a millionth of the group's length is flat at dial 0 too, and is not the dial's doing - a dial
+        // typed so small that its distance IS that millionth wrote the bytes of weld 0 and was told to "set the weld to 0".
         var areaBefore = new double[faceCount];
         double FaceArea(int f) => 0.5 * FLen(FCross(FSub(pos[tris[f * 3 + 1]], pos[tris[f * 3]]), FSub(pos[tris[f * 3 + 2]], pos[tris[f * 3]])));
         for (int f = 0; f < faceCount; f++) areaBefore[f] = FaceArea(f);
@@ -1886,17 +1903,38 @@ public static partial class GlbDisconnectedParts
             }
             for (int v = 0; v < pos.Count; v++) if (count[classes[v]] > 1) pos[v] = FScale(sum[classes[v]], 1.0 / count[classes[v]]);
         }
-        for (int f = 0; f < faceCount; f++)
         {
-            double after = FaceArea(f);
-            result.SurfaceBefore += areaBefore[f]; result.SurfaceAfter += after;
-            if (areaBefore[f] > 0 && after == 0) result.FacesFlattened++;   // two corners in one class sit on one centroid: exactly zero, no tolerance to choose
+            int measuredParts = partNames.Count;
+            var partFaces = new int[measuredParts]; var partFlat = new int[measuredParts]; var partBefore = new double[measuredParts]; var partAfter = new double[measuredParts];
+            for (int f = 0; f < faceCount; f++)
+            {
+                double after = FaceArea(f); int p = partOf[tris[f * 3]];
+                result.SurfaceBefore += areaBefore[f]; result.SurfaceAfter += after;
+                partFaces[p]++;
+                int ca = coincident[tris[f * 3]], cb = coincident[tris[f * 3 + 1]], cc = coincident[tris[f * 3 + 2]];
+                if (ca == cb || cb == cc || ca == cc) continue;   // flat at dial 0 already: not the dial's, and no part is "gone" for a sliver it never showed
+                partBefore[p] += areaBefore[f]; partAfter[p] += after;
+                // two corners in one class sit on one centroid: exactly zero, no tolerance to choose
+                if (areaBefore[f] > 0 && after == 0) { result.FacesFlattened++; partFlat[p]++; }
+            }
+            for (int p = 0; p < measuredParts; p++)
+            {
+                if (partFaces[p] == 0) continue;
+                result.PartsMeasured++;
+                if (PartMostlyGone(partFaces[p], partFlat[p], partBefore[p], partAfter[p])) result.PartsFlattened.Add(partNames[p]);
+            }
         }
-        result.WeldDamaged = WeldDamaged(weldFraction, faceCount, result.FacesFlattened, result.SurfaceBefore, result.SurfaceAfter);
+        result.WeldDamaged = WeldDamaged(weldFraction, faceCount, result.FacesFlattened, result.SurfaceBefore, result.SurfaceAfter, result.PartsFlattened.Count);
         if (result.WeldDamaged)
+        {
+            const int named = 5;
+            string partsGone = result.PartsFlattened.Count == 0 ? "" : string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "; {0} of {1} part(s) lost at least half their faces or their surface ({2}{3})", result.PartsFlattened.Count, result.PartsMeasured,
+                string.Join(", ", result.PartsFlattened.Take(named).Select(n => "'" + n + "'")), result.PartsFlattened.Count > named ? ", +" + (result.PartsFlattened.Count - named) + " more" : "");
             result.Warnings.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                "The weld flattened {0:N0} of {1:N0} face(s) to nothing and the group kept {2:0.#}% of its surface: its weld distance, {3:0.####} ({4:0.###}‰ of the group's length {5:0.#}), is wider than the detail in these parts. Set the weld to 0 (or lower it) and fuse again.",
-                result.FacesFlattened, faceCount, result.SurfaceBefore > 0 ? 100.0 * result.SurfaceAfter / result.SurfaceBefore : 100.0, weld, weldFraction * 1000.0, longest));
+                "The weld flattened {0:N0} of {1:N0} face(s) to nothing and the group kept {2:0.#}% of its surface{6}: its weld distance, {3:0.####} ({4:0.###}‰ of the group's length {5:0.#}), is wider than the spacing of the vertices in these parts. Set the weld to 0 (or lower it) and fuse again.",
+                result.FacesFlattened, faceCount, result.SurfaceBefore > 0 ? 100.0 * result.SurfaceAfter / result.SurfaceBefore : 100.0, weld, weldFraction * 1000.0, longest, partsGone));
+        }
         List<List<int>> allIslands = Islands(classes, out long[] fEdgeKeys, out bool[] fEdgeDir, out Dictionary<long, List<int>> fEdgeFaces, out int collapsedFaces);
         result.IslandsAfter = allIslands.Count;
 
