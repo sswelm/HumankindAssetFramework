@@ -61,7 +61,8 @@ cascade takes T before B and nothing is visited twice). The script then runs a s
 (12 checks): the feature is inactive, the game's ANY rule is back, the tech screen's title is plain, and the same
 saved queue is still removed cleanly, because the removal guard is not gated on the list. With the old list-gated guard planted back, that run fails with
 the game's `ArgumentOutOfRangeException`. Leaf queue mutations that need the live Sandbox are replaced by list
-operations.
+operations. Both stages must exit zero and finish with `DRILL PASS`. The wrapper tests reject a stage that exits
+zero after only loading the assemblies.
 Set `HAF_DRILL_MONO` to run the checks under the Unity editor's Mono as well. That Mono crashes while exiting, and the
 script compares its exit code with a load-only control (139). On 2026-11-21, with the push gate and the game running
 beside it, one run of three exited 127 after `DRILL PASS` and was reported as a failure; two reruns exited 139. A
