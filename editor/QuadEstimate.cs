@@ -73,7 +73,7 @@ public static class QuadEstimate
         return quads;
     }
 
-    // THE FEWEST CELLS THAT FIT, FILLED EVENLY (2026-11-25, user, the Heavy Monitor at 7.3 of 8 fragments: "I can never
+    // FEWER CELLS, FILLED EVENLY (2026-11-25, user, the Heavy Monitor at 7.3 of 8 fragments: "I can never
     // seem to get more usage ... the spreading of the quads is not yet optimal").
     //   The first partition halved a cell at its MEDIAN TRIANGLE until every cell fitted. Two things followed. (1) The
     //   cells of one bake held the same number of triangles and different numbers of quads - how well triangles pair is a
@@ -81,7 +81,7 @@ public static class QuadEstimate
     //   it: that ship's eight cells of 25,207 triangles estimated 13,989 to 16,000 quads, and 50 triangles more were refused
     //   ("need more than 8 draw fragments"). (2) Halving makes 1, 2, 4 or 8 cells unless the halves differ in density: on
     //   every split entry of the project it made 2, 4 or 8, and a mesh of five budgets (HandCrankedSubmarines) got eight.
-    //   Now: k = the fewest cells the estimate can fit in; the cell is cut in two along its longest axis (whole triangles
+    //   Now: k starts at the fewest cells the estimate could fit in; the cell is cut in two along its longest axis (whole triangles
     //   in centroid order, as before) where the two sides' estimated quads stand as floor(k/2) to ceil(k/2), and each side
     //   is cut on in the same way. A leaf can still come out over the budget, for three reasons (measured by the review):
     //   a cut separates pairs, a side re-sorted along its own longest axis estimates differently, and each cut balances
@@ -94,9 +94,10 @@ public static class QuadEstimate
     //   maxCells fit is the partition's to say, not the estimate's.
     //   The start is NOT a lower bound (a side re-sorted along its own axis can pair better than the root did), and the
     //   balance can lose to the halving on a mesh whose density changes sharply. Trying every k from 2 found nothing on
-    //   the project's 21 split entries and costs about 4 seconds a bake, so instead: when the balance needed a k past its
-    //   start, or found none, the halving is run too (about 0.3 s) and the fewer cells win - the split never makes more
-    //   pieces than the halving did, and never refuses a mesh the halving fitted.
+    //   the project's 21 split entries and costs about 4 seconds a bake, so instead the halving is ALWAYS run too (about
+    //   0.3 s) and the fewer cells win, the balance on a tie: the split never makes more pieces than the halving, and
+    //   never refuses a mesh the halving fitted. (Review round 3: the first version ran the halving only when the balance
+    //   had needed a k past its start, and a balance that fitted at its start could still keep a piece more.)
     //   REFUSED AT ONCE when it cannot fit: a cell of t triangles estimates at least t/2 quads (a quad holds at most two
     //   triangles), so more than 2 x budget x maxCells triangles never fit (review, round 2: a mesh of a million
     //   triangles took 7 s to be refused).
@@ -105,6 +106,7 @@ public static class QuadEstimate
     public static List<List<int>> PartitionByQuadBudget(int[] tris, float[] centroids, int budget, int maxCells)
     {
         int total = tris.Length / 3;
+        if (maxCells < 1) return null;   // no cell allowed: nothing fits (master returned null here too)
         var all = new List<int>(total);
         for (int i = 0; i < total; i++) all.Add(i);
         List<List<int>> cells = null;
@@ -125,11 +127,8 @@ public static class QuadEstimate
                 var made = new List<List<int>>();
                 if (SplitInto(tris, centroids, new List<int>(all), k, budget, made)) cells = made;
             }
-            if (cells == null || cells.Count > start)
-            {
-                var halved = Halving(tris, centroids, all, budget, maxCells);
-                if (halved != null && (cells == null || halved.Count < cells.Count)) cells = halved;
-            }
+            var halved = Halving(tris, centroids, all, budget, maxCells);
+            if (halved != null && (cells == null || halved.Count < cells.Count)) cells = halved;
         }
         if (cells == null) return null;
         cells.Sort((a, b) =>

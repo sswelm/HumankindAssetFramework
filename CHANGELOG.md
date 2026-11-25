@@ -4862,23 +4862,24 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Authoring tools
 
-- **The Multi-fragment split fills its pieces evenly and makes no more of them than fit (2026-11-25).** Reported
-  from the Model Factory's console, the Heavy Monitor at "7.3x" in eight fragments: "I can never seem to get more
-  usage ... the spreading of the quads is not yet optimal".
+- **The Multi-fragment split fills its pieces evenly and never makes more of them than before (2026-11-25).**
+  Reported from the Model Factory's console, the Heavy Monitor at "7.3x" in eight fragments: "I can never seem to
+  get more usage ... the spreading of the quads is not yet optimal".
   - **Cause.** The split cut a piece that did not fit in two at its median TRIANGLE, along its longest axis, until
     every piece fitted. The pieces of one bake held about the same number of triangles and different numbers of
     quads, because how well triangles pair into quads differs by region: that ship's eight pieces of 25,207 to 25,208
     triangles estimated 13,989 to 16,000 quads (the editor log of the bake). The piece at the budget capped the bake;
     50 triangles more were refused. And halving gives 1, 2, 4 or 8 pieces unless the halves differ much in density:
     on every split entry of the project it made 2, 4 or 8 (HandCrankedSubmarines needed five and got eight).
-  - **Change.** `QuadEstimate.PartitionByQuadBudget` picks the fewest pieces the quad estimate allows and cuts each
-    piece where the two sides' estimated quads stand in the ratio of the pieces each side still has to make (still
-    whole triangles in centroid order along the longest axis; deterministic; the piece letters stable). If a piece
-    comes out over the budget, one piece more is tried. When that happened, or nothing fitted, the old halving runs
-    too and the fewer pieces win, so the split never makes more pieces than before and never refuses a mesh that
-    used to fit. A mesh of more than 2 x 16,000 x 8 triangles is refused at once (a quad holds at most two).
+  - **Change.** `QuadEstimate.PartitionByQuadBudget` starts from the fewest pieces the quad estimate could allow and
+    cuts each piece where the two sides' estimated quads stand in the ratio of the pieces each side still has to
+    make (still whole triangles in centroid order along the longest axis; deterministic; the piece letters stable);
+    if a piece comes out over the budget, one piece more is tried. The old halving always runs as well (about
+    0.3 s), and the fewer pieces win, the balanced ones on a tie: the split never makes more pieces than before and
+    never refuses a mesh that used to fit. A mesh of more than 2 x 16,000 x 8 triangles is refused at once (a quad
+    holds at most two), and a refused mesh is told its own estimate and how much to cut.
   - **In Unity, by the reporter,** with the PR's first commit (the review's changes give the same pieces on all 21
-    rebuilt entries, not run in Unity): the Heavy Monitor fits 217,608 triangles in eight pieces (estimated 15,864
+    rebuilt entries; not run in Unity): the Heavy Monitor fits 217,608 triangles in eight pieces (estimated 15,864
     to 16,000, the SDK's real counts 15,753 to 15,970; 126,844 quads, "7.8x"); 217,658 is refused. With the old
     split, on the same day's mesh, 201,657 fitted and 201,707 was refused: **7.9 % more triangles** in the same eight
     fragments, for an entry that raises Reduce to ~tris. The draw work grows with the triangles (7.3x to 7.8x).
@@ -4887,23 +4888,30 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     JetFighters 8 to 5, LightCruisers 8 to 5, OceanLiner 8 to 7, SteamFrigates 4 to 3, SteamGunboat 8 to 6, SteamLiner
     8 to 7, SteamSubmarines 8 to 7), none more. A prediction: the rebuild is close to the mesh the split saw, not
     equal to it - the Heavy Monitor rebuilt at 217,608 does not fit in eight, where the real bake did. Fewer pieces
-    are fewer draw calls; the "Nx" figure (quads / 16,320) hardly moves.
-  - **Review of the PR, two rounds** (the algorithm; the baker, bake test and game-side plugin; every number here;
-    the fixes; 69 planted defects): k is started from the lower of the root's two estimates (stored and sorted
-    order) and capped at eight, after a mesh stored in scattered order was cut into a piece too many or refused; a
-    budget of 0 no longer divides by zero; the left side of every cut is counted in one pass (exact; about 35 %
-    faster); the halving fallback and the early refusal above. Tests: 46 on the partition (`QuadEstimateTests`,
-    `QuadPartitionReviewTests`), among them a property test against the halving on 480 random meshes. Sound, by the
-    review: nothing in the baker or the plugin assumes 2, 4 or 8 pieces or equal pieces; stale pieces are removed on
-    both bake paths and cannot reach a mod build; the seam vertices fall in total.
-  - **Cost:** the split step of a bake takes 1 to 2 seconds longer (in Unity's Mono, 1.0 to 2.3 s for the project's
-    200,000-triangle entries, where it took 0.2 s).
+    are fewer draw calls; the "Nx" figure (quads / 16,320) hardly moves. The seam vertices the pieces duplicate fall
+    in total, and rise on two entries (OceanLiner, SteamShipOfTheLine).
+  - **Review of the PR, three rounds,** nine reviewers (the algorithm; the baker, bake test and game-side plugin;
+    every number; the fixes; planted defects - 69 in round 2, 17 more on later lines; a blind reread; a drill of the
+    baker's split on all 21 meshes; the published text). What it changed: k starts from the lower of the root's
+    estimates in stored and in sorted order, capped at eight (a mesh stored in scattered order was cut into a piece
+    too many, or refused); a budget of 0 no longer divides by zero; the left side of every cut is counted in one pass
+    (exact; about 30 % faster); the halving fallback, first only after a failed start, then always (a reviewer's
+    mesh fitted at the start in five pieces where the halving made four); the early refusal; the refusal message;
+    three tests that passed for the wrong reason. Tests: 39 on the partition (`QuadEstimateTests`,
+    `QuadPartitionReviewTests`), among them a comparison with the halving on 120 random meshes at four budgets each.
+    Sound, by the review: nothing in the baker or the plugin assumes 2, 4 or 8 pieces or equal pieces; stale pieces
+    are removed on both bake paths and cannot reach a mod build; on all 21 meshes the baker's split ships every
+    triangle once, with its attributes, in at most eight pieces named in order.
+  - **Cost:** a bake's split step takes 1 to 2.5 seconds longer. The partition alone in Unity's Mono, best of three:
+    1.1 to 2.3 s on the project's 180,000 to 235,000-triangle entries, where it took 0.2 to 0.3 s (up to 2.7 s in other
+    runs); in the editor the old step took 0.3 to 0.4 s.
   - **Not changed:** the budget of 16,000 estimated quads a piece under the engine's 16,320, and the check of the
-    SDK's real counts after the bake. In the editor logs of two ships (102 bakes, 815 distinct pieces) the real
-    count was at most 56 above the estimate. **Not guarded by a unit test:** the baker's own split lines (the
-    budget, the eight letters, the stale-piece deletion) - the test project does not compile `UniversalBaker.cs`;
-    the in-Unity Bake Tests and the real-count check are what holds them. **Not done:** nothing was looked at in
-    game; an entry is unchanged until it is baked again, and a rebake can change its number of pieces.
+    SDK's real counts after the bake. In the editor logs of three ships (Heavy Monitor, Pre-Dreadnought, Dreadnought)
+    the real count was at most 56 above the estimate. **Not guarded by a unit test:** the baker's own split lines (the
+    budget, the eight letters, the stale-piece deletion, the message) - the test project does not compile
+    `UniversalBaker.cs`; the in-Unity Bake Tests and the real-count check are what holds them. **Not done:** nothing
+    was looked at in game; an entry is unchanged until it is baked again, and a rebake can change its number of
+    pieces.
 
 - **The Model Fuser leaves out a face that lies exactly on another, wound the other way, where no camera sees it
   (2026-11-25).** Reported from the game: "weird Z fighting on the upper deck" of the Pre-Dreadnought (RSS Centurion).

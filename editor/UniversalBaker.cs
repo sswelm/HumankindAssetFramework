@@ -993,8 +993,7 @@ public static class UniversalBaker
             {
                 var chunks = SplitForQuadCeiling(smrs[0].sharedMesh, name);
                 if (chunks == null)
-                    return Fail($"{name}: {smrs[0].sharedMesh.triangles.Length / 3:N0} tris need more than {MaxMeshChunks} draw fragments " +
-                                $"(at most {MaxMeshChunks} x {QuadBudget:N0} estimated quads, and every cut between the pieces costs some: in practice about 127,000) — lower 'Reduce to ~tris' or the Vehicle Lab dials first.");
+                    return Fail(OverFragmentsMessage(name, smrs[0].sharedMesh.triangles));
                 if (chunks.Count > 1)
                 {
                     // The chunks must be ASSETS: the prefab below references them, and a mesh that lives only in
@@ -2531,8 +2530,7 @@ public static class UniversalBaker
         var chunks = cfg.multiMesh ? SplitForQuadCeiling(mesh, name) : new List<Mesh> { mesh };
         Lap("multi-mesh split");
         if (chunks == null)
-            return Fail($"{name}: {mesh.triangles.Length / 3:N0} tris need more than {MaxMeshChunks} draw fragments " +
-                        $"(at most {MaxMeshChunks} x {QuadBudget:N0} estimated quads, and every cut between the pieces costs some: in practice about 127,000) — lower 'Reduce to ~tris' or the Vehicle Lab dials first.");
+            return Fail(OverFragmentsMessage(name, mesh.triangles));
         // Re-bake = clean slate: delete prior outputs so nothing is overwritten IN PLACE. In-place overwrite leaves Unity
         // serving a stale cached mesh/prefab to the skeleton bake below -> the shipped skeleton lags a bake behind and the
         // ship renders 90 deg off in-game even though the (force-reimported) preview looks right. Fresh assets == first bake.
@@ -2648,10 +2646,23 @@ public static class UniversalBaker
     // The estimator and the BSP partition live in editor/QuadEstimate.cs (pure, unit-tested since 2026-09-14 —
     // the edge-hash story and the tris/2 trap are documented there). This forwarder keeps the baker's call sites.
     static int EstimateQuads(int[] tris, IList<int> cell) => QuadEstimate.EstimateQuads(tris, cell);
+    // THE REFUSAL, with the mesh's own numbers (review of PR #322, round 3: the message quoted one ship's figure, "about
+    // 127,000", with no unit, under a count of triangles - a reader took it for triangles). The estimate and the room are
+    // in QUADS; the share to cut is what would bring the estimate down to that room, at least.
+    static string OverFragmentsMessage(string name, int[] tris)
+    {
+        int n = tris.Length / 3;
+        int quads = EstimateQuads(tris, Enumerable.Range(0, n).ToList());
+        long room = (long)MaxMeshChunks * QuadBudget;
+        double cut = quads > room ? 100.0 * (quads - room) / quads : 0.0;
+        return $"{name}: {n:N0} tris, an estimated {quads:N0} quads, do not fit in {MaxMeshChunks} draw fragments of {QuadBudget:N0} " +
+               $"estimated quads each ({room:N0} in all, less a few hundred that the cuts between the pieces cost). Lower 'Reduce to ~tris' " +
+               (cut > 0 ? $"by at least {cut:0.0} %, and a little more, " : "a little ") + "or the Vehicle Lab dials first.";
+    }
 
     // MULTI-MESH SPLIT (2026-09-13, the Bremen — 51,072 quads on a 16,320 ceiling): partition an over-ceiling mesh
     // into spatial chunks, each a standalone Mesh under the per-fragment budget (measured in ESTIMATED QUADS —
-    // see EstimateQuads above; tris/2 was review P1's trap). As few chunks as the estimate fits in, each cut along
+    // see EstimateQuads above; tris/2 was review P1's trap). Chunks of about equal estimated quads, each cut along
     // the longest axis where the two sides' quads balance (whole triangles in centroid order, deterministic;
     // QuadEstimate.PartitionByQuadBudget - until 2026-11-25 a halving at the median triangle), every vertex
     // attribute remapped per chunk. Chunk 0 keeps the plain _ModelMesh name (the body the donor fragment

@@ -104,7 +104,7 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(Enumerable.Range(0, 400), cells.SelectMany(c => c).OrderBy(i => i));
         }
 
-        // THE FEWEST CELLS THAT FIT: halving made 1, 2, 4 or 8 cells, so a mesh of five budgets was cut into eight
+        // FEWER CELLS: on this strip halving made 4, 4, 8 and 8 cells where 3, 4, 5 and 6 fit
         [Theory]
         [InlineData(36, 3)][InlineData(27, 4)][InlineData(22, 5)][InlineData(19, 6)]
         public void A_mesh_is_cut_into_as_few_cells_as_fit(int budget, int expected)
@@ -118,20 +118,18 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(minX.OrderBy(x => x), minX);
         }
 
-        // a cut separates pairs, so the cells together hold more quads than the whole: when that puts a cell over the
-        // budget the next count is tried - and past the cap the answer is still null
+        // a cut that separates no pair costs nothing: 100 quads of a 20 x 5 grid in two cells of exactly 50 (the cut runs
+        // between columns of whole quads). The path where a cut DOES cost a quad and one cell more is tried is
+        // QuadPartitionReviewTests.When_the_first_k_does_not_fit_the_next_one_is_tried (review round 3: this test's name
+        // promised it, and its adaptive assertion accepted either outcome). 100 quads in cells of 12 need nine: refused.
         [Fact]
-        public void A_cell_over_the_budget_after_the_cut_takes_one_cell_more_and_the_cap_still_holds()
+        public void A_cut_between_whole_quads_costs_nothing_and_nine_cells_are_refused()
         {
-            int[] tris = Grid(20, 5, out float[] cent);                              // 100 quads: two cells of 50 would do...
-            int whole = QuadEstimate.EstimateQuads(tris, Enumerable.Range(0, 200).ToList());
-            Assert.Equal(100, whole);
+            int[] tris = Grid(20, 5, out float[] cent);
+            Assert.Equal(100, QuadEstimate.EstimateQuads(tris, Enumerable.Range(0, 200).ToList()));
             var two = QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 50, maxCells: 8);
-            int sum = two.Sum(c => QuadEstimate.EstimateQuads(tris, c));
-            Assert.True(sum >= whole);
-            Assert.All(two, c => Assert.True(QuadEstimate.EstimateQuads(tris, c) <= 50));
-            Assert.Equal(sum > whole ? 3 : 2, two.Count);                            // ...unless the cut cost a quad
-            Assert.Null(QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 12, maxCells: 8));   // 100 quads need nine cells of 12
+            Assert.Equal(new[] { 50, 50 }, two.Select(c => QuadEstimate.EstimateQuads(tris, c)).ToArray());
+            Assert.Null(QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 12, maxCells: 8));
         }
 
         // THE STARTING k IS JUDGED IN THE ORDER THE CUTS SEE (review of PR #322): a strip of 124 quads whose triangles are

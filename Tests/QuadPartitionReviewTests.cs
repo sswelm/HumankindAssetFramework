@@ -10,10 +10,11 @@ namespace HumankindAssetFramework.Tests
     // scratch folder); the plants that change nothing observable are left without one.
     public class QuadPartitionReviewTests
     {
-        // K2 (the k start not capped at maxCells). Two columns of 124 quads, 200 apart along x; each triangle's x centroid
-        // is scattered inside its column, so in the root's order (sorted along x) the greedy estimate is 286, over 4 x 63 -
-        // yet each column re-sorted along its own longest axis (y) pairs every quad and halves into 62 + 62. The capped
-        // start tries k = 4 and fits; an uncapped start begins at ceil(286 / 63) = 5 > 4 and returns null.
+        // Two columns of 124 quads, 200 apart along x; each triangle's x centroid is scattered inside its column, so sorted
+        // along x the greedy estimate is 286, over 4 x 63 - yet each column re-sorted along its own longest axis (y) pairs
+        // every quad and halves into 62 + 62: four cells fit. (Written for K2, the start not capped at maxCells; review
+        // round 3 found it no longer tells K2 apart - the start takes the lower, stored-order estimate, 248, and the
+        // halving would give the four anyway. Kept as a fixture of a mesh that fits only after its sides are re-sorted.)
         [Fact]
         public void The_cap_is_tried_even_when_the_roots_estimate_is_past_it()
         {
@@ -139,14 +140,23 @@ namespace HumankindAssetFramework.Tests
             Assert.All(cells, cl => Assert.True(QuadEstimate.EstimateQuads(tris, cl) <= 130));
         }
 
-        // N3 (one cell past maxCells allowed): the strip needs three cells at a budget of 36, so two is null - the existing
-        // null cases need four or nine, which one more cell does not reach either
+        // N3 (one cell past maxCells allowed), in the balance AND in the halving. Review round 3: the first version's null
+        // came from the early refusal (200 triangles > 2 x 36 x 2), not from either cap. A strip of 100 quads stored with
+        // its first triangle last estimates 101 in its stored order and 100 sorted: at a budget of 100 it does not fit as
+        // it stands, two cells of 50 do, and with room for one cell the answer is null - the early refusal does not fire
+        // (200 is not over 2 x 100 x 1), so the caps decide.
         [Fact]
         public void One_cell_past_the_cap_is_still_null()
         {
-            int[] tris = Grid(100, 1, out float[] cent);
-            Assert.Equal(3, QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 36, maxCells: 3).Count);
-            Assert.Null(QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 36, maxCells: 2));
+            int[] grid = Grid(100, 1, out float[] gc);
+            var tris = new int[grid.Length]; var cent = new float[gc.Length];
+            for (int i = 0; i < 200; i++) { int from = (i + 1) % 200; System.Array.Copy(grid, from * 3, tris, i * 3, 3); System.Array.Copy(gc, from * 3, cent, i * 3, 3); }
+            Assert.Equal(101, QuadEstimate.EstimateQuads(tris, Enumerable.Range(0, 200).ToList()));   // the fixture: over 100 as stored
+            Assert.Equal(2, QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 100, maxCells: 2).Count);
+            Assert.Null(QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 100, maxCells: 1));
+            Assert.Null(QuadEstimate.Halving(tris, cent, Enumerable.Range(0, 200).ToList(), 100, 1));
+            Assert.Null(QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 100, maxCells: 0));
+            Assert.Null(QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 200, maxCells: 0));   // no cell allowed, even for a mesh that fits whole
         }
 
         // A1 (always x): a grid tall in y is cut ACROSS y, every cell keeps the full width. Every existing fixture is longest
@@ -254,6 +264,22 @@ namespace HumankindAssetFramework.Tests
             var cells = QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 25, maxCells: 8);
             Assert.Equal(6, cells.Count);
             Assert.All(cells, c => Assert.True(QuadEstimate.EstimateQuads(tris, c) <= 25));
+        }
+
+        // THE BALANCE FITS AT ITS START AND THE HALVING FITS IN FEWER (review round 3, a reviewer's random search): a welded
+        // 6 x 6 grid stored in shuffled order with jittered centroids, at a budget of 9. Stored 42, sorted 38: the balance
+        // starts at 5 and fits there, the halving makes 4. The first fallback ran the halving only after a failed start
+        // and returned 5; with room for 4 cells it returned 4 - more room made more cells.
+        [Fact]
+        public void A_balance_that_fits_at_its_start_still_loses_to_fewer_halving_pieces()
+        {
+            int[] tris = { 45, 39, 46, 39, 33, 40, 37, 31, 38, 11, 12, 18, 1, 2, 8, 22, 16, 23, 3, 4, 10, 25, 19, 26, 39, 40, 46, 12, 6, 13, 26, 27, 33, 33, 27, 34, 10, 4, 11, 18, 19, 25, 31, 32, 38, 21, 15, 22, 14, 8, 15, 17, 11, 18, 26, 20, 27, 0, 1, 7, 10, 11, 17, 19, 13, 20, 28, 22, 29, 9, 10, 16, 32, 33, 39, 8, 9, 15, 32, 26, 33, 11, 5, 12, 29, 23, 30, 46, 40, 47, 35, 36, 42, 29, 30, 36, 40, 41, 47, 16, 10, 17, 47, 41, 48, 24, 25, 31, 31, 25, 32, 8, 2, 9, 30, 31, 37, 4, 5, 11, 25, 26, 32, 43, 37, 44, 37, 38, 44, 24, 18, 25, 28, 29, 35, 30, 24, 31, 15, 9, 16, 22, 23, 29, 14, 15, 21, 38, 39, 45, 17, 18, 24, 40, 34, 41, 15, 16, 22, 36, 30, 37, 44, 38, 45, 18, 12, 19, 38, 32, 39, 23, 24, 30, 12, 13, 19, 2, 3, 9, 35, 29, 36, 16, 17, 23, 19, 20, 26, 33, 34, 40, 7, 1, 8, 9, 3, 10, 7, 8, 14, 42, 36, 43, 21, 22, 28, 36, 37, 43, 5, 6, 12, 23, 17, 24 };
+            float[] cent = { 7.806282043457031f, 272.6600036621094f, 0.0f, 9.203704833984375f, 271.6600036621094f, 0.0f, 7.750278472900391f, 271.6600036621094f, 0.0f, 8.518179893493652f, 268.3299865722656f, 0.0f, 6.228750228881836f, 267.3299865722656f, 0.0f, 5.698413848876953f, 269.6600036621094f, 0.0f, 8.287252426147461f, 267.3299865722656f, 0.0f, 9.647658348083496f, 269.6600036621094f, 0.0f, 8.45277214050293f, 272.3299865722656f, 0.0f, 9.751138687133789f, 267.6600036621094f, 0.0f, 10.250988960266113f, 270.3299865722656f, 0.0f, 9.833520889282227f, 270.6600036621094f, 0.0f, 8.56151294708252f, 267.6600036621094f, 0.0f, 9.09514045715332f, 269.3299865722656f, 0.0f, 8.33945369720459f, 271.3299865722656f, 0.0f, 5.61317777633667f, 269.6600036621094f, 0.0f, 5.604391098022461f, 268.6600036621094f, 0.0f, 7.920406341552734f, 268.6600036621094f, 0.0f, 10.225042343139648f, 269.6600036621094f, 0.0f, 4.675367832183838f, 267.3299865722656f, 0.0f, 8.32166576385498f, 268.3299865722656f, 0.0f, 10.015045166015625f, 268.6600036621094f, 0.0f, 5.255587100982666f, 270.6600036621094f, 0.0f, 6.450579643249512f, 268.3299865722656f, 0.0f, 8.793296813964844f, 271.3299865722656f, 0.0f, 5.846185207366943f, 268.3299865722656f, 0.0f, 9.678712844848633f, 270.6600036621094f, 0.0f, 9.233859062194824f, 267.6600036621094f, 0.0f, 6.208495140075684f, 270.6600036621094f, 0.0f, 9.7084379196167f, 272.6600036621094f, 0.0f, 5.317890644073486f, 272.3299865722656f, 0.0f, 6.186430931091309f, 271.3299865722656f, 0.0f, 10.41987133026123f, 272.3299865722656f, 0.0f, 7.391970634460449f, 268.6600036621094f, 0.0f, 10.282288551330566f, 272.6600036621094f, 0.0f, 7.79788875579834f, 270.3299865722656f, 0.0f, 8.719381332397461f, 270.6600036621094f, 0.0f, 5.716484069824219f, 267.6600036621094f, 0.0f, 6.8837504386901855f, 271.3299865722656f, 0.0f, 8.576620101928711f, 267.3299865722656f, 0.0f, 8.482831001281738f, 270.3299865722656f, 0.0f, 6.351219654083252f, 272.6600036621094f, 0.0f, 7.037464141845703f, 272.3299865722656f, 0.0f, 8.634153366088867f, 269.6600036621094f, 0.0f, 4.863198757171631f, 271.3299865722656f, 0.0f, 6.968275547027588f, 270.6600036621094f, 0.0f, 6.138350486755371f, 268.6600036621094f, 0.0f, 5.912505149841309f, 270.3299865722656f, 0.0f, 4.341063022613525f, 269.3299865722656f, 0.0f, 7.753293514251709f, 272.3299865722656f, 0.0f, 8.29369068145752f, 269.3299865722656f, 0.0f, 10.14802074432373f, 271.6600036621094f, 0.0f, 5.4007344245910645f, 269.3299865722656f, 0.0f, 6.544422626495361f, 271.6600036621094f, 0.0f, 6.916506290435791f, 272.6600036621094f, 0.0f, 9.701112747192383f, 268.6600036621094f, 0.0f, 8.06155014038086f, 271.6600036621094f, 0.0f, 6.435831546783447f, 270.3299865722656f, 0.0f, 10.279679298400879f, 268.3299865722656f, 0.0f, 6.673902988433838f, 267.3299865722656f, 0.0f, 5.296314716339111f, 271.6600036621094f, 0.0f, 6.3691582679748535f, 269.3299865722656f, 0.0f, 10.151618957519531f, 269.3299865722656f, 0.0f, 9.375421524047852f, 271.3299865722656f, 0.0f, 4.975680351257324f, 267.6600036621094f, 0.0f, 7.718625068664551f, 267.6600036621094f, 0.0f, 4.366644859313965f, 268.3299865722656f, 0.0f, 5.578838348388672f, 272.6600036621094f, 0.0f, 4.815774917602539f, 270.3299865722656f, 0.0f, 6.192354679107666f, 272.3299865722656f, 0.0f, 9.463364601135254f, 267.3299865722656f, 0.0f, 7.312695503234863f, 269.6600036621094f, 0.0f };
+            Assert.Equal(72, tris.Length / 3);
+            var cells = QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 9, maxCells: 8);
+            Assert.Equal(4, cells.Count);
+            Assert.Equal(4, QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 9, maxCells: 4).Count);
+            Assert.All(cells, c => Assert.True(QuadEstimate.EstimateQuads(tris, c) <= 9));
         }
 
         // NEVER MORE PIECES THAN THE HALVING, NEVER NULL WHERE IT FITTED (review round 2: on a mesh whose density changes

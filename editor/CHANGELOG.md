@@ -7,15 +7,17 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 - **Model Factory: the Multi-fragment split fills its pieces evenly** (2026-11-25, user report: the Heavy Monitor
   never got past "7.3x" in eight fragments). The pieces used to hold the same number of triangles, so one piece
-  reached the quad limit while the others still had room. Each cut is now placed where the quads balance, and a
-  model gets only as many pieces as it needs.
+  reached the quad limit while the others still had room. Each cut is now placed so the pieces hold about the same
+  number of quads, and a model often needs fewer pieces.
   - **More detail in the same eight pieces:** the Heavy Monitor now fits 217,608 triangles where 201,657 was the
     most, about 8 % more. To use it, raise **Reduce to ~tris** and bake again; the unit then costs a little more to
-    draw (7.3x became 7.8x).
+    draw (the budget warning's 7.3x became 7.8x).
   - **Fewer pieces:** about 9 of the project's 21 split entries should need fewer pieces on their next bake (a
-    prediction from their baked meshes). Fewer pieces are fewer draw calls; the "Nx" figure barely changes.
-  - The split never makes more pieces than before, and never refuses a model that used to fit.
-  - A bake's split step takes 1 to 2 seconds longer. Nothing changes for an entry until it is baked again.
+    prediction from their baked meshes). Fewer pieces are less work for the game; the budget warning's figure
+    barely changes.
+  - The split never makes more pieces than before, and never refuses a model that used to fit. When a model does
+    not fit, the message now says by how much to lower Reduce to ~tris.
+  - A bake's split step takes 1 to 2.5 seconds longer. Nothing changes for an entry until it is baked again.
 
 - **Model Fuser: the status says when mirrored parts were turned inward** (2026-11-24, user report, the RSS
   Centurion: casemate walls solid in the Fuser, see-through in the Vehicle Lab). Some files store their mirrored
