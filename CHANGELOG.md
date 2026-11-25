@@ -172,6 +172,49 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     model reads like an element of a mixed array); a bracket typed for a brace (123 give back one right model fewer (the damaged model itself) and 1,289 more, of 4,404 on the reference pack; 19 of 120 on the
     district registry, the pushed version 51); a remark that carries further keys or stands inside a model above
     its name; a file without line ends that lost two quotes in one district.
+- **Model Fuser: mirrored parts the fuse turned inward lead the status (2026-11-24).** Reported by the user on the RSS
+  Centurion, the same afternoon as the weld dial below: "in the fuser the space between the upper row of secondary
+  guns and the heavier lower secondary guns is displayed correctly but in the vehicle lab it becomes partly
+  transparent".
+  - **Three causes were open** (a part marked X, the fuse turning a surface, the source wound that way), so every
+    spot was attributed by a ray census: rays from both sides at 113,662 cells, in the source and in the fused file, a
+    cell solid when any face at the first hit faces the ray. Parts marked X: 26 cells. The source read with the glTF
+    rule (mirrored nodes reversed): 9,324 see-through. The source as stored: 5,136. The user's fused file: 6,525.
+  - **The cause:** this file stores its mirrored parts already facing outward, and the fuse reversed them as glTF
+    asks. The fuse's own report said so, for groups A and E (9 and 8 parts), in the console and the report file. The
+    box **Check mirrored parts** was unticked. The Fuser's preview draws the source as stored, without the reversal,
+    which is why the wall was solid there and gone in the Lab.
+  - **Measured with the box ticked:** 5,109 see-through cells on the whole ship; in the casemate area 15.8% against
+    23.4% with it off and 13.4% in the source as stored. Headless renders of both sides with back faces culled: off,
+    the wall between the gun rows missing on two casemates, as in the user's screenshot; on, every casemate solid.
+    The user fused with the box ticked and confirmed; that file is byte-identical to the drill's box-on output.
+  - **What was wrong with the tool:** with the box off only a group that holds the evidence itself warned: two
+    groups. Comparing the box-off and box-on files triangle by triangle, the box turns 19,564 faces in seven groups
+    (A, B, D, E, N, S, U); the casemates' group U, 5,726 faces, was not one of the two - it has no mirrored part
+    welded to a plain one.
+  - **The change** writes no different byte. With the box off, `FuseGroups` pools the groups' evidence as it does
+    with the box on (jobs that share the setting, which is what the window sends) and gives each group the box would
+    act on two numbers: the parts whose reversal the box would undo (`Result.MirroredCheckWouldUndo`), and the parts
+    and faces STILL reversed in what was written (`MirroredStillReversedParts/Faces`). A face removed as a hidden
+    twin contributes to neither count. Faces retained as a doubled pair contribute to the total output of their
+    part when deciding whether a majority of its nondegenerate faces are reversed. The window lists groups with
+    reversed faces, most faces first. Groups with evidence against the pooled verdict follow their own evidence.
+  - **A review by a second agent changed it before the push.** The first cut announced the parts the box would
+    un-reverse as "facing inward": 846 parts in 18 groups on this ship, where the box changes seven. The winding
+    passes turn many of them back by themselves; two mirrored closed boxes were announced as see-through in an output
+    the box would not have changed by a byte. Hence the second count, taken at the end of the passes.
+  - **Proved by:** on the ship, the still-reversed count names eight groups and 21,076 faces against the seven
+    groups and 19,564 faces the box actually turns: equal in A and N (450, 66), within a quarter in D, S, U and E (7,406/7,003, 6,202/5,154, 5,246/5,726, 16/20), 1,636
+    against 1,145 in B, and one group named that the box leaves as it is (W, 54 faces) - the passes run differently
+    once the start changes, so the number is what is reversed in the file, not a promise of what the box turns. The
+    parts the box would un-reverse equal the parts it does un-reverse in 23 of 23 groups; the outputs of the build
+    before and after are byte-identical, box off and box on. Fixtures, each checked against the faces as written: a
+    group that holds the evidence and one that cannot see it; closed boxes the passes turn back; a follower with a
+    little evidence of its own; a group that sees the answer and still has faces reversed; a file stored the standard
+    way; a group with contrary evidence beside one that proves the nine-in-ten verdict stood. Nine planted defects,
+    four of them the reviewer's, fail at least one test each. **Not done:** the remaining 5,109 cells were not broken
+    down (they are at the source's own level); the box is still off by default, as the user asked on 2026-09-19; the
+    window was compiled, not opened.
 - **Model Fuser: a weld that flattens parts says so (2026-11-24).** Reported by the user on the RSS Centurion, a
   pre-dreadnought of 2,164 parts in 23 fuse groups: "something weird is going on with Group U after fusing, where it
   gets all messed up", then "group K is missing", then "the chains are also missing".

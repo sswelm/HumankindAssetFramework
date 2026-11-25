@@ -5,6 +5,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser: the status says when mirrored parts were turned inward** (2026-11-24, user report, the RSS
+  Centurion: casemate walls solid in the Fuser, see-through in the Vehicle Lab). Some files store their mirrored
+  parts already facing outward; the fuse reverses mirrored parts as glTF asks, and those then face inward. **Check
+  mirrored parts** cures it, and the fuse already warned, but only in the console and the report and only for a
+  group that holds the evidence itself (two groups on that ship; the box turns faces in seven, the casemates' among
+  them). With the box off, every group with mirrored faces still reversed in what it wrote now carries a warning
+  with the count, and the status after a fuse leads with them: "MIRRORED PARTS STILL REVERSED IN 8 GROUPS (21,076
+  faces, 57 parts) ... Tick Check mirrored parts and Fuse again". The count is what is reversed in the file; what
+  the box then turns can differ a little (19,564 faces in seven groups there). The Fuser's preview draws the source
+  as stored and so looks right either way. Nothing a fuse writes changes.
 - **Model Fuser: one surface where two lie on each other** (2026-11-25, user report, the Pre-Dreadnought's upper deck
   drawn with grey patches in game; seen fixed in game the same day, after fusing again, baking and rebuilding). The
   ship's wood deck lies exactly on the superstructure's own top face, which is wound the other way, and the aft mast and
