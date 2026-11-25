@@ -79,18 +79,27 @@ public static class QuadEstimate
     //   cells of one bake held the same number of triangles and different numbers of quads - how well triangles pair is a
     //   property of the region - so the cell that paired worst reached the budget while the others stood up to 12.6 % under
     //   it: that ship's eight cells of 25,207 triangles estimated 13,989 to 16,000 quads, and 50 triangles more were refused
-    //   ("need more than 8 draw fragments"). (2) Halving only makes 1, 2, 4 or 8 cells: a mesh of five budgets was cut into
-    //   eight.
+    //   ("need more than 8 draw fragments"). (2) Halving makes 1, 2, 4 or 8 cells unless the halves differ in density: on
+    //   every split entry of the project it made 2, 4 or 8, and a mesh of five budgets (HandCrankedSubmarines) got eight.
     //   Now: k = the fewest cells the estimate can fit in; the cell is cut in two along its longest axis (whole triangles
     //   in centroid order, as before) where the two sides' estimated quads stand as floor(k/2) to ceil(k/2), and each side
     //   is cut on in the same way. A leaf can still come out over the budget, for three reasons (measured by the review):
     //   a cut separates pairs, a side re-sorted along its own longest axis estimates differently, and each cut balances
     //   only its own two sides, so the cost of the cuts below lands on one subtree. Then k + 1 is tried, up to `maxCells`.
     //   (The user's Heavy Monitor at 217,608 triangles: four leaves at 16,000, four at 15,864 to 15,908.)
-    //   k STARTS from the root's estimate in the order the cuts see it - sorted along the longest axis - not in the
-    //   mesh's own triangle order (review of PR #322: a mesh stored in scattered order estimates far higher in index
-    //   order, and the first version started past the k that fits, or past maxCells and so at null where the halving
-    //   fitted), and at most at maxCells: whether maxCells fit is the partition's to say, not the estimate's.
+    //   k STARTS from the lower of the root's two estimates - in its stored order and sorted along its longest axis
+    //   (review of PR #322, rounds 1 and 2: a mesh stored in scattered order estimates far higher in stored order, and
+    //   the first version started past the k that fits, or past maxCells and so at null where the halving fitted; the
+    //   sorted order alone overshot on a grid whose stored order paired better) - and at most at maxCells: whether
+    //   maxCells fit is the partition's to say, not the estimate's.
+    //   The start is NOT a lower bound (a side re-sorted along its own axis can pair better than the root did), and the
+    //   balance can lose to the halving on a mesh whose density changes sharply. Trying every k from 2 found nothing on
+    //   the project's 21 split entries and costs about 4 seconds a bake, so instead: when the balance needed a k past its
+    //   start, or found none, the halving is run too (about 0.3 s) and the fewer cells win - the split never makes more
+    //   pieces than the halving did, and never refuses a mesh the halving fitted.
+    //   REFUSED AT ONCE when it cannot fit: a cell of t triangles estimates at least t/2 quads (a quad holds at most two
+    //   triangles), so more than 2 x budget x maxCells triangles never fit (review, round 2: a mesh of a million
+    //   triangles took 7 s to be refused).
     // `centroids` is flat xyz per triangle. Cells come back ordered by their minimum centroid (x, then y, then z), so chunk
     // letters are stable across re-bakes. Returns null when the mesh needs more than `maxCells` chunks.
     public static List<List<int>> PartitionByQuadBudget(int[] tris, float[] centroids, int budget, int maxCells)
@@ -99,18 +108,27 @@ public static class QuadEstimate
         var all = new List<int>(total);
         for (int i = 0; i < total; i++) all.Add(i);
         List<List<int>> cells = null;
-        if (total <= 1 || EstimateQuads(tris, all) <= budget) cells = new List<List<int>> { all };
-        else if (budget <= 0) return null;   // nothing of more than one triangle fits (and no division by it below)
+        int stored = EstimateQuads(tris, all);
+        if (total <= 1 || stored <= budget) cells = new List<List<int>> { all };
+        // a budget below one quad fits no cell of two triangles (before the PR the halving made one-triangle cells up to
+        // maxCells; refused now - the Factory's budget is the constant 16,000), and no division by it below
+        else if (budget <= 0) return null;
+        else if (total > 2L * budget * maxCells) return null;   // see REFUSED AT ONCE above
         else
         {
             var sorted = new List<int>(all);
             SortAlongLongestAxis(centroids, sorted);
-            long whole = EstimateQuads(tris, sorted);
+            long whole = System.Math.Min(stored, EstimateQuads(tris, sorted));
             int start = (int)System.Math.Min(maxCells, System.Math.Max(2L, (whole + budget - 1) / budget));
             for (int k = start; k <= maxCells && cells == null; k++)
             {
                 var made = new List<List<int>>();
                 if (SplitInto(tris, centroids, new List<int>(all), k, budget, made)) cells = made;
+            }
+            if (cells == null || cells.Count > start)
+            {
+                var halved = Halving(tris, centroids, all, budget, maxCells);
+                if (halved != null && (cells == null || halved.Count < cells.Count)) cells = halved;
             }
         }
         if (cells == null) return null;
@@ -121,6 +139,23 @@ public static class QuadEstimate
             c = ma[1].CompareTo(mb[1]); if (c != 0) return c;
             return ma[2].CompareTo(mb[2]);
         });
+        return cells;
+    }
+
+    // THE HALVING (the partition before 2026-11-25, unchanged): a cell that does not fit, in the order it stands, is cut
+    // at its median triangle along its longest axis, until every cell fits. Null past maxCells cells.
+    internal static List<List<int>> Halving(int[] tris, float[] centroids, List<int> all, int budget, int maxCells)
+    {
+        var stack = new List<List<int>> { new List<int>(all) };
+        var cells = new List<List<int>>();
+        while (stack.Count > 0)
+        {
+            var cell = stack[stack.Count - 1]; stack.RemoveAt(stack.Count - 1);
+            if (cell.Count <= 1 || EstimateQuads(tris, cell) <= budget) { cells.Add(cell); if (cells.Count > maxCells) return null; continue; }
+            SortAlongLongestAxis(centroids, cell);
+            int mid = cell.Count / 2;
+            stack.Add(cell.GetRange(0, mid)); stack.Add(cell.GetRange(mid, cell.Count - mid));
+        }
         return cells;
     }
 
