@@ -144,7 +144,7 @@ public static class BakeFeatureTest
 
             // ---- MULTI-MESH SPLIT (2026-09-13, the Bremen): a bake over the 16,320-quad per-fragment ceiling
             //      must ship overflow chunks (_ModelMesh_B..) instead of silently not drawing the tail in-game.
-            //      The 70,844-tri grid BSP-halves past the ceiling twice -> 4 chunks; assert every chunk fits,
+            //      The 70,844-tri grid is about 35,400 quads -> 3 chunks (4 by halving, until 2026-11-25); assert every chunk fits,
             //      nothing was lost (triangle sum), and the shipped Skeleton carries one skinnedMeshInfos entry
             //      per chunk — the entries the plugin's fragment discovery appends draw calls for. ----
             {

@@ -32,12 +32,26 @@ public static class QuadEstimate
     // shared indices at all) encodes quads == tris, so the old tris/2 budget could ship chunks up to 2x over the
     // ceiling; even the welded Bremen paired at 0.6 quads/tri, not 0.5. Greedy pairing in triangle order — the
     // common quad triangulation emits its pair adjacently. `cell` lists the triangle indices to count.
-    public static int EstimateQuads(int[] tris, IList<int> cell)
+    public static int EstimateQuads(int[] tris, IList<int> cell) => Greedy(tris, cell, null);
+
+    // the estimate of every PREFIX of `cell` in one pass (review of PR #322: the balance search re-estimated the left
+    // side from scratch at every probe). Exact, not an approximation: the greedy pairing of a prefix is the first steps
+    // of the greedy pairing of the whole - a triangle only looks at the ones before it - so after m triangles the running
+    // count (a quad per triangle that found no mate, none for one that did) IS EstimateQuads of those m.
+    // prefix[m] = EstimateQuads(tris, cell[0..m)), m = 0..cell.Count.
+    internal static int[] PrefixQuads(int[] tris, IList<int> cell)
+    {
+        var prefix = new int[cell.Count + 1];
+        Greedy(tris, cell, prefix);
+        return prefix;
+    }
+
+    static int Greedy(int[] tris, IList<int> cell, int[] prefix)
     {
         long Key(int x, int y) => x < y ? ((long)x << 32) | (uint)y : ((long)y << 32) | (uint)x;
         var owner = new Dictionary<long, int>(cell.Count * 2, EdgeKeys);
         var paired = new Dictionary<int, bool>(cell.Count);
-        int quads = 0;
+        int quads = 0, running = 0, m = 0;
         foreach (int t in cell)
         {
             int a = tris[t * 3], b = tris[t * 3 + 1], c = tris[t * 3 + 2];
@@ -51,37 +65,72 @@ public static class QuadEstimate
             {
                 paired[t] = false;
                 owner[e0] = t; owner[e1] = t; owner[e2] = t;
+                running++;
             }
+            if (prefix != null) prefix[++m] = running;
         }
         foreach (var kv in paired) if (!kv.Value) quads++;
         return quads;
     }
 
-    // BSP partition at the triangle-centroid median on the longest axis (the Workshop plane cut's proven partition
-    // — whole triangles, deterministic order) until every cell estimates at or under `budget` quads. `centroids`
-    // is flat xyz per triangle. Cells come back ordered by their minimum centroid (x, then y, then z), so chunk
+    // FEWER CELLS, FILLED EVENLY (2026-11-25, user, the Heavy Monitor at 7.3 of 8 fragments: "I can never
+    // seem to get more usage ... the spreading of the quads is not yet optimal").
+    //   The first partition halved a cell at its MEDIAN TRIANGLE until every cell fitted. Two things followed. (1) The
+    //   cells of one bake held the same number of triangles and different numbers of quads - how well triangles pair is a
+    //   property of the region - so the cell that paired worst reached the budget while the others stood up to 12.6 % under
+    //   it: that ship's eight cells of 25,207 triangles estimated 13,989 to 16,000 quads, and 50 triangles more were refused
+    //   ("need more than 8 draw fragments"). (2) Halving makes 1, 2, 4 or 8 cells unless the halves differ in density: on
+    //   every split entry of the project it made 2, 4 or 8, and a mesh of five budgets (HandCrankedSubmarines) got eight.
+    //   Now: k starts at the fewest cells the estimate could fit in; the cell is cut in two along its longest axis (whole triangles
+    //   in centroid order, as before) where the two sides' estimated quads stand as floor(k/2) to ceil(k/2), and each side
+    //   is cut on in the same way. A leaf can still come out over the budget, for three reasons (measured by the review):
+    //   a cut separates pairs, a side re-sorted along its own longest axis estimates differently, and each cut balances
+    //   only its own two sides, so the cost of the cuts below lands on one subtree. Then k + 1 is tried, up to `maxCells`.
+    //   (The user's Heavy Monitor at 217,608 triangles: four leaves at 16,000, four at 15,864 to 15,908.)
+    //   k STARTS from the lower of the root's two estimates - in its stored order and sorted along its longest axis
+    //   (review of PR #322, rounds 1 and 2: a mesh stored in scattered order estimates far higher in stored order, and
+    //   the first version started past the k that fits, or past maxCells and so at null where the halving fitted; the
+    //   sorted order alone overshot on a grid whose stored order paired better) - and at most at maxCells: whether
+    //   maxCells fit is the partition's to say, not the estimate's.
+    //   The start is NOT a lower bound (a side re-sorted along its own axis can pair better than the root did), and the
+    //   balance can lose to the halving on a mesh whose density changes sharply. Trying every k from 2 found nothing on
+    //   the project's 21 split entries and costs about 4 seconds a bake, so instead the halving is ALWAYS run too (about
+    //   0.3 s) and the fewer cells win, the balance on a tie: the split never makes more pieces than the halving, and
+    //   never refuses a mesh the halving fitted. (Review round 3: the first version ran the halving only when the balance
+    //   had needed a k past its start, and a balance that fitted at its start could still keep a piece more.)
+    //   REFUSED AT ONCE when it cannot fit: a cell of t triangles estimates at least t/2 quads (a quad holds at most two
+    //   triangles), so more than 2 x budget x maxCells triangles never fit (review, round 2: a mesh of a million
+    //   triangles took 7 s to be refused).
+    // `centroids` is flat xyz per triangle. Cells come back ordered by their minimum centroid (x, then y, then z), so chunk
     // letters are stable across re-bakes. Returns null when the mesh needs more than `maxCells` chunks.
     public static List<List<int>> PartitionByQuadBudget(int[] tris, float[] centroids, int budget, int maxCells)
     {
         int total = tris.Length / 3;
+        if (maxCells < 1) return null;   // no cell allowed: nothing fits (master returned null here too)
         var all = new List<int>(total);
         for (int i = 0; i < total; i++) all.Add(i);
-        var stack = new List<List<int>> { all };
-        var cells = new List<List<int>>();
-        while (stack.Count > 0)
+        List<List<int>> cells = null;
+        int stored = EstimateQuads(tris, all);
+        if (total <= 1 || stored <= budget) cells = new List<List<int>> { all };
+        // a budget below one quad fits no cell of two triangles (before the PR the halving made one-triangle cells up to
+        // maxCells; refused now - the Factory's budget is the constant 16,000), and no division by it below
+        else if (budget <= 0) return null;
+        else if (total > 2L * budget * maxCells) return null;   // see REFUSED AT ONCE above
+        else
         {
-            var cell = stack[stack.Count - 1]; stack.RemoveAt(stack.Count - 1);
-            if (cell.Count <= 1 || EstimateQuads(tris, cell) <= budget) { cells.Add(cell); continue; }
-            float[] mn = { float.MaxValue, float.MaxValue, float.MaxValue }, mx = { float.MinValue, float.MinValue, float.MinValue };
-            foreach (int ti in cell)
-                for (int a = 0; a < 3; a++) { float c = centroids[ti * 3 + a]; if (c < mn[a]) mn[a] = c; if (c > mx[a]) mx[a] = c; }
-            float sx = mx[0] - mn[0], sy = mx[1] - mn[1], sz = mx[2] - mn[2];
-            int ax = sx >= sy && sx >= sz ? 0 : (sy >= sz ? 1 : 2);
-            cell.Sort((p, q) => { int c = centroids[p * 3 + ax].CompareTo(centroids[q * 3 + ax]); return c != 0 ? c : p.CompareTo(q); });
-            int mid = cell.Count / 2;
-            stack.Add(cell.GetRange(0, mid)); stack.Add(cell.GetRange(mid, cell.Count - mid));
+            var sorted = new List<int>(all);
+            SortAlongLongestAxis(centroids, sorted);
+            long whole = System.Math.Min(stored, EstimateQuads(tris, sorted));
+            int start = (int)System.Math.Min(maxCells, System.Math.Max(2L, (whole + budget - 1) / budget));
+            for (int k = start; k <= maxCells && cells == null; k++)
+            {
+                var made = new List<List<int>>();
+                if (SplitInto(tris, centroids, new List<int>(all), k, budget, made)) cells = made;
+            }
+            var halved = Halving(tris, centroids, all, budget, maxCells);
+            if (halved != null && (cells == null || halved.Count < cells.Count)) cells = halved;
         }
-        if (cells.Count > maxCells) return null;
+        if (cells == null) return null;
         cells.Sort((a, b) =>
         {
             float[] ma = MinCentroid(a, centroids), mb = MinCentroid(b, centroids);
@@ -90,6 +139,72 @@ public static class QuadEstimate
             return ma[2].CompareTo(mb[2]);
         });
         return cells;
+    }
+
+    // THE HALVING (the partition before 2026-11-25, unchanged): a cell that does not fit, in the order it stands, is cut
+    // at its median triangle along its longest axis, until every cell fits. Null past maxCells cells.
+    internal static List<List<int>> Halving(int[] tris, float[] centroids, List<int> all, int budget, int maxCells)
+    {
+        var stack = new List<List<int>> { new List<int>(all) };
+        var cells = new List<List<int>>();
+        while (stack.Count > 0)
+        {
+            var cell = stack[stack.Count - 1]; stack.RemoveAt(stack.Count - 1);
+            if (cell.Count <= 1 || EstimateQuads(tris, cell) <= budget) { cells.Add(cell); if (cells.Count > maxCells) return null; continue; }
+            SortAlongLongestAxis(centroids, cell);
+            int mid = cell.Count / 2;
+            stack.Add(cell.GetRange(0, mid)); stack.Add(cell.GetRange(mid, cell.Count - mid));
+        }
+        return cells;
+    }
+
+    // `cell` into k cells of about equal estimated quads, appended to `cells`; false when one of them is over the budget
+    static bool SplitInto(int[] tris, float[] centroids, List<int> cell, int k, int budget, List<List<int>> cells)
+    {
+        if (k <= 1 || cell.Count <= 1)
+        {
+            if (cell.Count > 1 && EstimateQuads(tris, cell) > budget) return false;
+            cells.Add(cell); return true;
+        }
+        SortAlongLongestAxis(centroids, cell);
+        int kl = k / 2, kr = k - kl;
+        // the cut: the first position where the left side's share of the quads reaches kl of k. The left estimate only
+        // grows with the position (a triangle more is a quad more or a pair made); the right one shrinks on the whole.
+        int[] left = PrefixQuads(tris, cell);   // the left side at every position, in one pass
+        int lo = 1, hi = cell.Count - 1;
+        while (lo < hi)
+        {
+            int mid = lo + (hi - lo) / 2;
+            long l = left[mid], r = EstimateQuads(tris, cell.GetRange(mid, cell.Count - mid));
+            if (l * kr >= r * kl) hi = mid; else lo = mid + 1;
+        }
+        // THE NEIGHBOURING CUTS (from a parallel review by another model, 805e9b6b): when the balanced cut leaves a side
+        // over the budget - it separated a pair the side needed - the cuts one triangle either way are tried before the
+        // caller moves on to one cell more; a cut that keeps a pair together can fit where the balanced one did not (a
+        // 6 x 5 grid in 3 cells of 11, a 9 x 5 grid in 5 cells of 10: null without them). A side that could not fit even
+        // with every triangle paired is not tried. The cells a failed try appended are taken back.
+        bool TryCut(int cut)
+        {
+            if (cut < 1 || cut >= cell.Count || cut > 2L * budget * kl || cell.Count - cut > 2L * budget * kr) return false;
+            int first = cells.Count;
+            if (SplitInto(tris, centroids, cell.GetRange(0, cut), kl, budget, cells)
+                && SplitInto(tris, centroids, cell.GetRange(cut, cell.Count - cut), kr, budget, cells)) return true;
+            cells.RemoveRange(first, cells.Count - first);
+            return false;
+        }
+        return TryCut(lo) || TryCut(lo - 1) || TryCut(lo + 1);
+    }
+
+    // whole triangles in centroid order along the cell's longest axis (x, then y, then z on a tie of extents), the
+    // triangle index breaking a tie of centroids: the order every cut and every k start is judged in
+    static void SortAlongLongestAxis(float[] centroids, List<int> cell)
+    {
+        float[] mn = { float.MaxValue, float.MaxValue, float.MaxValue }, mx = { float.MinValue, float.MinValue, float.MinValue };
+        foreach (int ti in cell)
+            for (int a = 0; a < 3; a++) { float c = centroids[ti * 3 + a]; if (c < mn[a]) mn[a] = c; if (c > mx[a]) mx[a] = c; }
+        float sx = mx[0] - mn[0], sy = mx[1] - mn[1], sz = mx[2] - mn[2];
+        int ax = sx >= sy && sx >= sz ? 0 : (sy >= sz ? 1 : 2);
+        cell.Sort((p, q) => { int c = centroids[p * 3 + ax].CompareTo(centroids[q * 3 + ax]); return c != 0 ? c : p.CompareTo(q); });
     }
 
     static float[] MinCentroid(List<int> cell, float[] centroids)
