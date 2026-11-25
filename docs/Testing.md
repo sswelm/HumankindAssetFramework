@@ -2842,6 +2842,29 @@ do not prove each branch was reached.
 Scoped out, named: a name listed twice in one tier's list would name its second datablock differently
 (the Lab lists a part once).
 
+**The dissolve's delimit is NORMAL, not empty (2026-11-25).** The paragraph above read the script's
+`bmesh.ops.dissolve_limit(...)` as delimit 0 because the call gives none. Blender gives an operator's unset flag slot the
+first value of its enum (`bmo_op_slots_init`), and `bmo_enum_dissolve_limit_flags` starts with `NORMAL`: a manifold edge
+whose two faces are wound against each other is a delimiter and is never joined, and a vertex with such an edge is judged
+by its plain edge angle. The port joined those faces, turning one of them over first (`BM_faces_join_pair`). Every
+fixture and every other recipe of the sample was equal with the rule wrong, so none of them held it; the 4,400 temporary
+probes named above list inconsistently wound meshes among their matches, but no committed case held the dissolve on
+them. Found when `hms_roberts_1940_split_fused` came under the 40 MB sample limit after a re-fuse: one RAILING
+part of 133,133 vertices, 123,842 left here and 124,369 in Blender. How it was narrowed, for the next mismatch of this
+kind: both sides dumped, for that part, every face's centre as bits, each BSP cell's face list, each cell's edge and
+vertex lists, and the element counts after each of the 64 cells (an instrumented copy of the script's `_dissolve_limited`
+against the same rows from `DissolveLimited`). Everything up to the first dissolve was equal; after the first cell the
+vertex counts were equal and the face counts six apart; 16 of that cell's 2,185 edges ended differently; Blender, handed
+each of those edges alone on a copy of the mesh, dissolved ten and kept six, and the six were the ones whose two faces run
+the same way along the edge. Now held by `Tests/DissolveDelimitTests.cs` (14 cases, managed and native: the pair of
+triangles, a strip wound -, +, +, -, a vertex on a delimiter edge with a bend under the limit, one between folded faces
+with a bend over it, and the control wound alike; every count is Blender 5.1.2's with the slot unset) and by the drill
+fixture `fx_c_soup_wound` (Patch: a flat 7 x 7 grid with a third of its cells' second triangles turned over, 49 vertices
+to 29 through the dissolve; Seam: a grid whose upper half is turned over with a 4 degree zigzag between the halves, 49 to
+6). Planted: the code before the fix fails the fixture on Patch (6 against 29) and 12 of the 14 cases; with the edge half
+kept and the vertex half removed from the managed code, the fixture fails on Seam (11 against 6) and the Roberts part
+again (123,942).
+
 **Step (d), stage 3 of item (5), part d1: the frame every rig shares (2026-10-16).** Stage 3 is 1,382 lines of branches keyed on
 the role lists, so it is ported by branch: `editor/BlenderVehicleRig.Stage3.cs` declines a job by name ("stage 3: the ... is not
 modelled yet") when a list a later part ports is non-empty - turrets, guns, muzzles, cradles, trails, rotors, tail rotors,

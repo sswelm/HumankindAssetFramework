@@ -31,6 +31,11 @@ Stage 2 (step (c), the weld tiers):
   fx_c_soup_L        a flat L-shaped strip in the SHROUD tier at 50: the dissolve leaves a CONCAVE n-gon, so the ear clipping's
                      kd-tree of concave corners decides the ears; a lone flat quad beside it takes the quad rule
   fx_c_soup_attributes custom normals, vertex colours and two UV layers through the soup operators
+  fx_c_soup_wound    faces wound against each other in the RIGGING tier at 90 (2026-11-25): dissolve_limit runs with delimit
+                     {'NORMAL'} - the unset flag slot's default - so an edge between two such faces is never joined and a vertex
+                     on one is judged by its plain edge angle. Patch: a flat 7 x 7 grid with a third of its cells' second
+                     triangles turned over; Seam: a flat 7 x 7 grid whose upper half is turned over, the row between the halves
+                     a zigzag of 4 degrees (under the limit by its plain angle, over it by the angle scaled with the faces')
   fx_d_chunk_splice  an earlier BSP cell deletes an edge queued for a later cell: the script dies in stage 2
   fx_c_soup_bumpy    a 60 x 40 bumpy grid (4,800 faces) in the RIGGING tier at 80: over the 4,000-face cap, the dissolve runs
                      per BSP cell on the cell's interior edges and vertices
@@ -253,15 +258,16 @@ def grid_seam(r, name, material, n=9):
     return len(r.meshes) - 1
 
 
-def flat_grid(r, name, material, nx, ny, bump=0.0, mask=None):
-    """An (nx x ny)-vertex grid of two triangles per cell, z = bump * sin/cos (flat at 0); `mask(i, j)` keeps a cell or not."""
+def flat_grid(r, name, material, nx, ny, bump=0.0, mask=None, wound=None, nudge=None):
+    """An (nx x ny)-vertex grid of two triangles per cell, z = bump * sin/cos (flat at 0); `mask(i, j)` keeps a cell or not;
+    `wound(i, j, k)` winds triangle k (0 or 1) of a cell the other way; `nudge(i, j)` moves a vertex along y, in the plane."""
     import math as _m
     pos = []; uv = []; rows = []
     for j in range(ny):
         row = []
         for i in range(nx):
             x, y = i / (nx - 1.0), j / (ny - 1.0)
-            row.append(len(pos)); pos.append((x, y, bump * _m.sin(5.0 * x) * _m.cos(4.0 * y))); uv.append((x, y))
+            row.append(len(pos)); pos.append((x, y if nudge is None else y + nudge(i, j), bump * _m.sin(5.0 * x) * _m.cos(4.0 * y))); uv.append((x, y))
         rows.append(row)
     idx = []
     for j in range(ny - 1):
@@ -269,7 +275,8 @@ def flat_grid(r, name, material, nx, ny, bump=0.0, mask=None):
             if mask is not None and not mask(i, j):
                 continue
             a = rows[j][i]; b = rows[j][i + 1]; c = rows[j + 1][i + 1]; d = rows[j + 1][i]
-            idx += [a, b, c, a, c, d]
+            for k, t in enumerate(((a, b, c), (a, c, d))):
+                idx += [t[0], t[2], t[1]] if wound is not None and wound(i, j, k) else list(t)
     prim = {"attributes": {"POSITION": r.b.accessor(pos, "f", "VEC3"), "TEXCOORD_0": r.b.accessor(uv, "f", "VEC2", minmax=False)},
             "indices": r.b.accessor(idx, "H" if len(pos) < 65536 else "I", "SCALAR", minmax=False), "material": material}
     r.meshes.append({"name": name, "primitives": [prim]})
@@ -660,6 +667,13 @@ def main(out):
     attrs["TEXCOORD_1"] = r.b.accessor([(i / 7.0, 1.0 - i / 35.0) for i in range(36)], "f", "VEC2", minmax=False)
     r.node("ColouredNet", mesh=mesh); r.node("Other", mesh=r.mesh("Other", at=(3, 0, 0), material=ma))
     recipe(out, "fx_c_soup_attributes", r.write(models, "fx_c_soup_attributes"), [("ColouredNet", 15, {}), ("Other", 0, {})], riggingReducePct=90.0)
+    # Faces wound against each other: the dissolve's NORMAL delimiter (the unset flag slot's default), on the edges and the vertices.
+    r = Rig(); ma = r.material("Rope")
+    r.node("Patch", mesh=flat_grid(r, "Patch", ma, 7, 7, wound=lambda i, j, k: k == 1 and (i + 2 * j) % 3 == 0))
+    r.node("Seam", mesh=flat_grid(r, "Seam", ma, 7, 7, wound=lambda i, j, k: j >= 3, nudge=lambda i, j: (0.003 if i % 2 else -0.003) if j == 3 else 0.0),
+           translation=[2.0, 0.0, 0.0])
+    r.node("Other", mesh=r.mesh("Other", at=(5, 0, 0), material=ma))
+    recipe(out, "fx_c_soup_wound", r.write(models, "fx_c_soup_wound"), [("Patch", 15, {}), ("Seam", 15, {}), ("Other", 0, {})], riggingReducePct=90.0)
     # ---- stage 3 (step (d), part d1: the frame every rig shares)
     # fx_r_wheels: two tires thin along Y with an off-centre bolt joining the first (the 0.75 rule), a cube wheel (its extents tie:
     # the axle is the first, X), the tire listed twice; the wave rock on (RootHull carries the body); a rudder that is also listed as

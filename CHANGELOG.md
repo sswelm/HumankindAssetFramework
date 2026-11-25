@@ -10,6 +10,47 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Vehicle Lab: the limited dissolve leaves faces wound against each other apart, as Blender does (2026-11-25).**
+  Found by the Blender-parity run: the vehicle_rig drill failed on one recipe, `hms_roberts_1940_split_fused`, on one
+  part of its RAILING tier.
+  - **The failure.** `Fused_R_Material2_10_Part_005`, 133,133 vertices: after the limited dissolve at 5 degrees the C#
+    left 123,842 and Blender 124,369, so the decimate that follows ended at 38,854 against 38,623. Every other part of
+    the recipe and every other job of the drill was equal. The recipe had never been in the drill's default sample:
+    its source was 45.5 MB against the 40 MB limit until a re-fuse that morning made it 32.2 MB. The source from
+    before that re-fuse shows the same defect on the same part (165,706 against 166,270).
+  - **The cause: `delimit` is not empty when it is not given.** `vehicle_rig.py` calls `bmesh.ops.dissolve_limit`
+    without a `delimit`, and the port read that as delimit 0. Blender gives an operator's unset flag slot the FIRST
+    value of its enum (`bmo_op_slots_init`, bmesh_operators.cc), and the dissolve's enum starts with `NORMAL`. So in
+    Blender an edge whose two faces are wound against each other is never joined (`bm_edge_is_delimiter`), and a vertex
+    with such an edge keeps its plain edge angle instead of the angle scaled by the faces' (`bm_vert_is_delimiter`). The
+    port joined those faces: in the part's first cell of 2,230 faces it dissolved six edges Blender keeps, each between
+    two triangles wound the opposite way (ten more edges of the cell ended differently around them; all sixteen are
+    equal now). The cell split, the faces' centres and the edge and vertex lists handed to each of the 64 cells were
+    equal to the bit; only the dissolve differed.
+  - **Measured in Blender 5.1.2**, two coplanar triangles sharing an edge, the second wound the other way: two faces
+    with the slot unset, two with `delimit={'NORMAL'}`, one quad with `delimit=set()`. The old port gave the quad.
+  - **The fix** is in both implementations, `editor/BlenderDissolve.cs` and `native/hafbmesh.cpp` (the DLL is rebuilt;
+    a fresh build of `native/` is byte-equal to it). They were wrong alike, so the native kernel's comparison with the
+    managed code could not see it.
+  - **Held by** `Tests/DissolveDelimitTests.cs`, 14 cases on the managed code and the kernel, each count Blender's on
+    the same shape: 12 fail on the code before the fix, the two controls (faces wound alike) pass on both. And by a
+    drill fixture, `fx_c_soup_wound`, so the rule no longer depends on one saved recipe staying under the size limit:
+    the code before the fix fails it (6 vertices against Blender's 29 on its first part), and with only the vertex half
+    of the fix taken out its second part fails (11 against 6).
+  - **What changes in a bake:** a part in a soup tier (rigging, shroud, railing and the like) that has faces wound
+    against each other comes out as Blender made it. Of the 37 saved recipes the Roberts is the only one that changes:
+    the other 36 were equal to Blender through the reduction before the fix and are after it (the eight over the size
+    limit were run for this, with both builds).
+  - **Verified:** the recipe alone on four copies of its source (the one from before the re-fuse and three re-fuses of
+    that day), equal through all five stages with a byte-identical GLB each time, the native kernel and the managed
+    code both on the failing copy; the whole drill with Blender live, default sample: 196 of 206 jobs equal, 10 left by
+    name as before, no failure; with every recipe (`FULL=1`) and the new fixture: 205 of 215 equal, 10 left by name,
+    157 exported files byte-identical; 3,173 unit tests.
+  - **A trap met on the way:** the drill reads each source twice, once in Blender and minutes later in C#. The model
+    was re-fused between the two in one run, and the drill reported a stage 1 difference on it (3,031 vertices against
+    12,843 on one part) that was two different files, not a defect. The run was repeated on a recipes folder whose
+    Roberts source is a copy. The drill itself does not guard against this.
+
 - **A damaged pack.json keeps the models after the damage (2026-11-24).** Recorded as not fixed by PR #315, asked
   for by the user the same day.
   - **The defect:** when a pack does not parse, `ParseModels` reads one object per model, found by counting braces
