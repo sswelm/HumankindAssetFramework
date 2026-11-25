@@ -234,6 +234,28 @@ namespace HumankindAssetFramework.Tests
             Assert.True(eight <= four, $"maxCells 8 made {eight} cells, maxCells 4 made {four}");
         }
 
+        // THE HALVING WINS WHERE IT IS BETTER (review round 2, a reviewer's "chains" mesh, scaled down): 50 strips of four
+        // triangles a-b-c-d along x, the two middle ones low and the two ends high in y. Sorted along x a strip pairs a-b
+        // and c-d (2 quads); sorted along y the middles come first and pair b-c, the ends stay alone (3 quads). At a budget
+        // of 25 the balance alone needs 7 pieces and the halving makes 6: the partition returns the halving's 6.
+        [Fact]
+        public void Where_the_halving_makes_fewer_pieces_its_pieces_are_returned()
+        {
+            int C = 50, N = 4 * C; var tris = new int[3 * N]; var cent = new float[3 * N];
+            for (int c = 0; c < C; c++)
+                for (int i = 0; i < 4; i++)
+                {
+                    int t = c * 4 + i, v = c * 6 + i;
+                    tris[t * 3] = v; tris[t * 3 + 1] = v + 1; tris[t * 3 + 2] = v + 2;
+                    cent[t * 3] = c * 10f + i; cent[t * 3 + 1] = (i == 0 || i == 3) ? 0.5f * 10f * C : 0f;
+                }
+            var halved = QuadEstimate.Halving(tris, cent, Enumerable.Range(0, N).ToList(), 25, 8);
+            Assert.Equal(6, halved.Count);
+            var cells = QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 25, maxCells: 8);
+            Assert.Equal(6, cells.Count);
+            Assert.All(cells, c => Assert.True(QuadEstimate.EstimateQuads(tris, c) <= 25));
+        }
+
         // NEVER MORE PIECES THAN THE HALVING, NEVER NULL WHERE IT FITTED (review round 2: on a mesh whose density changes
         // sharply the balance alone needed 7 where the halving made 6). Random meshes of welded strips and lone triangles in
         // scattered order, at budgets from tight to loose: the partition is a partition, every cell fits, and it has at most
