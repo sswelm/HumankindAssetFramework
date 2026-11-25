@@ -57,31 +57,34 @@ public static class QuadEstimate
         return quads;
     }
 
-    // BSP partition at the triangle-centroid median on the longest axis (the Workshop plane cut's proven partition
-    // — whole triangles, deterministic order) until every cell estimates at or under `budget` quads. `centroids`
-    // is flat xyz per triangle. Cells come back ordered by their minimum centroid (x, then y, then z), so chunk
+    // THE FEWEST CELLS THAT FIT, FILLED EVENLY (2026-11-25, user, the Heavy Monitor at 7.3 of 8 fragments: "I can never
+    // seem to get more usage ... the spreading of the quads is not yet optimal").
+    //   The first partition halved a cell at its MEDIAN TRIANGLE until every cell fitted. Two things followed. (1) The
+    //   cells of one bake held the same number of triangles and different numbers of quads - how well triangles pair is a
+    //   property of the region - so the cell that paired worst reached the budget while the others stood up to 15 % under
+    //   it: that ship's eight cells of 25,207 triangles estimated 13,989 to 16,000 quads, and one more triangle would have
+    //   needed a ninth. (2) Halving only makes 1, 2, 4 or 8 cells: a mesh of five budgets was cut into eight.
+    //   Now: k = the fewest cells the whole estimate can fit in; the cell is cut in two along its longest axis (whole
+    //   triangles in centroid order, as before) where the two sides' estimated quads stand as floor(k/2) to ceil(k/2), and
+    //   each side is cut on in the same way. A cut costs quads (the pairs it separates), so a leaf can still come out over
+    //   the budget: then k + 1 is tried, up to `maxCells`.
+    // `centroids` is flat xyz per triangle. Cells come back ordered by their minimum centroid (x, then y, then z), so chunk
     // letters are stable across re-bakes. Returns null when the mesh needs more than `maxCells` chunks.
     public static List<List<int>> PartitionByQuadBudget(int[] tris, float[] centroids, int budget, int maxCells)
     {
         int total = tris.Length / 3;
         var all = new List<int>(total);
         for (int i = 0; i < total; i++) all.Add(i);
-        var stack = new List<List<int>> { all };
-        var cells = new List<List<int>>();
-        while (stack.Count > 0)
-        {
-            var cell = stack[stack.Count - 1]; stack.RemoveAt(stack.Count - 1);
-            if (cell.Count <= 1 || EstimateQuads(tris, cell) <= budget) { cells.Add(cell); continue; }
-            float[] mn = { float.MaxValue, float.MaxValue, float.MaxValue }, mx = { float.MinValue, float.MinValue, float.MinValue };
-            foreach (int ti in cell)
-                for (int a = 0; a < 3; a++) { float c = centroids[ti * 3 + a]; if (c < mn[a]) mn[a] = c; if (c > mx[a]) mx[a] = c; }
-            float sx = mx[0] - mn[0], sy = mx[1] - mn[1], sz = mx[2] - mn[2];
-            int ax = sx >= sy && sx >= sz ? 0 : (sy >= sz ? 1 : 2);
-            cell.Sort((p, q) => { int c = centroids[p * 3 + ax].CompareTo(centroids[q * 3 + ax]); return c != 0 ? c : p.CompareTo(q); });
-            int mid = cell.Count / 2;
-            stack.Add(cell.GetRange(0, mid)); stack.Add(cell.GetRange(mid, cell.Count - mid));
-        }
-        if (cells.Count > maxCells) return null;
+        int whole = EstimateQuads(tris, all);
+        List<List<int>> cells = null;
+        if (total <= 1 || whole <= budget) cells = new List<List<int>> { all };
+        else
+            for (int k = System.Math.Max(2, (int)(((long)whole + budget - 1) / budget)); k <= maxCells && cells == null; k++)
+            {
+                var made = new List<List<int>>();
+                if (SplitInto(tris, centroids, new List<int>(all), k, budget, made)) cells = made;
+            }
+        if (cells == null) return null;
         cells.Sort((a, b) =>
         {
             float[] ma = MinCentroid(a, centroids), mb = MinCentroid(b, centroids);
@@ -90,6 +93,34 @@ public static class QuadEstimate
             return ma[2].CompareTo(mb[2]);
         });
         return cells;
+    }
+
+    // `cell` into k cells of about equal estimated quads, appended to `cells`; false when one of them is over the budget
+    static bool SplitInto(int[] tris, float[] centroids, List<int> cell, int k, int budget, List<List<int>> cells)
+    {
+        if (k <= 1 || cell.Count <= 1)
+        {
+            if (cell.Count > 1 && EstimateQuads(tris, cell) > budget) return false;
+            cells.Add(cell); return true;
+        }
+        float[] mn = { float.MaxValue, float.MaxValue, float.MaxValue }, mx = { float.MinValue, float.MinValue, float.MinValue };
+        foreach (int ti in cell)
+            for (int a = 0; a < 3; a++) { float c = centroids[ti * 3 + a]; if (c < mn[a]) mn[a] = c; if (c > mx[a]) mx[a] = c; }
+        float sx = mx[0] - mn[0], sy = mx[1] - mn[1], sz = mx[2] - mn[2];
+        int ax = sx >= sy && sx >= sz ? 0 : (sy >= sz ? 1 : 2);
+        cell.Sort((p, q) => { int c = centroids[p * 3 + ax].CompareTo(centroids[q * 3 + ax]); return c != 0 ? c : p.CompareTo(q); });
+        int kl = k / 2, kr = k - kl;
+        // the cut: the first position where the left side's share of the quads reaches kl of k. The left estimate only
+        // grows with the position (a triangle more is a quad more or a pair made); the right one shrinks on the whole.
+        int lo = 1, hi = cell.Count - 1;
+        while (lo < hi)
+        {
+            int mid = lo + (hi - lo) / 2;
+            long l = EstimateQuads(tris, cell.GetRange(0, mid)), r = EstimateQuads(tris, cell.GetRange(mid, cell.Count - mid));
+            if (l * kr >= r * kl) hi = mid; else lo = mid + 1;
+        }
+        return SplitInto(tris, centroids, cell.GetRange(0, lo), kl, budget, cells)
+            && SplitInto(tris, centroids, cell.GetRange(lo, cell.Count - lo), kr, budget, cells);
     }
 
     static float[] MinCentroid(List<int> cell, float[] centroids)

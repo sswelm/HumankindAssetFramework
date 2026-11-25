@@ -86,6 +86,69 @@ namespace HumankindAssetFramework.Tests
             Assert.Null(QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 30, maxCells: 2));   // needs 4
         }
 
+        // THE CELLS FILL EVENLY (2026-11-25, the Heavy Monitor: eight cells of 25,207 triangles each, 13,989 to 16,000 quads -
+        // the cell that pairs worst capped the bake at 7.3 of 8 fragments). A mesh whose left half is a welded grid (a quad
+        // per two triangles) and whose right half is faceted (a quad per triangle): cut at the median TRIANGLE, the two
+        // sides hold 100 and 200 quads; cut where the quads balance, 150 each.
+        [Fact]
+        public void A_cut_balances_the_quads_not_the_triangles()
+        {
+            int[] tris = HalfWeldedHalfFaceted(out float[] cent);                    // 200 + 200 triangles, 100 + 200 quads
+            Assert.Equal(300, QuadEstimate.EstimateQuads(tris, Enumerable.Range(0, 400).ToList()));
+            var cells = QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 160, maxCells: 8);
+            Assert.Equal(2, cells.Count);                                            // 300 quads fit in two cells of 160...
+            var quads = cells.Select(c => QuadEstimate.EstimateQuads(tris, c)).ToList();
+            Assert.All(quads, q => Assert.InRange(q, 148, 152));                     // ...because each holds half the QUADS
+            Assert.Equal(new[] { 250, 150 }, cells.Select(c => c.Count).ToArray());   // the grid's 200 triangles and 50 faceted ones | 150 faceted ones
+            Assert.Equal(Enumerable.Range(0, 400), cells.SelectMany(c => c).OrderBy(i => i));
+        }
+
+        // THE FEWEST CELLS THAT FIT: halving made 1, 2, 4 or 8 cells, so a mesh of five budgets was cut into eight
+        [Theory]
+        [InlineData(36, 3)][InlineData(27, 4)][InlineData(22, 5)][InlineData(19, 6)]
+        public void A_mesh_is_cut_into_as_few_cells_as_fit(int budget, int expected)
+        {
+            int[] tris = Grid(100, 1, out float[] cent);                             // 100 quads in a row: a cut separates one pair at most
+            var cells = QuadEstimate.PartitionByQuadBudget(tris, cent, budget, maxCells: 8);
+            Assert.Equal(expected, cells.Count);
+            Assert.All(cells, c => Assert.True(QuadEstimate.EstimateQuads(tris, c) <= budget));
+            Assert.Equal(Enumerable.Range(0, 200), cells.SelectMany(c => c).OrderBy(i => i));
+            var minX = cells.Select(c => c.Min(ti => cent[ti * 3])).ToList();
+            Assert.Equal(minX.OrderBy(x => x), minX);
+        }
+
+        // a cut separates pairs, so the cells together hold more quads than the whole: when that puts a cell over the
+        // budget the next count is tried - and past the cap the answer is still null
+        [Fact]
+        public void A_cell_over_the_budget_after_the_cut_takes_one_cell_more_and_the_cap_still_holds()
+        {
+            int[] tris = Grid(20, 5, out float[] cent);                              // 100 quads: two cells of 50 would do...
+            int whole = QuadEstimate.EstimateQuads(tris, Enumerable.Range(0, 200).ToList());
+            Assert.Equal(100, whole);
+            var two = QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 50, maxCells: 8);
+            int sum = two.Sum(c => QuadEstimate.EstimateQuads(tris, c));
+            Assert.True(sum >= whole);
+            Assert.All(two, c => Assert.True(QuadEstimate.EstimateQuads(tris, c) <= 50));
+            Assert.Equal(sum > whole ? 3 : 2, two.Count);                            // ...unless the cut cost a quad
+            Assert.Null(QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 12, maxCells: 8));   // 100 quads need nine cells of 12
+        }
+
+        // x 0..10: a welded 10 x 10 grid (200 triangles, 100 quads); x 10..20: the same grid with no shared vertex (200
+        // triangles, 200 quads)
+        static int[] HalfWeldedHalfFaceted(out float[] centroids)
+        {
+            var t = new List<int>(Grid(10, 10, out float[] c0)); var c = new List<float>(c0);
+            int next = 11 * 11;
+            for (int j = 0; j < 10; j++)
+                for (int i = 0; i < 10; i++)
+                {
+                    t.AddRange(new[] { next, next + 1, next + 2,  next + 3, next + 4, next + 5 }); next += 6;
+                    c.AddRange(new[] { 10 + i + 0.33f, j + 0.33f, 0f,  10 + i + 0.66f, j + 0.66f, 0f });
+                }
+            centroids = c.ToArray();
+            return t.ToArray();
+        }
+
         // nx × ny welded quad grid on the XY plane: cell (i,j) -> tris (a,b,c),(c,b,d) sharing edge (b,c)
         static int[] Grid(int nx, int ny, out float[] centroids)
         {

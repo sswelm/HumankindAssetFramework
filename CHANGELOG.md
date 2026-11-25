@@ -4862,6 +4862,25 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Authoring tools
 
+- **The Multi-fragment split fills its pieces evenly and makes no more of them than fit (2026-11-25).** Reported
+  from the Model Factory's console, the Heavy Monitor at "7.3x" in eight fragments: "I can never seem to get more
+  usage ... the spreading of the quads is not yet optimal". The split halved a mesh at its median TRIANGLE until
+  every piece fitted, so the pieces of one bake held the same number of triangles and different numbers of quads
+  (how well triangles pair differs by region): that ship's eight pieces of 25,207 triangles estimated 13,989 to
+  16,000 quads, and the one at the budget capped the bake. Halving also only makes 1, 2, 4 or 8 pieces.
+  `QuadEstimate.PartitionByQuadBudget` now takes the fewest pieces the estimate fits in and places every cut where
+  the estimated QUADS of the two sides stand in proportion (still whole triangles in centroid order along the
+  longest axis); a piece that comes out over the budget after its cut takes one piece more.
+  - **Measured** on the 21 baked entries of the project that have overflow pieces, their meshes put back together
+    from the baked assets (`C:/tmp/haf-build/quadsplit`: `meshes.py`, `Drill.cs`, `allmodels.txt`): 11 need fewer
+    pieces (CruiserSubmarines 4 to 3, HandCrankedSubmarines 8 to 5, JetFighters 8 to 5, LightCruisers 8 to 5, OceanLiner 8 to 7, PreDreadnought 8 to 7, ProtectedCruisers 8 to 7, SteamFrigates 4 to 3, SteamGunboat 8 to 6, SteamLiner 8 to 7, SteamSubmarines 8 to 7), none needs more, and the Heavy Monitor's eight go from 13,990-15,879 estimated quads to
+    14,665-14,899, which leaves room for 7.4 % more triangles where there was room for 0.8 %.
+  - **Cost:** the partition of a 200,000-triangle mesh takes about 1.0 s where it took 0.15 s.
+  - **Not changed:** the budget of 16,000 estimated quads a piece under the engine's 16,320, and the check of the
+    SDK's real counts after the bake. **Not done:** no bake was run in Unity with the new split and nothing was
+    looked at in game; an entry is unchanged until it is baked again, and a rebake can change its number of pieces
+    (the stale ones are deleted, as before).
+
 - **The Model Fuser leaves out a face that lies exactly on another, wound the other way, where no camera sees it
   (2026-11-25).** Reported from the game: "weird Z fighting on the upper deck" of the Pre-Dreadnought (RSS Centurion).
   Seen fixed in game on 2026-11-25 by the reporter, on the first cut of the rule, after fusing again, baking and

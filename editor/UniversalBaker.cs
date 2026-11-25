@@ -2651,8 +2651,9 @@ public static class UniversalBaker
 
     // MULTI-MESH SPLIT (2026-09-13, the Bremen — 51,072 quads on a 16,320 ceiling): partition an over-ceiling mesh
     // into spatial chunks, each a standalone Mesh under the per-fragment budget (measured in ESTIMATED QUADS —
-    // see EstimateQuads above; tris/2 was review P1's trap). BSP at the triangle-centroid median on the longest
-    // axis (the Workshop plane cut's proven partition — whole triangles, deterministic order), every vertex
+    // see EstimateQuads above; tris/2 was review P1's trap). As few chunks as the estimate fits in, each cut along
+    // the longest axis where the two sides' quads balance (whole triangles in centroid order, deterministic;
+    // QuadEstimate.PartitionByQuadBudget - until 2026-11-25 a halving at the median triangle), every vertex
     // attribute remapped per chunk. Chunk 0 keeps the plain _ModelMesh name (the body the donor fragment
     // renames onto); overflow chunks get _ModelMesh_B.. and draw through plugin-appended fragments.
     // Returns the input mesh alone when it already fits; null when even 8 chunks can't hold it.

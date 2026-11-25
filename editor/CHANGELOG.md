@@ -5,6 +5,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Factory: the Multi-fragment split fills its pieces evenly** (2026-11-25, user report: the Heavy Monitor
+  never got past "7.3x" in eight fragments). The pieces used to hold the same number of triangles, so the piece
+  whose triangles paired worst reached the quad limit while the others stood well under it. Each cut is now placed
+  where the quads balance, and a model gets only as many pieces as it needs (5, 6 or 7 are possible now, not just
+  2, 4 or 8). On the Heavy Monitor that leaves room for about 7 % more triangles in the same eight pieces; 11 of
+  the project's 21 split entries need fewer pieces on their next bake (fewer fragments are less draw work).
+  Nothing changes for an entry until it is baked again.
+
 - **Model Fuser: the status says when mirrored parts were turned inward** (2026-11-24, user report, the RSS
   Centurion: casemate walls solid in the Fuser, see-through in the Vehicle Lab). Some files store their mirrored
   parts already facing outward; the fuse reverses mirrored parts as glTF asks, and those then face inward. **Check
