@@ -17,7 +17,8 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
     barely changes.
   - The split never makes more pieces than before, and never refuses a model that used to fit. When a model does
     not fit, the message now says by how much to lower Reduce to ~tris.
-  - A bake's split step takes 1 to 2.5 seconds longer. Nothing changes for an entry until it is baked again.
+  - A bake's split step takes about 1 to 1.5 seconds longer, up to 4 seconds on a model that needs a second try.
+    Nothing changes for an entry until it is baked again.
 
 - **Model Fuser: the status says when mirrored parts were turned inward** (2026-11-24, user report, the RSS
   Centurion: casemate walls solid in the Fuser, see-through in the Vehicle Lab). Some files store their mirrored

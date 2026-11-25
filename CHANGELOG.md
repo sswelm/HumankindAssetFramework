@@ -4874,7 +4874,8 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   - **Change.** `QuadEstimate.PartitionByQuadBudget` starts from the fewest pieces the quad estimate could allow and
     cuts each piece where the two sides' estimated quads stand in the ratio of the pieces each side still has to
     make (still whole triangles in centroid order along the longest axis; deterministic; the piece letters stable);
-    if a piece comes out over the budget, one piece more is tried. The old halving always runs as well (about
+    if a cut leaves a side over the budget, the cuts one triangle either way are tried (from a parallel review), then
+    one piece more. The old halving always runs as well (about
     0.3 s), and the fewer pieces win, the balanced ones on a tie: the split never makes more pieces than before and
     never refuses a mesh that used to fit. A mesh of more than 2 x 16,000 x 8 triangles is refused at once (a quad
     holds at most two), and a refused mesh is told its own estimate and how much to cut.
@@ -4897,14 +4898,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     too many, or refused); a budget of 0 no longer divides by zero; the left side of every cut is counted in one pass
     (exact; about 30 % faster); the halving fallback, first only after a failed start, then always (a reviewer's
     mesh fitted at the start in five pieces where the halving made four); the early refusal; the refusal message;
-    three tests that passed for the wrong reason. Tests: 39 on the partition (`QuadEstimateTests`,
+    three tests that passed for the wrong reason. A parallel review by another model (805e9b6b) found the same start,
+    refusal and fallback issues independently and added the neighbouring cuts, merged here: they change no piece on
+    the 21 entries and fit 6 triangles more on the Heavy Monitor at the limit (217,304 against 217,298 on the
+    rebuild), and they cost time on a mesh that needs a retry. Tests: 43 on the partition (`QuadEstimateTests`,
     `QuadPartitionReviewTests`), among them a comparison with the halving on 120 random meshes at four budgets each.
     Sound, by the review: nothing in the baker or the plugin assumes 2, 4 or 8 pieces or equal pieces; stale pieces
     are removed on both bake paths and cannot reach a mod build; on all 21 meshes the baker's split ships every
     triangle once, with its attributes, in at most eight pieces named in order.
-  - **Cost:** a bake's split step takes 1 to 2.5 seconds longer. The partition alone in Unity's Mono, best of three:
-    1.1 to 2.3 s on the project's 180,000 to 235,000-triangle entries, where it took 0.2 to 0.3 s (up to 2.7 s in other
-    runs); in the editor the old step took 0.3 to 0.4 s.
+  - **Cost:** a bake's split step takes about 1 to 1.5 seconds longer, up to 4 seconds on an entry whose first piece
+    count does not fit. The partition alone in Unity's Mono, best of three, on the project's 180,000 to
+    235,000-triangle entries: 1.2 to 1.7 s for most, 2.6 s (PreDreadnought) and 4.2 s (ProtectedCruisers), where it
+    took 0.2 to 0.3 s; in the editor the old step took 0.3 to 0.4 s.
   - **Not changed:** the budget of 16,000 estimated quads a piece under the engine's 16,320, and the check of the
     SDK's real counts after the bake. In the editor logs of three ships (Heavy Monitor, Pre-Dreadnought, Dreadnought)
     the real count was at most 56 above the estimate. **Not guarded by a unit test:** the baker's own split lines (the

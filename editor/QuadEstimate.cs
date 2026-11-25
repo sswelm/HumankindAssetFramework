@@ -178,8 +178,21 @@ public static class QuadEstimate
             long l = left[mid], r = EstimateQuads(tris, cell.GetRange(mid, cell.Count - mid));
             if (l * kr >= r * kl) hi = mid; else lo = mid + 1;
         }
-        return SplitInto(tris, centroids, cell.GetRange(0, lo), kl, budget, cells)
-            && SplitInto(tris, centroids, cell.GetRange(lo, cell.Count - lo), kr, budget, cells);
+        // THE NEIGHBOURING CUTS (from a parallel review by another model, 805e9b6b): when the balanced cut leaves a side
+        // over the budget - it separated a pair the side needed - the cuts one triangle either way are tried before the
+        // caller moves on to one cell more; a cut that keeps a pair together can fit where the balanced one did not (a
+        // 6 x 5 grid in 3 cells of 11, a 9 x 5 grid in 5 cells of 10: null without them). A side that could not fit even
+        // with every triangle paired is not tried. The cells a failed try appended are taken back.
+        bool TryCut(int cut)
+        {
+            if (cut < 1 || cut >= cell.Count || cut > 2L * budget * kl || cell.Count - cut > 2L * budget * kr) return false;
+            int first = cells.Count;
+            if (SplitInto(tris, centroids, cell.GetRange(0, cut), kl, budget, cells)
+                && SplitInto(tris, centroids, cell.GetRange(cut, cell.Count - cut), kr, budget, cells)) return true;
+            cells.RemoveRange(first, cells.Count - first);
+            return false;
+        }
+        return TryCut(lo) || TryCut(lo - 1) || TryCut(lo + 1);
     }
 
     // whole triangles in centroid order along the cell's longest axis (x, then y, then z on a tie of extents), the

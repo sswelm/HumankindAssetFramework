@@ -177,6 +177,52 @@ namespace HumankindAssetFramework.Tests
             }
         }
 
+        [Theory]
+        [InlineData(6, 5, 11, 3)]
+        [InlineData(9, 5, 10, 5)]
+        public void A_nearby_cut_can_fit_within_the_fragment_cap(int width, int height, int budget, int maxCells)
+        {
+            int[] tris = Grid(width, height, out float[] centroids);
+            var cells = QuadEstimate.PartitionByQuadBudget(tris, centroids, budget, maxCells);
+
+            Assert.NotNull(cells);
+            Assert.Equal(maxCells, cells.Count);
+            Assert.All(cells, cell =>
+            {
+                Assert.NotEmpty(cell);
+                Assert.InRange(QuadEstimate.EstimateQuads(tris, cell), 1, budget);
+            });
+            Assert.Equal(Enumerable.Range(0, tris.Length / 3), cells.SelectMany(c => c).OrderBy(i => i));
+        }
+
+        [Fact]
+        public void Stored_triangle_order_cannot_rule_out_a_split_that_fits()
+        {
+            int[] grid = Grid(4, 1, out float[] gridCentroids);
+            int[] order = { 0, 1, 2, 3, 5, 6, 4, 7 };
+            int[] tris = order.SelectMany(i => grid.Skip(3 * i).Take(3)).ToArray();
+            float[] centroids = order.SelectMany(i => gridCentroids.Skip(3 * i).Take(3)).ToArray();
+            Assert.Equal(5, QuadEstimate.EstimateQuads(tris, Enumerable.Range(0, order.Length).ToArray()));
+
+            var cells = QuadEstimate.PartitionByQuadBudget(tris, centroids, budget: 2, maxCells: 2);
+
+            Assert.NotNull(cells);
+            Assert.Equal(2, cells.Count);
+            Assert.All(cells, cell => Assert.Equal(2, QuadEstimate.EstimateQuads(tris, cell)));
+            Assert.Equal(Enumerable.Range(0, order.Length), cells.SelectMany(c => c).OrderBy(i => i));
+        }
+
+        [Fact]
+        public void A_feasible_median_split_remains_available()
+        {
+            int[] tris = Grid(5, 4, out float[] centroids);
+            var cells = QuadEstimate.PartitionByQuadBudget(tris, centroids, budget: 3, maxCells: 8);
+            Assert.NotNull(cells);
+            Assert.Equal(8, cells.Count);
+            Assert.All(cells, cell => Assert.Equal(3, QuadEstimate.EstimateQuads(tris, cell)));
+            Assert.Equal(Enumerable.Range(0, tris.Length / 3), cells.SelectMany(c => c).OrderBy(i => i));
+        }
+
         // x 0..10: a welded 10 x 10 grid (200 triangles, 100 quads); x 10..20: the same grid with no shared vertex (200
         // triangles, 200 quads)
         static int[] HalfWeldedHalfFaceted(out float[] centroids)
