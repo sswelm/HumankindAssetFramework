@@ -14,6 +14,7 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   status names it. On the galley, the first record
   restores all 15 parts to their 2026-10-20 roles, and the fuse groups alone restore 9 and name the other 6. A part
   the session already listed keeps its role, Default included, and ＜new model＞ still starts from nothing.
+  Probe checks list timestamps against the output GLB and checks the reported member count when reading fuse groups.
 - **Model Factory: the Multi-fragment split fills its pieces evenly** (2026-11-25, user report: the Heavy Monitor
   never got past "7.3x" in eight fragments). The pieces used to hold the same number of triangles, so one piece
   reached the quad limit while the others still had room. Each cut is now placed so the pieces hold about the same

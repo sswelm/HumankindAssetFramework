@@ -915,61 +915,77 @@ public static class VehicleLabRules
     // named: picking the majority put a group of five Ignored parts and three kept ones in the bin.
 
     /// <summary>The fused parts a Model Fuser report names, each with its members: "== group A" opens a group, "parts: a, b"
-    /// lists its members, "Fused N part(s) -> 'name': ..." names the part the fuse made of them. The writer joins members
-    /// with ", " and does not quote them, so a name holding ", " is ambiguous: a name in <paramref name="knownNames"/> that
-    /// matches there is taken whole (the longest), anything else splits at ", ".</summary>
+    /// lists its members, "Fused N part(s) -> 'name': ..." names the fused part. Prefer the plain split when
+    /// it agrees with the reported count. Otherwise use names from <paramref name="knownNames"/> to join
+    /// comma-containing members and accept the result only when it matches the count.</summary>
     public static Dictionary<string, string[]> FuseReportGroups(string reportText, ICollection<string> knownNames = null)
     {
         var groups = new Dictionary<string, string[]>(StringComparer.Ordinal);
-        string[] members = null; bool open = false;
+        string members = null; bool open = false;
         foreach (string raw in (reportText ?? "").Split('\n'))
         {
             string line = raw.TrimEnd('\r');
             if (line.StartsWith("== group ", StringComparison.Ordinal)) { open = true; members = null; continue; }
             if (!open) continue;
-            if (line.StartsWith("parts: ", StringComparison.Ordinal)) { members = SplitMembers(line.Substring(7), knownNames); continue; }
-            // the name runs to the "': <count>" after it, so a quote inside the name stays in it
-            var m = System.Text.RegularExpressions.Regex.Match(line, @"^Fused \d+ part\(s\) -> '(.+?)': \d");
-            if (!m.Success) m = System.Text.RegularExpressions.Regex.Match(line, @"^Fused \d+ part\(s\) -> '(.+)'");
-            if (m.Success && members != null) { groups[m.Groups[1].Value] = members; open = false; members = null; }
+            if (line.StartsWith("parts: ", StringComparison.Ordinal)) { members = line.Substring(7); continue; }
+            // Match the vertex-count suffix so names containing a quote, colon or number survive.
+            var m = System.Text.RegularExpressions.Regex.Match(line, @"^Fused ([0-9]+) part\(s\) -> '(.+)'(?:: [0-9]+ -> [0-9]+ verts\b|$)");
+            if (!m.Success || members == null || !int.TryParse(m.Groups[1].Value, out int count)) continue;
+            var names = SplitMembers(members, knownNames, count);
+            if (names != null) groups[m.Groups[2].Value] = names;
+            open = false; members = null;
         }
         return groups;
     }
 
-    static string[] SplitMembers(string list, ICollection<string> known)
+    static string[] SplitMembers(string list, ICollection<string> known, int count)
     {
+        var plain = list.Split(new[] { ", " }, StringSplitOptions.None);
+        if (plain.Length == count && plain.All(n => !string.IsNullOrWhiteSpace(n))) return plain.Select(n => n.Trim()).ToArray();
+        if (plain.Length <= count || known == null) return null;
+
         var got = new List<string>();
         int pos = 0;
         while (pos < list.Length)
         {
             string best = null;
-            if (known != null)
-                foreach (string k in known)
-                    if (!string.IsNullOrEmpty(k) && (best == null || k.Length > best.Length) && pos + k.Length <= list.Length &&
-                        string.CompareOrdinal(list, pos, k, 0, k.Length) == 0 &&
-                        (pos + k.Length == list.Length || string.CompareOrdinal(list, pos + k.Length, ", ", 0, 2) == 0)) best = k;
+            foreach (string k in known)
+                if (!string.IsNullOrEmpty(k) && (best == null || k.Length > best.Length) && pos + k.Length <= list.Length &&
+                    string.CompareOrdinal(list, pos, k, 0, k.Length) == 0 &&
+                    (pos + k.Length == list.Length || string.CompareOrdinal(list, pos + k.Length, ", ", 0, 2) == 0)) best = k;
             if (best == null) { int c = list.IndexOf(", ", pos, StringComparison.Ordinal); best = c < 0 ? list.Substring(pos) : list.Substring(pos, c - pos); }
             if (best.Trim().Length > 0) got.Add(best.Trim());
             pos += best.Length + 2;   // past the name and its ", "
         }
-        return got.ToArray();
+        return got.Count == count ? got.ToArray() : null;
     }
 
     public sealed class RoleList { public int Role; public DateTime Written; public IEnumerable<string> Names; }
 
-    /// <summary>The roles the last Generate baked, from its role lists. A name in two lists with different roles is left out:
-    /// the record contradicts itself, so it decides nothing. Generate writes the Default list only when the Default dial is
-    /// above 0, so one older than the newest other list by more than a minute is an earlier Generate's and is not read.</summary>
-    public static Dictionary<string, int> LastGenerateRoles(IEnumerable<RoleList> lists, int defaultRole)
+    /// <summary>An exact session role wins, including Default. Split children inherit only a marked role.</summary>
+    public static int? ProbeSessionRole(string name, IReadOnlyDictionary<string, int> roles, int defaultRole)
+    {
+        if (roles.TryGetValue(name, out int exact)) return exact;
+        foreach (string parent in ParentNames(name))
+            if (roles.TryGetValue(parent, out int inherited) && inherited != defaultRole) return inherited;
+        return null;
+    }
+
+    /// <summary>Recover role lists written before the generated GLB. A newer list indicates another attempt
+    /// or a different output with the same basename. A name claimed by different roles is left undecided.
+    /// Older versions wrote Default only when its dial was active. A Default list predating the other lists
+    /// belongs to an earlier Generate.</summary>
+    public static Dictionary<string, int> LastGenerateRoles(IEnumerable<RoleList> lists, int defaultRole, DateTime outputWritten)
     {
         var all = (lists ?? Enumerable.Empty<RoleList>()).Where(l => l != null).ToList();
-        var others = all.Where(l => l.Role != defaultRole).ToList();
-        DateTime newest = others.Count > 0 ? others.Max(l => l.Written) : DateTime.MinValue;
         var roles = new Dictionary<string, int>(StringComparer.Ordinal);
+        if (all.Any(l => l.Written > outputWritten)) return roles;
+        DateTime earliestOther = all.Where(l => l.Role != defaultRole)
+            .Select(l => l.Written).DefaultIfEmpty(DateTime.MinValue).Min();
         var torn = new HashSet<string>(StringComparer.Ordinal);
         foreach (var l in all)
         {
-            if (l.Role == defaultRole && others.Count > 0 && l.Written < newest.AddMinutes(-1)) continue;
+            if (l.Role == defaultRole && l.Written < earliestOther) continue;
             foreach (string n0 in l.Names ?? Enumerable.Empty<string>())
             {
                 string n = (n0 ?? "").Trim();

@@ -1649,8 +1649,8 @@ public class VehicleLabWindow : EditorWindow
         foreach (var p0 in parts) if (p0.role != Role.Default) kept[p0.name] = p0.role;   // explicit Body verdicts survive too
         var keptPlace = new Dictionary<string, (Vector3 off, Vector3 scl)>();   // placements survive a re-Probe by name, like roles
         foreach (var p0 in parts) if (IsPlaced(p0)) keptPlace[p0.name] = (p0.offset, p0.scale);
-        var keptBones = new Dictionary<string, Role>();
-        foreach (var b0 in boneParts) if (b0.role != Role.Default) keptBones[b0.name] = b0.role;
+        var keptBones = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var b0 in boneParts) if (b0.role != Role.Default) keptBones[b0.name] = (int)b0.role;
         bool hadBones = boneParts.Count > 0;
         // every part the session listed, Default included: a name not in here is NEW to the session (see RecoverFreshRoles below)
         var sessionRoles = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -1713,14 +1713,9 @@ public class VehicleLabWindow : EditorWindow
             var low = p.name.ToLowerInvariant();
             bool rigBone = row.Kind == "RIGBONE";
             if (!rigBone && keptPlace.TryGetValue(p.name, out var kp)) { p.offset = kp.off; p.scale = kp.scl; }
-            var keptMap = rigBone ? keptBones : kept;
-            // THE CLASSIFICATION FOLLOWS THE CUT (2026-09-25, user: "I'm getting tired of having to reclassify all the
-            // time after a split"): a part the Cutter made from another - X_Part_001, X_CutA, or X_3 after the unique
-            // renaming - takes X's role when X has one and this part has none of its own (VehicleLabRules.ParentNames).
-            Role? inherited = null;
-            foreach (string ancestor in VehicleLabRules.ParentNames(p.name)) if (keptMap.TryGetValue(ancestor, out var ar)) { inherited = ar; break; }
-            p.role = keptMap.TryGetValue(p.name, out var kr) ? kr
-                   : inherited.HasValue ? inherited.Value
+            // Preserve explicit defaults and inherit marked roles for split children before guessing from the name.
+            int? sessionRole = VehicleLabRules.ProbeSessionRole(p.name, rigBone ? keptBones : sessionRoles, (int)Role.Default);
+            p.role = sessionRole.HasValue ? (Role)sessionRole.Value
                    : low.Contains("tail") && (low.Contains("rotor") || low.Contains("prop")) ? Role.TailRotor  // "tail rotor" before the generic rotor guess
                    : low.Contains("fantail") || low.Contains("fenestron") ? Role.TailRotor
                    : low.Contains("oar") ? Role.Oar   // before the generic "blade" -> Rotor guess: an oar blade contains "blade"
@@ -1735,7 +1730,7 @@ public class VehicleLabWindow : EditorWindow
                    : low.Contains("rotor") || low.Contains("helix") || low.Contains("blade") || low.Contains("propeller") ? Role.Rotor
                    : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
                    : low.Contains("turret") ? Role.Turret : Role.Default;
-            if (!rigBone && !inherited.HasValue && !sessionRoles.ContainsKey(p.name)) fresh.Add(p);
+            if (!rigBone && !sessionRole.HasValue) fresh.Add(p);
             (rigBone ? newBoneParts : newParts).Add(p);
         }
         if (rejected.Count > 0)
@@ -1762,14 +1757,12 @@ public class VehicleLabWindow : EditorWindow
             {
                 if (newNames.Contains(old)) continue;
                 string g = GroupOf(old); if (g == null) continue;
-                var cands = newParts.Where(x => GroupOf(x.name) == g && !kept.ContainsKey(x.name) && !keptPlace.ContainsKey(x.name)).ToList();
+                var cands = newParts.Where(x => GroupOf(x.name) == g && !sessionRoles.ContainsKey(x.name) && !keptPlace.ContainsKey(x.name)).ToList();
                 if (cands.Count != 1) continue;
                 var t = cands[0]; var what = new List<string>();
-                if (kept.TryGetValue(old, out var r0)) { t.role = r0; what.Add("role " + r0); }
+                if (kept.TryGetValue(old, out var r0)) { t.role = r0; what.Add("role " + r0); fresh.Remove(t); }
                 if (keptPlace.TryGetValue(old, out var pl)) { t.offset = pl.off; t.scale = pl.scl; what.Add("placement"); }
                 migrated.Add($"{old} → {t.name} ({string.Join(" + ", what)})");
-                fresh.Remove(t);   // the rename is the session's own word for this part
-
             }
             if (migrated.Count > 0) Debug.Log("[VehicleLab] fused group(s) renamed by the Fuser — markings carried over by group: " + string.Join("; ", migrated));
         }
@@ -1780,17 +1773,23 @@ public class VehicleLabWindow : EditorWindow
         if (fresh.Count > 0 && sessionRoles.Count > 0)
         {
             Dictionary<string, int> lastGen = null;
-            if (!string.IsNullOrEmpty(outGlb))
+            string output = (outGlb ?? "").Trim();
+            if (File.Exists(output))
             {
-                string bn = Path.GetFileNameWithoutExtension(outGlb);
-                var lists = new List<VehicleLabRules.RoleList>();
-                foreach (var kv in VehicleRigArgLine.RoleOfNamesFile)
+                try
                 {
-                    string f = Path.Combine(projRoot, prevDir, bn + "_" + kv.Key + ".txt");
-                    try { if (File.Exists(f)) lists.Add(new VehicleLabRules.RoleList { Role = kv.Value, Written = File.GetLastWriteTimeUtc(f), Names = File.ReadAllLines(f) }); }
-                    catch (Exception e) { Debug.LogWarning("[VehicleLab] probe: could not read the last Generate's role list " + f + ": " + e.Message); }
+                    string bn = Path.GetFileNameWithoutExtension(output);
+                    DateTime written = File.GetLastWriteTimeUtc(output);
+                    var lists = new List<VehicleLabRules.RoleList>();
+                    foreach (var kv in VehicleRigArgLine.RoleOfNamesFile)
+                    {
+                        string f = Path.Combine(projRoot, prevDir, bn + "_" + kv.Key + ".txt");
+                        if (File.Exists(f)) lists.Add(new VehicleLabRules.RoleList { Role = kv.Value, Written = File.GetLastWriteTimeUtc(f), Names = File.ReadAllLines(f) });
+                    }
+                    if (File.GetLastWriteTimeUtc(output) == written)
+                        lastGen = VehicleLabRules.LastGenerateRoles(lists, (int)Role.Default, written);
                 }
-                lastGen = VehicleLabRules.LastGenerateRoles(lists, (int)Role.Default);
+                catch (Exception e) { Debug.LogWarning("[VehicleLab] probe: could not read Generate's role lists for " + output + ": " + e.Message); }
             }
             Dictionary<string, string[]> groups = null;
             string report = (srcFile ?? "").Trim() + ".fuse-report.txt";
@@ -2563,12 +2562,13 @@ public class VehicleLabWindow : EditorWindow
         // DEFAULT reduce (2026-09-19): the catch-all tier — every part still unmarked, cut like Body. Passed as a TAGGED
         // argument (the positional block is full at argv[75]), so an older script and a newer Lab still run together.
         string defaultFile = Path.Combine(projRoot, prevDir, baseName + "_default.txt").Replace('\\', '/');
-        if (defaultReducePct > 0f) File.WriteAllLines(defaultFile, src.Where(p => p.role == Role.Default).Select(p => p.name).ToArray());   // only when the dial asks: an undecided model lists thousands of names
+        File.WriteAllLines(defaultFile, defaultReducePct > 0f
+            ? src.Where(p => p.role == Role.Default).Select(p => p.name).ToArray()
+            : Array.Empty<string>());   // clear the previous list when this run has no Default reduction
         // SHROUD (2026-09-21): the standing rigging's own soup-pass tier — tagged like defaultreduce=. The names file is
         // written and sent at EVERY dial setting (review of PR #89): the script's artifact purge protects a marked part
         // only when its name reaches the script, and a sphere-shaped part still called Icosphere would otherwise be
-        // deleted at 0 % despite the mark. (Default keeps its "only when the dial asks": unmarked parts have no mark to
-        // protect, and an undecided model lists thousands of names.)
+        // deleted at 0 % despite the mark. Default names are passed only when its reduction dial is active.
         string shroudFile = Path.Combine(projRoot, prevDir, baseName + "_shroud.txt").Replace('\\', '/');
         File.WriteAllLines(shroudFile, src.Where(p => p.role == Role.Shroud).Select(p => p.name).ToArray());
         // WINDOW (2026-09-25): glazing's own weld tier - tagged like shroudreduce=, the names always sent (see above).

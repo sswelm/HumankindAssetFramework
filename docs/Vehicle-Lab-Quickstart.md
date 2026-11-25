@@ -143,11 +143,11 @@ fresh row with the same `Fused_<group>_` prefix and says so in the status. The s
 and says so in the log.
 
 **Re-pointed at a fused file.** A fuse renames every part it groups, so the roles kept by name have nothing to land on.
-A re-Probe gives each part that is new to the session the role it was last generated with: every Generate writes one
-list per role to `Assets/FactorySource/VehicleLab/<Output GLB file name>_oars.txt`, `_sails.txt`, ... (named after the
-output's file name only, and written when Generate starts, so a Generate that failed still counts). The Default list
-is written only when the Default dial is above 0; a Default list older than the other lists is an earlier Generate's
-and is not read. A part not in those lists takes the role its fuse-group members share, read from
+A re-Probe first checks the role lists in `Assets/FactorySource/VehicleLab/<Output GLB file name>_oars.txt`,
+`_sails.txt`, and so on for each part that is new to the session. It uses the lists when the output GLB exists
+and is at least as recent as every list. When the Default dial is zero, Generate clears its list. Probe
+ignores a legacy Default list that predates the rest of the batch. A part without a role from those lists
+takes the role its fuse-group members share, read from
 `<source>.fuse-report.txt`; a member split since the fuse votes with the part it was cut from. A group whose members
 disagree stays undecided, and the status names it with its members' roles. A group whose members are all Default
 decides nothing and is not named. The last Generate wins over the members, even when they were re-marked since.
