@@ -4810,9 +4810,9 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
       `OccluderCache.RayTree`). Glass (a BLEND material) stops nothing.
     - A candidate that is not seen is left out when the other side of its plane is seen. A pair seen on both
       sides stays, and so does a pair seen on neither.
-    - Before any of that, a face the winding passes turned, most of which then lies on a face they did not turn and
-      wound the same way, gets its authored winding back: the two were authored as a pair wound both ways, on
-      different triangles. The report's `twins:` line counts them.
+    - Before any of that, a face the winding passes turned, ALL of which then lies on faces they did not turn and
+      wound the same way (thirteen points of it, the rim's included), gets its authored winding back: the two
+      were authored as a pair wound both ways, on different triangles. The report's `twins:` line counts them.
   - **Versions the measurements refused, in order.** Each was built, measured on real models and replaced.
     1. *A vote per connected patch of candidates* left out faces in plain view (about 300 of 2.4 million pixels over
        26 culled views of the Centurion): the inside of a tube open at the top is hidden low down and seen at the rim.
@@ -4836,9 +4836,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
        onto a face they did not turn, wound the same way, gets its authored winding back and is judged as a twin.
     9. *Face sizes measured against the group* (second review): a group of small parts made every face "large", and
        35 of the Centurion's 58 million rays were asked of such faces. Sizes are measured against the model: the
-       Centurion's fuse goes from 9.6 s to 6.9 s, HMS Roberts' from 47.0 s to 44.5 s. The price is that a face
+       Centurion's fuse goes from 9.6 s to 7.1 s, HMS Roberts' from 47.0 s to 45.7 s. The price is that a face
        small against the model is asked from fewer directions than before; over the 112 views the pixels lost
        go: RSS Centurion 6 to 7, SMS Wespe 10 to 12, HMS Roberts 0 to 24.
+    10. *Turned back when most of it was covered* (third review, a fixture): five of the seven inner points were
+       enough, as for a candidate - but a candidate is only left out when no camera sees its front, and the
+       turn-back took the outward front the passes had given the face without asking. A closed crate stored inside
+       out, with a panel over one wall from 0.9 of 10 up, came out open over that strip. All thirteen points must
+       be covered now; a face partly covered stays as the passes left it, which is what the fuse did before this
+       change. On real models it shows in counts only (Bell H-13: 170 faces turned back before, 23 now; no surveyed
+       pixel different either way).
     The figures in 1 to 3 were printed by those runs; their files were overwritten by the next version's.
   - **Fronts only, checked against the alternative** (second review asked): with either side of a triangle stopping
     a ray, everything else equal, 112 views lose 225 pixels on the Svea against 35, 1 on the Centurion against 6, and
@@ -4847,7 +4854,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     the same either way.
   - **Measured on the last version, old fuse against new, the Model Fuser's own groups** (docs/Testing.md, "Hidden
     twins"): on the Centurion 64,361 of 468,161 triangles are left out. Over eight models, back-face-culled views from 112
-    directions between 15 and 75 degrees change in 85 of 72,946,277 pixels (28 of the 1,026,758 faces left out or
+    directions between 15 and 75 degrees change in 85 of 72,946,277 pixels (28 of the 1,026,724 faces left out or
     turned back are behind them). Hidden
     faces lying under a visible one of another material, from the screenshot's angle: 43,265 pixels before, 2 after.
   - **What it changes:** a fused shell can have fewer triangles than its sources (`Result.HiddenFacesRemoved`; the
@@ -4855,7 +4862,7 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     the report's counts are of the faces written). A model already fused is unchanged until it is fused again.
     The vertex normals of the faces that stay no longer average in a face that is gone. The Bake Tests' Workshop
     row accounts for the faces exactly instead of asking for "at least half"; 19 of its goldens move in their
-    FUSE line and need a re-bless in Unity: `1861_us_convederate_navy_ship_split_fused` 149,912→149,790, `Ribauldequin_textured` rewound 642→640, `bell_h-13_animation-ready` 126,098→125,733, `french_submarine_cruiser_surcouf_split_fused` 72,716→55,794, `gymnote_1888_split_fused` 9,487→9,295, `hms_roberts_1940_split_fused` 149,858→105,062, `hms_svea_cut_split_fused` 149,952→94,026, `jagdpanzer_iv_late_prod2` 24,039→23,905, `m114_gun_only` 11,244→11,237, `project_50_u-boat_split_fused` 149,921→108,519, `rah66` 11,906→11,885, `rms_teutonic_cut2_split` 150,000→149,862, `salegs_revenge_split_fused` 149,838→134,414, `sms_wespe_split_fused` 149,976→112,236, `sns_dragon_split_fused` 149,999→131,573, `spanish_battleship_espana_split_fused` 149,616→98,513, `ss._great_eastern_transport_fever_2_mod` 148,908→148,856, `ss_romanic_split_fused` 149,907→149,850, `triconter_split` 149,996→149,609.
+    FUSE line and need a re-bless in Unity: `1861_us_convederate_navy_ship_split_fused` 149,912→149,790, `Ribauldequin_textured` rewound 642→640, `bell_h-13_animation-ready` 126,098→125,742, `french_submarine_cruiser_surcouf_split_fused` 72,716→55,794, `gymnote_1888_split_fused` 9,487→9,295, `hms_roberts_1940_split_fused` 149,858→105,062, `hms_svea_cut_split_fused` 149,952→94,026, `jagdpanzer_iv_late_prod2` 24,039→23,905, `m114_gun_only` 11,244→11,237, `project_50_u-boat_split_fused` 149,921→108,519, `rah66` 11,906→11,885, `rms_teutonic_cut2_split` 150,000→149,862, `salegs_revenge_split_fused` 149,838→134,414, `sms_wespe_split_fused` 149,976→112,236, `sns_dragon_split_fused` 149,999→131,573, `spanish_battleship_espana_split_fused` 149,616→98,513, `ss._great_eastern_transport_fever_2_mod` 148,908→148,856, `ss_romanic_split_fused` 149,907→149,850, `triconter_split` 149,996→149,609.
   - **Not covered.**
     - Faces lying on each other wound the SAME way: a different defect, which fights under any renderer (of
       another material and within 0.05 units, 84 of 340,344 cells of a top-down census of this ship's fused file;
@@ -4875,9 +4882,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
       the first result is thrown away. Measured by the second review, not removed.
   - **Review.** Three reviewers took the first cut apart (the code; ten more real models and the first eight again,
     from 176 directions each; every claim against its evidence, with 27 planted defects of which 19 survived the
-    tests as they stood), and a fourth took their fixes apart. Versions 4 to 9 above, the report's counts, the
-    fixtures for the surviving plants and the corrections to this entry are theirs.
-  - **Tests:** 52 (`Tests/GlbFuseHiddenTwinTests.cs`). 45 defects planted one at a time; 44 caught, 1 not: rewound counts faces left out.
+    tests as they stood), a fourth took their fixes apart, and a fifth the fourth's (16 more planted defects, 12
+    of which the tests let through). Versions 4 to 10 above, the report's counts, the fixtures for the surviving
+    plants and the corrections to this entry are theirs.
+  - **Tests:** 60 (`Tests/GlbFuseHiddenTwinTests.cs`). 61 defects planted one at a time; 61 caught, none let through.
 
 - **A definition made in the editor is in the Pick lists at once, and a new Model Factory entry starts on Keep
   Model (2026-11-24).** Reported from the Model Factory: a pawn definition made that session

@@ -5226,31 +5226,31 @@ the mod on 2026-11-25: the deck is clean in game. The measurements below are of 
 **What the measurement is.** Each model's split source (the file the Model Fuser opens) is fused twice, by the
 commit before the rule and by the rule, with the groups of its own `.fuse.txt` sidecar, weld 0, *Check mirrored
 parts* on, the parts marked X removed afterwards, outside Unity. The new build is a frozen copy of the test DLL
-(sha256 `3a32a5e3be76dae2`) whose own 50 tests were run from the copy before the first fuse; no build ran while it was in use.
-Two fixtures were added to the tests after that build, for planted defects, with no change to the fuse; a frozen
-copy of the later build (sha256 `ea0784e2206f95a9`, its 52 tests run from the copy) fused all eight again, with
-nothing else running, to the same bytes, and the time columns are that run's.
+(sha256 `c5e7fd34ed0e2389`) whose own 60 tests were run from the copy before the first fuse; no build ran while it was in use.
+One comment in the source was corrected after that build; a frozen copy of the build with it (sha256
+`b8ad44bee295ab43`) fused all eight again with nothing else running, to the same bytes, and the time columns are
+that run's.
 Both outputs are then drawn back-face-culled, orthographic, 800 pixels across, nearest front-facing triangle per
 pixel. A pixel counts as changed when the new output shows nothing, or something farther away than the old one, or
 another material at the same depth.
 
 | Model | groups | triangles in | triangles out | left out | fuse before | fuse after |
 |---|---|---|---|---|---|---|
-| RSS Centurion | 22 | 468,161 | 403,800 | 64,361 (13.7 %) | 4.9 s | 6.9 s |
-| SMS Wespe | 21 | 298,248 | 222,110 | 76,138 (25.5 %) | 9.3 s | 6.1 s |
-| F-100D Super Sabre | 11 | 114,339 | 114,273 | 66 (0.1 %) | 0.7 s | 0.8 s |
-| SS Romanic | 21 | 425,632 | 425,361 | 271 (0.1 %) | 4.2 s | 4.5 s |
-| HMS Svea | 19 | 407,530 | 341,897 | 65,633 (16.1 %) | 2.1 s | 2.5 s |
+| RSS Centurion | 22 | 468,161 | 403,800 | 64,361 (13.7 %) | 5.0 s | 7.1 s |
+| SMS Wespe | 21 | 298,248 | 222,110 | 76,138 (25.5 %) | 9.6 s | 6.1 s |
+| F-100D Super Sabre | 11 | 114,339 | 114,273 | 66 (0.1 %) | 0.8 s | 0.8 s |
+| SS Romanic | 21 | 425,632 | 425,361 | 271 (0.1 %) | 4.3 s | 4.7 s |
+| HMS Svea | 19 | 407,530 | 341,897 | 65,633 (16.1 %) | 2.2 s | 2.6 s |
 | Project 50 U-boat | 15 | 185,190 | 137,124 | 48,066 (26.0 %) | 1.2 s | 1.8 s |
-| HMS Roberts | 20 | 1,597,921 | 1,062,968 | 534,953 (33.5 %) | 42.3 s | 44.5 s |
-| España | 24 | 907,432 | 677,400 | 230,032 (25.3 %) | 9.6 s | 11.7 s |
+| HMS Roberts | 20 | 1,597,921 | 1,062,968 | 534,953 (33.5 %) | 42.6 s | 45.7 s |
+| España | 24 | 907,432 | 677,432 | 230,000 (25.3 %) | 9.7 s | 12.0 s |
 
 Two sets of views. The first is the author's: nine directions above the horizon (straight down, four at 45 degrees,
 four at 35) and eight level with it. The second is a reviewer's, made to find what the first missed: 112 directions
 at 15 to 75 degrees and 64 at 0 to 12 degrees, sixteen ways round, turned 11.25 degrees so that none coincides with
 a direction the rule itself asks. "Faces behind those pixels" is how many of the faces the new output lacks are seen
 in any of the 112: the faces left out, and the faces it writes the other way round because they were turned back to
-their authored winding (7,238 over the eight models: RSS Centurion 88, SMS Wespe 147, F-100D Super Sabre 2, SS Romanic 1, HMS Svea 13, Project 50 U-boat 85, HMS Roberts 6,856, España 46).
+their authored winding (7,236 over the eight models: RSS Centurion 88, SMS Wespe 147, F-100D Super Sabre 2, SS Romanic 1, HMS Svea 13, Project 50 U-boat 85, HMS Roberts 6,856, España 44).
 
 | Model | 9 views from above | 8 level views | 112 views, 15 to 75 degrees | faces behind those pixels | 64 views, 0 to 12 degrees |
 |---|---|---|---|---|---|
@@ -5261,7 +5261,7 @@ their authored winding (7,238 over the eight models: RSS Centurion 88, SMS Wespe
 | HMS Svea | 0 / 883,727 | 0 / 755,174 | 35 / 10,317,268 | 2 of 65,646 | 132 / 6,242,932 |
 | Project 50 U-boat | 0 / 418,411 | 16 / 499,825 | 0 / 5,353,229 | 0 of 48,151 | 0 / 3,738,890 |
 | HMS Roberts | 0 / 910,923 | 2 / 638,588 | 24 / 10,544,496 | 5 of 541,809 | 34 / 5,466,893 |
-| España | 1 / 791,631 | 6 / 723,316 | 3 / 9,380,404 | 3 of 230,078 | 18 / 5,798,483 |
+| España | 1 / 791,631 | 6 / 723,316 | 3 / 9,380,404 | 3 of 230,044 | 18 / 5,798,483 |
 
 Over the eight models the 112 views change in 85 of 72,946,277 pixels. In the first set no pixel gained a surface or changed
 material in place. The second set was also run the other way round, for the faces only the new output has (those
@@ -5283,7 +5283,7 @@ fused shell had two surfaces of two materials facing the sky in one plane. A fac
 then lies on a face they did not turn and wound the same way, now gets its authored winding back first (the report's
 `twins:` line counts them) and is judged like any other twin. (2) "Large" was measured against the fuse group, so
 a group of small parts had every face asked from 161 directions; it is measured against the model. That is what
-took the Centurion's fuse from 9.6 s to 6.9 s and HMS Roberts' from 47.0 s to 44.5 s (the build before this round,
+took the Centurion's fuse from 9.6 s to 7.1 s and HMS Roberts' from 47.0 s to 45.7 s (the build before this round,
 timed alone on the machine like the table's), and it has a price in these views, because a face small against the
 model is asked from fewer directions: pixels lost over the 112 go RSS Centurion 6 to 7, SMS Wespe 10 to 12, HMS Roberts 0 to 24 (on HMS Roberts five faces, each one
 side of a doubled pair, 1 to 11 pixels each; none of the faces behind these pixels is one that was turned back,
@@ -5302,19 +5302,38 @@ Fronts only stays. On the Centurion it leaves more same-material pairs under the
 screenshot's angle (480 pixels against 202); pairs of two materials are 2 either way. Both builds of that comparison
 are from before (1) and (2); the tables above are of the build with them.
 
-Turning faces back was then measured on its own, on three models outside the eight where the Workshop row's
-`rewound` count moved: every mesh node in one group, the first review's build against the second's, the same 112
-views both ways (what the old output showed and the new does not, and the reverse).
+**What the third review changed.** A reviewer of the second round found no fault in its mechanics (threads, order,
+degenerate faces, a group planned twice, the same bytes over 48 runs) and one in its rule. A face was turned back when
+five of its seven inner sample points lay on the other face, as a candidate is found. But a candidate is only left
+out when no camera sees its front; the turn-back took away the outward front the passes had given the face without
+asking anyone. Their fixture: a closed crate stored inside out, a panel on one wall that covers it from 0.9 of 10
+up. The wall was turned back, then left out as hidden, and the crate stood open over the strip. A face is now turned
+back only when all thirteen of its sample points, the rim's included, lie on faces the passes did not turn. A face
+partly covered stays as the passes left it, facing the same way as the face it lies on: what the fuse did before
+this change, and where the two are of different materials a defect this rule does not touch.
 
-| Model | faces turned back | pixels lost | pixels gained |
-|---|---|---|---|
-| Bell H-13 | 170 | 0 of 3,135,840 | 0 |
-| HNoMS Troll | 378 | 17 of 7,233,065 | 0 |
-| MiG-21 | 17 | 0 of 7,689,457 | 0 |
+Measured on three models outside the eight where the Workshop row's `rewound` count had moved: every mesh node in
+one group, the build before the second round against the second round's and against this one, the same 112 views
+both ways (what the old output showed and the new does not, and the reverse).
 
-The Troll's 17 pixels are eight faces, all turned back, one to six pixels each over the 112 views: the rim of a face
-that reaches past the face it lies on (a face is turned back when five of its seven sample points lie on the other).
-Asking for all seven would leave such a face turned, facing the same way as the face under it over most of its area.
+| Model | turned back, five of seven | pixels lost | pixels gained | turned back, all thirteen | pixels lost | pixels gained |
+|---|---|---|---|---|---|---|
+| Bell H-13 | 170 | 0 of 3,135,840 | 0 | 23 | 0 | 0 |
+| HNoMS Troll | 378 | 17 of 7,233,065 | 0 | 378 | 17 | 0 |
+| MiG-21 | 17 | 0 of 7,689,457 | 0 | 13 | 0 | 0 |
+
+On these three the stricter rule shows in the counts and in no surveyed pixel. The Troll's 17 pixels are the same
+under both rules and are not an opening (`trollwhy.py`): at each of the eight faces behind them a face wound the
+same way still covers the old face out to 0.999 of every corner, 0.0007 units behind it (a quarter of a millionth
+of the model's length), and the survey counts a pixel lost where the view is oblique enough for that to pass its
+depth tolerance. At six of the eight the face that remains is of another material (`Color_M02` where the turned
+face was `Color_M06`): from that side the surface now shows the material it was authored with. An earlier draft of
+this section called the 17 pixels the rim of a face reaching past the one under it; the measurement says
+otherwise.
+
+The same review planted 16 defects on the second round's own lines; the tests let 12 through, none of them a fault
+in the code. Seven fixtures of theirs and one for the crate are in the tests now, and the island rows of the report
+count their parts over the faces written.
 
 **The Centurion from the screenshot's angle** (the view the report came from, 1,200 pixels across): pixels whose
 visible surface has a face lying on it, wound the other way.
@@ -5340,16 +5359,16 @@ groups); that cost is in the table and has not been removed.
 19 move in their FUSE line only (fewer triangles and vertices out, and a lower `rewound` where a face that had been
 turned is among those left out or was turned back to its authored winding), 8 sources
 have no golden. The same drill on the commit before the rule passes all
-27. Moved: `1861_us_convederate_navy_ship_split_fused` 149,912→149,790, `Ribauldequin_textured` rewound 642→640, `bell_h-13_animation-ready` 126,098→125,733, `french_submarine_cruiser_surcouf_split_fused` 72,716→55,794, `gymnote_1888_split_fused` 9,487→9,295, `hms_roberts_1940_split_fused` 149,858→105,062, `hms_svea_cut_split_fused` 149,952→94,026, `jagdpanzer_iv_late_prod2` 24,039→23,905, `m114_gun_only` 11,244→11,237, `project_50_u-boat_split_fused` 149,921→108,519, `rah66` 11,906→11,885, `rms_teutonic_cut2_split` 150,000→149,862, `salegs_revenge_split_fused` 149,838→134,414, `sms_wespe_split_fused` 149,976→112,236, `sns_dragon_split_fused` 149,999→131,573, `spanish_battleship_espana_split_fused` 149,616→98,513, `ss._great_eastern_transport_fever_2_mod` 148,908→148,856, `ss_romanic_split_fused` 149,907→149,850, `triconter_split` 149,996→149,609. They are re-blessed by the Unity row, not by hand.
+27. Moved: `1861_us_convederate_navy_ship_split_fused` 149,912→149,790, `Ribauldequin_textured` rewound 642→640, `bell_h-13_animation-ready` 126,098→125,742, `french_submarine_cruiser_surcouf_split_fused` 72,716→55,794, `gymnote_1888_split_fused` 9,487→9,295, `hms_roberts_1940_split_fused` 149,858→105,062, `hms_svea_cut_split_fused` 149,952→94,026, `jagdpanzer_iv_late_prod2` 24,039→23,905, `m114_gun_only` 11,244→11,237, `project_50_u-boat_split_fused` 149,921→108,519, `rah66` 11,906→11,885, `rms_teutonic_cut2_split` 150,000→149,862, `salegs_revenge_split_fused` 149,838→134,414, `sms_wespe_split_fused` 149,976→112,236, `sns_dragon_split_fused` 149,999→131,573, `spanish_battleship_espana_split_fused` 149,616→98,513, `ss._great_eastern_transport_fever_2_mod` 148,908→148,856, `ss_romanic_split_fused` 149,907→149,850, `triconter_split` 149,996→149,609. They are re-blessed by the Unity row, not by hand.
 
-**Unit tests and plants.** `Tests/GlbFuseHiddenTwinTests.cs`, 52 cases, each fixture with one thing to prove and,
+**Unit tests and plants.** `Tests/GlbFuseHiddenTwinTests.cs`, 60 cases, each fixture with one thing to prove and,
 where it could pass for the wrong reason, a second half that shows the opposite outcome on a changed fixture.
-45 defects were planted one at a time in the source, built, run and restored (`plants2.py` in scratch). 44 are
-caught: never leaves a face out; cameras all round, not in front; glass faces of the group stop rays; the other side need not be seen; copies wound the same way are twins; opposition loosened to -0.5; a face the passes turned is not turned back; turned back although the face under it was turned too; a face turned back stays turned in the fuse; face sizes by the group although the model is given; island rows count faces left out; no plane tolerance in the kernel; the fuse hands the kernel 1000 times its rounding; the rest of the file is not asked; outline not checked; a left-out face is still emitted; a left-out face still shapes normals; glass primitives are in the file tree; mirrored nodes are read as stored; a group is in its own way in the shared tree; segments are never left out of a ray; triangles of the group are never left out of a ray; a ray never visits the right child; a point never visits the right child; boxes are not widened by the rounding; a triangle seen from behind stops rays; the lone face of a large cover is not asked; only the zenith camera; a large face is asked from the eight directions only; the pass runs at a non-zero weld; rays start in the face plane (lift 0); a camera must be 30 degrees off edge-on (facing 0.5); the lowest ring replaced by a second 65; lowest camera 39 degrees; lowest camera 1 degree; the middle ring not turned; every sample at the centroid; no rim points for a large face; a twin needs all seven points; a twin needs one point; the report counts faces left out as written; the per-part line counts faces left out; judged on the authored winding; the centroid need not be covered. Not caught, and left so (1): rewound counts faces left out. It is a count in the report line; a face both turned by the winding
-passes and left out, and not turned back first, did not occur in any fixture tried. Two that the first review's
-fixtures let through are caught now: a face turned back and KEPT is written as authored (an open crate stored
-inside out against a panel), and a group asks its own faces as fused, not the file's copy of them as stored (a
-flag beside a trough stored inside out).
+61 defects were planted one at a time in the source, built, run against every `GlbFuse` test class and restored
+(`plants2.py` in scratch; 17 of them added in the third round on the second round's own lines, most of them the reviewer's). 61 are caught:
+never leaves a face out; cameras all round, not in front; glass faces of the group stop rays; the other side need not be seen; copies wound the same way are twins; opposition loosened to -0.5; a face the passes turned is not turned back; turned back on the centroid alone; turned back without asking the rim; turned back on five of the seven inner points; turned back: normal negated, corners not rewound; turned back: corners rewound, normal not negated; a face the passes did not turn is turned back too; turned back onto a face wound either way; the restored count is the face count; the second twins line replaces the first; the fuse hands the kernel no model size; the model size ignores every other node; the model size leaves the own box out; a small face is a 2.56th of the model; a small face is a 25600th of the model; island row: a turned face left out stays in rewound; island row: the parts count faces left out; turned back although the face under it was turned too; a face turned back stays turned in the fuse; face sizes by the group although the model is given; island rows count faces left out; no plane tolerance in the kernel; the fuse hands the kernel 1000 times its rounding; the rest of the file is not asked; outline not checked; a left-out face is still emitted; a left-out face still shapes normals; glass primitives are in the file tree; mirrored nodes are read as stored; a group is in its own way in the shared tree; segments are never left out of a ray; triangles of the group are never left out of a ray; a ray never visits the right child; a point never visits the right child; boxes are not widened by the rounding; a triangle seen from behind stops rays; the lone face of a large cover is not asked; only the zenith camera; a large face is asked from the eight directions only; the pass runs at a non-zero weld; rays start in the face plane (lift 0); a camera must be 30 degrees off edge-on (facing 0.5); the lowest ring replaced by a second 65; lowest camera 39 degrees; lowest camera 1 degree; the middle ring not turned; every sample at the centroid; no rim points for a large face; a twin needs all seven points; a twin needs one point; the report counts faces left out as written; the per-part line counts faces left out; judged on the authored winding; rewound counts faces left out; the centroid need not be covered. None is let through. Three that earlier rounds' fixtures let through are caught by fixtures added since: a face turned back and
+KEPT is written as authored (an open crate stored inside out against a panel), a group asks its own faces as fused
+and not the file's copy of them as stored (a flag beside a trough stored inside out), and a face both turned by
+the passes and left out is in no `rewound` count (a closed box stored inside out, standing on a slab).
 
 **What this does not show.** The game has drawn one model fused by the first cut, not the last version. The culled
 comparison is against the directions listed, not every camera, and against a renderer that culls back faces, which
@@ -5358,6 +5377,6 @@ is in NO fuse group stays: on HMS Svea, from one angle, 4,488 pixels still have 
 under the visible one, and in every such pair looked at the hidden face is in an ungrouped part. The harness is in
 scratch
 (`C:/tmp/haf-build/zfight`: `fuse_drill.ps1`, `cullview.py`, `cullcompare.py`, `othership3.sh`, `reviewB/rmview.py`,
-`twinmats_nodes.py`, `absurvey.sh`, `restorecheck.sh`), not in `tools/`. One earlier run of it was thrown away: it
+`twinmats_nodes.py`, `absurvey.sh`, `restorecheck4.sh`, `round3.sh`), not in `tools/`. One earlier run of it was thrown away: it
 loaded the live test DLL while the
 plants were rebuilding it and reported a preservation failure that was a plant's.

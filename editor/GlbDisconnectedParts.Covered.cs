@@ -71,6 +71,7 @@ public static partial class GlbDisconnectedParts
     internal delegate bool RayStop(double ox, double oy, double oz, double dx, double dy, double dz);
 
     const int CoveredSamples = 7;   // the coincidence test's points: the centroid, three towards the corners, three towards the edges (0.7 of the way)
+    const int TurnBackSamples = 13;  // the turn-back's: those seven and the six rim points (0.95 of the way) - ALL of them must be covered
     // WHICH POINTS OF A FACE THE RAYS LEAVE FROM. The seven above all lie in the middle half of the face, and a face is
     // seen as soon as its RIM is (review of the first cut: a doubled panel with a plate three quarters its size in front
     // of it was left out with 45 % of its area in plain view). So six more, 0.95 of the way to the corners (7-9) and to
@@ -322,8 +323,15 @@ public static partial class GlbDisconnectedParts
         // corners - "an authored opposite pair is already two-sided" - but tells such a pair by its corners, and a deck
         // cut along the other diagonal than the ceiling under it is not one by that test: the direction pass turned the
         // ceiling up, and the fused shell carried two surfaces of two materials facing the sky in one plane, which fight
-        // under any renderer. A face the passes turned, most of which now lies on a face they did NOT turn and wound the
-        // same way, was authored opposite to it: it gets its authored winding back, and is then judged like any twin.
+        // under any renderer. A face the passes turned, which now lies on faces they did NOT turn and wound the same
+        // way, was authored opposite to them: it gets its authored winding back, and is then judged like any twin.
+        //   ALL of it must lie on them: every one of the thirteen points, the rim's included (third review, a fixture).
+        //   The first cut of this step asked for five of the seven inner points, as a candidate does - but a candidate is
+        //   only left out when no camera sees its front, and this step takes the outward front the passes gave the face
+        //   away without asking anyone. Where the face reached past the one it lay on, that part of the shell was then
+        //   open: a strip 0.9 wide down a closed crate whose wall a panel covered from 0.9 up. A face only partly covered
+        //   stays as the passes left it. (On real models the change is in counts only: Bell H-13 170 faces turned back
+        //   under the first cut and 23 now, no surveyed pixel different either way.)
         if (flipped != null)
         {
             var back = new bool[faceCount]; int restored = 0;
@@ -333,8 +341,8 @@ public static partial class GlbDisconnectedParts
                 Sample(f, 0, out double x, out double y, out double z);
                 if (CoverAt(f, x, y, z, true) < 0) return;
                 int on = 1;
-                for (int k = 1; k < CoveredSamples; k++) { Sample(f, k, out x, out y, out z); if (CoverAt(f, x, y, z, true) >= 0) on++; }
-                if (on >= 5) back[f] = true;
+                for (int k = 1; k < TurnBackSamples; k++) { Sample(f, k, out x, out y, out z); if (CoverAt(f, x, y, z, true) < 0) break; on++; }
+                if (on == TurnBackSamples) back[f] = true;
             });
             for (int f = 0; f < faceCount; f++)
             {

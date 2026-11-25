@@ -18,7 +18,7 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   left out` and the report's `hidden twins:` line names the parts. On that ship the fuse leaves out 64,361 of 468,161
   triangles; nine culled views from above the horizon change in 0 of 826,178 pixels, and from the report's screenshot
   angle the hidden faces lying under a visible one of another material go from 43,265 pixels to 2. Fuse time on it:
-  4.9 s before, 6.9 s after. **To get the fix, fuse the model again and bake it again** - nothing changes for a
+  5.0 s before, 7.1 s after. **To get the fix, fuse the model again and bake it again** - nothing changes for a
   model until then. The Bake Tests' Workshop row moves on 19 sources (their fused shells lose hidden twins): re-run
   the row and re-bless those goldens.
 - **Model Fuser: a weld that flattens parts now says so** (2026-11-24, user report, the RSS Centurion: "Group U gets

@@ -3167,7 +3167,11 @@ public static partial class GlbDisconnectedParts
         string largestIslands;
         {
             var rows = new List<string>();
-            foreach (int ii in Enumerable.Range(0, sheets.Count).OrderByDescending(i => sheets[i].Count))
+            // (third review: ordered by the faces WRITTEN, and the parts counted over them - a sheet all of whose faces were
+            // left out stood among the six largest as "0 faces ... parts: House ×2")
+            var writtenOf = new int[sheets.Count];
+            for (int i = 0; i < sheets.Count; i++) foreach (int f in sheets[i]) if (!drop[f]) writtenOf[i]++;
+            foreach (int ii in Enumerable.Range(0, sheets.Count).OrderByDescending(i => writtenOf[i]))
             {
                 List<int> isl = sheets[ii];
                 var keys = new HashSet<long>(PairKeyComparer.Instance); int boundary = 0, turned = 0;
@@ -3175,9 +3179,10 @@ public static partial class GlbDisconnectedParts
                 // WHICH PARTS make up the sheet (2026-09-19, the Romanic's bridge deck: a 39-face roof region welded into a
                 // deckhouse sheet took the deckhouse's verdict — the reader needs to see the mixture): the heaviest four
                 var byPart = new Dictionary<int, int>();
-                foreach (int f in isl) { int pp = partOf[tris[f * 3]]; byPart[pp] = byPart.TryGetValue(pp, out int pc) ? pc + 1 : 1; }
+                foreach (int f in isl) { if (drop[f]) continue; int pp = partOf[tris[f * 3]]; byPart[pp] = byPart.TryGetValue(pp, out int pc) ? pc + 1 : 1; }
                 string parts = string.Join(", ", byPart.OrderByDescending(kv => kv.Value).Take(4).Select(kv => partNames[kv.Key] + " ×" + kv.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)))
                              + (byPart.Count > 4 ? ", +" + (byPart.Count - 4).ToString(System.Globalization.CultureInfo.InvariantCulture) + " more" : "");
+                if (byPart.Count == 0) parts = "none written";
                 int leftOut = 0; foreach (int f in isl) if (drop[f]) { leftOut++; if (flip[f]) turned--; }   // the row counts the faces WRITTEN, as the lines above do
                 string line = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2}, {3} rewound; {4}) — parts: {5}" + (leftOut > 0 ? " — " + leftOut.ToString(System.Globalization.CultureInfo.InvariantCulture) + " more left out as hidden twins" : ""), isl.Count - leftOut, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, islandRule[ii], turned, islandConflict[ii], parts);
                 result.IslandLines.Add(line);   // all of them, for the report (review of 0097bd5: the report promised every island and carried six)
