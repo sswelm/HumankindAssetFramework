@@ -994,7 +994,7 @@ public static class UniversalBaker
                 var chunks = SplitForQuadCeiling(smrs[0].sharedMesh, name);
                 if (chunks == null)
                     return Fail($"{name}: {smrs[0].sharedMesh.triangles.Length / 3:N0} tris need more than {MaxMeshChunks} draw fragments " +
-                                $"(about {MaxMeshChunks * QuadBudget:N0} estimated quads; the cuts between them cost a few) — lower 'Reduce to ~tris' or the Vehicle Lab dials first.");
+                                $"(at most {MaxMeshChunks} x {QuadBudget:N0} estimated quads, and every cut between the pieces costs some: in practice about 127,000) — lower 'Reduce to ~tris' or the Vehicle Lab dials first.");
                 if (chunks.Count > 1)
                 {
                     // The chunks must be ASSETS: the prefab below references them, and a mesh that lives only in
@@ -2532,7 +2532,7 @@ public static class UniversalBaker
         Lap("multi-mesh split");
         if (chunks == null)
             return Fail($"{name}: {mesh.triangles.Length / 3:N0} tris need more than {MaxMeshChunks} draw fragments " +
-                        $"(about {MaxMeshChunks * QuadBudget:N0} estimated quads; the cuts between them cost a few) — lower 'Reduce to ~tris' or the Vehicle Lab dials first.");
+                        $"(at most {MaxMeshChunks} x {QuadBudget:N0} estimated quads, and every cut between the pieces costs some: in practice about 127,000) — lower 'Reduce to ~tris' or the Vehicle Lab dials first.");
         // Re-bake = clean slate: delete prior outputs so nothing is overwritten IN PLACE. In-place overwrite leaves Unity
         // serving a stale cached mesh/prefab to the skeleton bake below -> the shipped skeleton lags a bake behind and the
         // ship renders 90 deg off in-game even though the (force-reimported) preview looks right. Fresh assets == first bake.

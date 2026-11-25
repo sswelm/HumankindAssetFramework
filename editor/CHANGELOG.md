@@ -6,12 +6,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 ## 0.5.7 — unreleased
 
 - **Model Factory: the Multi-fragment split fills its pieces evenly** (2026-11-25, user report: the Heavy Monitor
-  never got past "7.3x" in eight fragments). The pieces used to hold the same number of triangles, so the piece
-  whose triangles paired worst reached the quad limit while the others stood well under it. Each cut is now placed
-  where the quads balance, and a model gets only as many pieces as it needs (3, 5, 6 or 7 are possible now, not
-  just 2, 4 or 8). The Heavy Monitor now fits 217,608 triangles in eight pieces where 201,657 was the most (7.9 %
-  more); 9 of the project's 21 split entries need fewer pieces on their next bake (fewer fragments are less draw
-  work). The split step of a bake takes about a second longer. Nothing changes for an entry until it is baked again.
+  never got past "7.3x" in eight fragments). The pieces used to hold the same number of triangles, so one piece
+  reached the quad limit while the others still had room. Each cut is now placed where the quads balance, and a
+  model gets only as many pieces as it needs.
+  - **More detail in the same eight pieces:** the Heavy Monitor now fits 217,608 triangles where 201,657 was the
+    most, about 8 % more. To use it, raise **Reduce to ~tris** and bake again; the unit then costs a little more to
+    draw (7.3x became 7.8x).
+  - **Fewer pieces:** about 9 of the project's 21 split entries should need fewer pieces on their next bake (a
+    prediction from their baked meshes). Fewer pieces are fewer draw calls; the "Nx" figure barely changes.
+  - The split never makes more pieces than before, and never refuses a model that used to fit.
+  - A bake's split step takes 1 to 2 seconds longer. Nothing changes for an entry until it is baked again.
 
 - **Model Fuser: the status says when mirrored parts were turned inward** (2026-11-24, user report, the RSS
   Centurion: casemate walls solid in the Fuser, see-through in the Vehicle Lab). Some files store their mirrored
