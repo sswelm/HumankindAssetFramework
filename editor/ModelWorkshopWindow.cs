@@ -207,7 +207,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             EditorGUILayout.LabelField("Model Fuser — weld the parts of each ⊕ group into ONE shell with consistent winding", EditorStyles.boldLabel);
             // two short lines, not one long one: a single long label sets the window's minimum width (user 2026-09-16)
             EditorGUILayout.LabelField("For a hull authored as separate plates (see-through, holes, gaps under reduction): mark the plates with one letter, Fuse, then feed the output to the Vehicle Lab.", EditorStyles.wordWrappedMiniLabel);
-            EditorGUILayout.LabelField("Triangles are preserved exactly; the source parts keep their transforms and children and lose only their mesh. To cut as well, open the output in the Model Cutter: each shell keeps its ⊕ letter there.", EditorStyles.wordWrappedMiniLabel);
+            EditorGUILayout.LabelField("Triangles are kept as they are, except hidden twins (a face lying exactly on a visible one, wound the other way), which are left out; the source parts keep their transforms and children and lose only their mesh. To cut as well, open the output in the Model Cutter: each shell keeps its ⊕ letter there.", EditorStyles.wordWrappedMiniLabel);
         }
         else
         {
@@ -743,7 +743,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                         "a thin solid or a convex plating region by its signed volume about its own centroid (inside-out = reversed whole), a FLAT sheet " +
                         "(a deck, a bulwark) by the inside-out score. Mirrored instances (negative node scale) are read with the winding they render with. The cure for " +
                         "a hull authored as dozens of separate plates — see-through, a hole in its side, gaps under any reduction. Triangles are preserved " +
-                        "exactly; the source parts keep their transforms and children and lose only their mesh. The source file is never touched."), WrappedButton, GUILayout.Height(56)))   // twice the height, wrapped: 19 groups' letters and counts fit (user 2026-09-18)
+                        "exactly, except hidden twins (a face lying exactly on a visible one, wound the other way, that no camera above the horizon sees), which are left out; the source parts keep their transforms and children and lose only their mesh. The source file is never touched."), WrappedButton, GUILayout.Height(56)))   // twice the height, wrapped: 19 groups' letters and counts fit (user 2026-09-18)
                     FuseMarked();
             }
         }

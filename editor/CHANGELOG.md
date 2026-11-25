@@ -5,6 +5,31 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Model Fuser: one surface where two lie on each other** (2026-11-25, user report, the Pre-Dreadnought's upper deck
+  drawn with grey patches in game; seen fixed in game the same day, after fusing again, baking and rebuilding). The
+  ship's wood deck lies exactly on the superstructure's own top face, which is wound the other way, and the aft mast and
+  two boats carry a brown inner copy of their skin on the same triangles; those were the places the game drew wrong.
+  A fuse **at weld 0** now leaves out a face that lies exactly on a face of the same group wound the other way, when no
+  camera above the horizon can see its front and the other side is seen, so one surface remains. Kept as they are: a
+  pair that shows on both sides (a flag, a boat's shell with a painted inside), a pair nothing sees, and faces lying on
+  each other wound the SAME way. The pass preserves BLEND and MASK faces and treats them as transparent to its
+  rays; an opaque face lying back to back on one is still left out when no camera sees it. Reversing a face back to its authored winding requires support at its vertices and edge midpoints as
+  well as its interior samples. With a non-zero weld the pass is not run and the report says so.
+  A face that the fuse's own winding passes had turned onto its authored twin gets its authored winding back first.
+  A fused part can therefore have fewer triangles than its sources: the status line ends with `N hidden twin face(s)
+  left out` and the report's `hidden twins:` line names the parts. On that ship the fuse leaves out 64,361 of 468,161
+  triangles; nine culled views from above the horizon change in 0 of 826,178 pixels, and from the report's screenshot
+  angle the hidden faces lying under a visible one of another material go from 43,265 pixels to 2. Fuse time on it:
+  5.0 s before, 7.1 s after. **To get the fix, fuse the model again and bake it again** - nothing changes for a
+  model until then. The Bake Tests' Workshop row moves on 19 sources (their fused shells lose hidden twins): re-run
+  the row and re-bless those goldens.
+
+- **Vehicle Lab: a Chain role with its own reduce dial** (2026-11-25, user request). Anchor chains and chain cables
+  can be marked **Chain** (dropdown, or key **N**) and cut by a **Chain reduce (%)** slider in Vertices control. They
+  are reduced like Rigging, Shroud and Railing (dissolve + collapse, no weld), stay rigid with the hull, and have
+  their own Show-only filter. Part names containing `chain` are guessed Chain on a fresh probe; roles already saved
+  in a recipe are untouched. 0 = untouched. A recipe that marks no part Chain generates exactly as before.
+
 - **Model Fuser: a weld that flattens parts now says so** (2026-11-24, user report, the RSS Centurion: "Group U gets
   all messed up", "group K is missing", "the chains are also missing"). The **Fuse — weld seams closer than** dial
   stood at 2.288‰ instead of 0. It sits below the preview and keeps its value from one ship to the next, and its

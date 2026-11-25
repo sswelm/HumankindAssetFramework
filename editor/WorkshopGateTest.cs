@@ -12,8 +12,8 @@
 //                      smallest 3 s): output triangles == source triangles
 //   FUSE  (weld 0)     the largest nodes up to a 150,000-triangle budget, into ONE shell (a whole million-triangle
 //                      liner would not finish inside a test row): the shell is in the output with the triangle count
-//                      the fuse reported, and at least half the source triangles survived (a collapse beyond that is
-//                      a broken weld, not a tidy-up)
+//                      the fuse reported, and every source triangle is in it or counted as a hidden twin left out
+//                      (2026-11-24; until then "at least half survived", which a doubled model no longer does)
 // then diffs the counts — parts, islands, children, triangles, welded vertices, islands after, faces rewound — against a
 // blessed golden, Tools/workshop_golden/<file>.txt (the deploy row's golden-master idea): the direction pass's verdicts
 // are exactly what PR #83 changed, and a rewound-faces count that moves on a ship nobody touched IS the regression. A
@@ -163,7 +163,9 @@ public static class WorkshopGateTest
         { snap.Add("FUSE skipped (a skinned source — the Workshop fuses static parts only)"); return; }
         var r = results[0];
         if (r.OutputTriangles > r.SourceTriangles) problems.Add($"the fuse GAINED triangles ({r.SourceTriangles} -> {r.OutputTriangles})");
-        if (r.OutputTriangles * 2 < r.SourceTriangles) problems.Add($"the fuse kept only {r.OutputTriangles} of {r.SourceTriangles} triangles");
+        // every triangle is in the shell or is a hidden twin the fuse left out (2026-11-24; a doubled model loses close to half
+        // that way, which the old "kept at least half" bound took for damage): the two must add up, exactly
+        if (r.OutputTriangles + r.HiddenFacesRemoved != r.SourceTriangles) problems.Add($"the fuse lost triangles it does not account for ({r.SourceTriangles} -> {r.OutputTriangles}, {r.HiddenFacesRemoved} hidden twin(s) left out)");
         var fusedParts = GlbDisconnectedParts.Analyze(fused, 0);
         var shell = fusedParts.FirstOrDefault(p => p.NodeName == job.Name);
         if (shell == null) problems.Add("the fused shell is missing from the output");

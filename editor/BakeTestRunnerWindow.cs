@@ -158,8 +158,8 @@ public class BakeTestRunnerWindow : EditorWindow
                        "up to 150k triangles into one shell, on every GLB a Vehicle Lab recipe names as its source, in " +
                        "memory (nothing on disk is touched), and checks: no " +
                        "triangle is lost by a split or a tear, every split child is one island, node names stay unique, " +
-                       "the fused shell is in the output with the reported triangle count and kept at least half the " +
-                       "triangles. Then diffs the counts — parts, islands, children, welded vertices, faces rewound — " +
+                       "the fused shell is in the output with the reported triangle count, and every source triangle is " +
+                       "in it or counted as a hidden twin left out. Then diffs the counts — parts, islands, children, welded vertices, faces rewound — " +
                        "against a blessed golden (Tools/workshop_golden/<file>.txt; the first run captures it). A " +
                        "rewound-faces count that moves on a ship nobody touched is a direction-pass regression.",
                 run = WorkshopGateTest.RunSection },

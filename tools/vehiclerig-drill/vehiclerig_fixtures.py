@@ -28,9 +28,15 @@ Stage 2 (step (c), the weld tiers):
   fx_c_soup_flat     a flat 6 x 6 grid of triangles in the RIGGING tier at 90: the limited dissolve joins every coplanar face into
                      one n-gon and collapses the straight-run vertices, the triangulate cuts the square, the decimate follows
   fx_c_soup_railing  the fx_c_soup_L strip and a flat 6 x 6 grid in the RAILING tier at 60 (role 24, names in the railingreduce= tag)
+  fx_c_soup_chain    the same strip and grid in the CHAIN tier at 70 (role 26, names in the chainreduce= tag, which only a marked part sends)
   fx_c_soup_L        a flat L-shaped strip in the SHROUD tier at 50: the dissolve leaves a CONCAVE n-gon, so the ear clipping's
                      kd-tree of concave corners decides the ears; a lone flat quad beside it takes the quad rule
   fx_c_soup_attributes custom normals, vertex colours and two UV layers through the soup operators
+  fx_c_soup_wound    faces wound against each other in the RIGGING tier at 90 (2026-11-25): dissolve_limit runs with delimit
+                     {'NORMAL'} - the unset flag slot's default - so an edge between two such faces is never joined and a vertex
+                     on one is judged by its plain edge angle. Patch: a flat 7 x 7 grid with a third of its cells' second
+                     triangles turned over; Seam: a flat 7 x 7 grid whose upper half is turned over, the row between the halves
+                     a zigzag of 4 degrees (under the limit by its plain angle, over it by the angle scaled with the faces')
   fx_d_chunk_splice  an earlier BSP cell deletes an edge queued for a later cell: the script dies in stage 2
   fx_c_soup_bumpy    a 60 x 40 bumpy grid (4,800 faces) in the RIGGING tier at 80: over the 4,000-face cap, the dissolve runs
                      per BSP cell on the cell's interior edges and vertices
@@ -174,7 +180,7 @@ Argument variants (recipes_exit, post-edited by --exits): fx_r_numeric_pct (the 
   fx_x_turret_quote / fx_x_turret_space hold Python's quote choice and non-ASCII whitespace escapes in malformed-tag errors.
 Exits and deaths (recipes_exit, keys renamed by --exits): fx_x_allignored (every part Ignored: the _guard crash), fx_x_bright (bright=1.5|x),
   fx_x_flagfold (flagfold=a|b), fx_x_defaultreduce (no '|'), fx_x_shroudreduce (a percent float() refuses), fx_x_gunreduce (likewise), fx_x_turretreduce (an infinite percent),
-  fx_x_windowreduce (no '|'), fx_x_railingreduce (a nan percent), fx_x_merge_missing (a second model path that is not there); fx_d_frames (argv[7] "15.0": int() dies),
+  fx_x_windowreduce (no '|'), fx_x_railingreduce (a nan percent), fx_x_chainreduce (an infinite percent), fx_x_merge_missing (a second model path that is not there); fx_d_frames (argv[7] "15.0": int() dies),
   fx_d_merge_offset (merge2 offset "a,0,0": float() dies), fx_d_names (a wheels file that is not there: namelist() dies)
 """
 import json, math, os, sys
@@ -253,15 +259,16 @@ def grid_seam(r, name, material, n=9):
     return len(r.meshes) - 1
 
 
-def flat_grid(r, name, material, nx, ny, bump=0.0, mask=None):
-    """An (nx x ny)-vertex grid of two triangles per cell, z = bump * sin/cos (flat at 0); `mask(i, j)` keeps a cell or not."""
+def flat_grid(r, name, material, nx, ny, bump=0.0, mask=None, wound=None, nudge=None):
+    """An (nx x ny)-vertex grid of two triangles per cell, z = bump * sin/cos (flat at 0); `mask(i, j)` keeps a cell or not;
+    `wound(i, j, k)` winds triangle k (0 or 1) of a cell the other way; `nudge(i, j)` moves a vertex along y, in the plane."""
     import math as _m
     pos = []; uv = []; rows = []
     for j in range(ny):
         row = []
         for i in range(nx):
             x, y = i / (nx - 1.0), j / (ny - 1.0)
-            row.append(len(pos)); pos.append((x, y, bump * _m.sin(5.0 * x) * _m.cos(4.0 * y))); uv.append((x, y))
+            row.append(len(pos)); pos.append((x, y if nudge is None else y + nudge(i, j), bump * _m.sin(5.0 * x) * _m.cos(4.0 * y))); uv.append((x, y))
         rows.append(row)
     idx = []
     for j in range(ny - 1):
@@ -269,7 +276,8 @@ def flat_grid(r, name, material, nx, ny, bump=0.0, mask=None):
             if mask is not None and not mask(i, j):
                 continue
             a = rows[j][i]; b = rows[j][i + 1]; c = rows[j + 1][i + 1]; d = rows[j + 1][i]
-            idx += [a, b, c, a, c, d]
+            for k, t in enumerate(((a, b, c), (a, c, d))):
+                idx += [t[0], t[2], t[1]] if wound is not None and wound(i, j, k) else list(t)
     prim = {"attributes": {"POSITION": r.b.accessor(pos, "f", "VEC3"), "TEXCOORD_0": r.b.accessor(uv, "f", "VEC2", minmax=False)},
             "indices": r.b.accessor(idx, "H" if len(pos) < 65536 else "I", "SCALAR", minmax=False), "material": material}
     r.meshes.append({"name": name, "primitives": [prim]})
@@ -578,7 +586,7 @@ def main(out):
     # the exits and deaths: plain recipes the --exits mode edits into the malformed shapes
     recipe(out, "fx_x_allignored", src, [("A", 3, {}), ("B", 3, {})], sub="recipes_exit")
     recipe(out, "fx_x_bright", src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit", model1Bright=1.5)
-    for k in ("fx_x_flagfold", "fx_x_defaultreduce", "fx_x_shroudreduce", "fx_x_gunreduce", "fx_x_turretreduce", "fx_x_turret_quote", "fx_x_turret_space", "fx_x_windowreduce", "fx_x_railingreduce", "fx_d_frames", "fx_d_names", "fx_d_infinite_count", "fx_d_nan_count", "fx_d_flagfold_infinite", "fx_d_reduce_before_names"):
+    for k in ("fx_x_flagfold", "fx_x_defaultreduce", "fx_x_shroudreduce", "fx_x_gunreduce", "fx_x_turretreduce", "fx_x_turret_quote", "fx_x_turret_space", "fx_x_windowreduce", "fx_x_railingreduce", "fx_x_chainreduce", "fx_d_frames", "fx_d_names", "fx_d_infinite_count", "fx_d_nan_count", "fx_d_flagfold_infinite", "fx_d_reduce_before_names"):
         recipe(out, k, src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit")
     for k in ("fx_x_merge_missing", "fx_d_merge_offset"):
         recipe(out, k, src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit", srcFile2=second)
@@ -644,6 +652,11 @@ def main(out):
     r.node("Rail", mesh=flat_grid(r, "Rail", ma, 7, 7, mask=lambda i, j: i < 2 or j < 2)); r.node("Post", mesh=flat_grid(r, "Post", ma, 6, 6), translation=[3.0, 0.0, 0.0])
     r.node("Other", mesh=r.mesh("Other", at=(6.0, 0.0, 0.0), material=ma))
     recipe(out, "fx_c_soup_railing", r.write(models, "fx_c_soup_railing"), [("Rail", 24, {}), ("Post", 24, {}), ("Other", 0, {})], railingReducePct=60.0)
+    # the CHAIN tier (2026-11-25): role 26, its names in the chainreduce= tag (sent because parts are marked); soup like the three above
+    r = Rig(); ma = r.material("Iron", (0.3, 0.3, 0.3))
+    r.node("Cable", mesh=flat_grid(r, "Cable", ma, 7, 7, mask=lambda i, j: i < 2 or j < 2)); r.node("Link", mesh=flat_grid(r, "Link", ma, 6, 6), translation=[3.0, 0.0, 0.0])
+    r.node("Other", mesh=r.mesh("Other", at=(6.0, 0.0, 0.0), material=ma))
+    recipe(out, "fx_c_soup_chain", r.write(models, "fx_c_soup_chain"), [("Cable", 26, {}), ("Link", 26, {}), ("Other", 0, {})], chainReducePct=70.0)
     r = Rig(); ma = r.material("Rope", (0.4, 0.3, 0.2))
     r.node("Shroud", mesh=flat_grid(r, "Shroud", ma, 61, 41, bump=0.02))
     recipe(out, "fx_c_soup_bumpy", r.write(models, "fx_c_soup_bumpy"), [("Shroud", 15, {})], riggingReducePct=80.0)
@@ -660,6 +673,13 @@ def main(out):
     attrs["TEXCOORD_1"] = r.b.accessor([(i / 7.0, 1.0 - i / 35.0) for i in range(36)], "f", "VEC2", minmax=False)
     r.node("ColouredNet", mesh=mesh); r.node("Other", mesh=r.mesh("Other", at=(3, 0, 0), material=ma))
     recipe(out, "fx_c_soup_attributes", r.write(models, "fx_c_soup_attributes"), [("ColouredNet", 15, {}), ("Other", 0, {})], riggingReducePct=90.0)
+    # Faces wound against each other: the dissolve's NORMAL delimiter (the unset flag slot's default), on the edges and the vertices.
+    r = Rig(); ma = r.material("Rope")
+    r.node("Patch", mesh=flat_grid(r, "Patch", ma, 7, 7, wound=lambda i, j, k: k == 1 and (i + 2 * j) % 3 == 0))
+    r.node("Seam", mesh=flat_grid(r, "Seam", ma, 7, 7, wound=lambda i, j, k: j >= 3, nudge=lambda i, j: (0.003 if i % 2 else -0.003) if j == 3 else 0.0),
+           translation=[2.0, 0.0, 0.0])
+    r.node("Other", mesh=r.mesh("Other", at=(5, 0, 0), material=ma))
+    recipe(out, "fx_c_soup_wound", r.write(models, "fx_c_soup_wound"), [("Patch", 15, {}), ("Seam", 15, {}), ("Other", 0, {})], riggingReducePct=90.0)
     # ---- stage 3 (step (d), part d1: the frame every rig shares)
     # fx_r_wheels: two tires thin along Y with an off-centre bolt joining the first (the 0.75 rule), a cube wheel (its extents tie:
     # the axle is the first, X), the tire listed twice; the wave rock on (RootHull carries the body); a rudder that is also listed as
@@ -1322,6 +1342,7 @@ EXITS = {
     "fx_x_turret_space": ("EXIT", lambda a: set_tag(a, "turretreduce", "\u00a0inf")),
     "fx_x_windowreduce": ("EXIT", lambda a: set_tag(a, "windowreduce", "nopipe")),
     "fx_x_railingreduce": ("EXIT", lambda a: set_tag(a, "railingreduce", "|nan")),
+    "fx_x_chainreduce": ("EXIT", lambda a: set_tag(a, "chainreduce", "|inf")),
     "fx_x_merge_missing": ("EXIT", lambda a: set_tag(a, "merge2", "|".join([a[[t.startswith("merge2=") for t in a].index(True)][7:].split("|")[0] + ".missing.glb"] + a[[t.startswith("merge2=") for t in a].index(True)][7:].split("|")[1:]))),
     "fx_d_frames": ("DIES", lambda a: a.__setitem__(7, "15.0")),
     "fx_d_reduce_before_names": ("DIES", lambda a: (a.__setitem__(52, "half"), a.__setitem__(69, a[69] + ".missing.txt"))),
