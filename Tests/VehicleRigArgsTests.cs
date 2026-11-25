@@ -219,6 +219,34 @@ public class VehicleRigArgsTests
         Assert.Equal(("parttx=@C:/p/ship_parttx.txt", true), t[80]);
     }
 
+    // 2026-11-25, the Chain role: its reduce tag (names file and dial) travels only when a part is marked, before twosided=.
+    [Fact]
+    public void The_chainreduce_tag_is_sent_only_when_a_part_is_marked()
+    {
+        var a = Sample();
+        a.chainReducePct = 40f;   // the dial alone sends nothing: without a marked part there is nothing to reduce
+        Assert.DoesNotContain(VehicleRigArgLine.RigArgv(a), x => x.value.StartsWith("chainreduce="));
+        a.chainMarked = true; a.twoSidedMarked = true;
+        var t = VehicleRigArgLine.RigArgv(a).ToList();
+        Assert.Equal(("railingreduce=@C:/p/ship_railing.txt|0", true), t[78]);
+        Assert.Equal(("chainreduce=@C:/p/ship_chain.txt|40", true), t[79]);
+        Assert.Equal(("twosided=@C:/p/ship_twosided.txt", true), t[80]);
+        Assert.Equal(81, t.Count);
+    }
+
+    [Theory]
+    [InlineData(26, true)][InlineData(24, false)][InlineData(25, false)]
+    public void A_recipe_with_a_Chain_part_asks_for_the_tag_and_reads_its_dial(int role, bool expected)
+    {
+        var r = VehicleRigArgLine.RigArgsFromRecipe("{\"srcFile\":\"D:/m/a.glb\",\"outGlb\":\"D:/m/a_Spin.glb\",\"frames\":15,\"chainReducePct\":65.5,\"parts\":[{\"name\":\"Hull\",\"role\":0},{\"name\":\"Anchor chain\",\"role\":" + role + "}]}");
+        Assert.Equal(expected, r.args.chainMarked);
+        Assert.Equal(65.5f, r.args.chainReducePct);
+        Assert.Equal(expected ? new[] { "Anchor chain" } : new string[0], VehicleRigArgLine.NamesOf(r, "chain"));
+        Assert.Equal(26, VehicleRigArgLine.RoleOfNamesFile["chain"]);
+        // a recipe saved before the role existed has no key: the dial is 0
+        Assert.Equal(0f, VehicleRigArgLine.RigArgsFromRecipe("{\"srcFile\":\"D:/m/a.glb\",\"outGlb\":\"D:/m/a_Spin.glb\",\"frames\":15,\"parts\":[]}").args.chainReducePct);
+    }
+
     [Theory]
     [InlineData(25, true)][InlineData(18, false)][InlineData(24, false)]
     public void A_recipe_with_a_Two_sided_part_asks_for_the_tag(int role, bool expected)

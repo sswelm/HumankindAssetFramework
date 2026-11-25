@@ -4778,6 +4778,16 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Authoring tools
 
+- **A Chain role with its own reduce dial (2026-11-25; Vehicle Lab role *Chain*, key `N`, recipe `chainReducePct`,
+  the script's `chainreduce=@names|percent`).** "Could you add an additional Reduce group called Chains": anchor
+  chains and chain cables are a role of their own (enum value 26, appended last so saved recipes keep their roles).
+  A SOUP tier like Rigging, Shroud and Railing - limited dissolve, then collapse, no weld - that runs right after
+  RAILING, in the script and in the C# stage 2 alike. The tag is sent only when a part is marked Chain (as
+  `twosided=` is), so a recipe without the role keeps its argument line and nothing regenerates. Part names with
+  `chain` are now guessed Chain on a fresh probe; roles already saved in a recipe are untouched. Drill fixtures:
+  `fx_c_soup_chain` (the tier, Blender against C#) and `fx_x_chainreduce` (an infinite percent is the script's
+  error). Not done: no bake of a real ship with the role has been looked at in game.
+
 - **A definition made in the editor is in the Pick lists at once, and a new Model Factory entry starts on Keep
   Model (2026-11-24).** Reported from the Model Factory: a pawn definition made that session
   (`Era5_Common_SemiSubmersibleTorpedoBoats_01`, added to `PresentationPawnDefinition_Era5_ENC.asset`) was in the
