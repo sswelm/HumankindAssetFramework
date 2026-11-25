@@ -1045,6 +1045,68 @@ public class GlbFuseHiddenTwinTests
         Assert.All(roof, t => Assert.Equal(1.0, t.normalY, 6));
     }
 
+    // ...BUT AN OPAQUE FACE BACK TO BACK WITH A PANE IS STILL A HIDDEN TWIN (measured on the reported ship after the review
+    // that kept glass out of the test: the grey faces lying on its window panes, wound the other way, stayed in the
+    // fuse - 113 pixels of the screenshot's view against 2). The house whose own top is wound DOWN, as authored, under
+    // a deck of glass or of an alpha-masked material: no camera sees the top's front, the pane's side is seen, the top
+    // goes and the pane stays.
+    [Theory]
+    [InlineData("BLEND")]
+    [InlineData("MASK")]
+    public void An_opaque_face_back_to_back_with_a_nonopaque_one_is_still_left_out(string alphaMode)
+    {
+        Soup s = HouseWithDeck();
+        byte[] glb = BuildGlb(Materials(null, alphaMode), PartOf("House", 0, s, t => t.StartsWith("house")), PartOf("Deck", 1, s, t => t == "deck"));
+        var r = GlbDisconnectedParts.FuseNodes(glb, new[] { 0, 1 }, 0, "Fused");
+        Assert.Equal(2, r.HiddenFacesRemoved); Assert.Equal(12, r.OutputTriangles);
+        var tris = FusedTriangles(r.Bytes, r.FusedNodeName);
+        Assert.DoesNotContain(tris[0], t => Math.Abs(t.height - 10) < 1e-6);                                     // nothing of the house in the pane's plane
+        Assert.Equal(2, tris[1].Count);
+        Assert.All(tris[1], t => { Assert.Equal(1.0, t.normalY, 6); Assert.Equal(10.0, t.height, 6); });         // the pane, facing up
+    }
+
+    // ...its front is asked of the cameras as any other face's is, and they look THROUGH glass: an opaque face (+X) on a
+    // pane (-X), its front inside a case. A case of glass: the front is seen, both stay. An opaque case: the face goes,
+    // the pane stays. And the other way round - the PANE's front in the opaque case - nothing goes: a glass or masked
+    // face is never left out.
+    [Theory]
+    [InlineData("BLEND")]
+    [InlineData("MASK")]
+    public void An_opaque_face_seen_through_glass_stays_and_a_nonopaque_face_is_never_left_out(string alphaMode)
+    {
+        var s = new Soup();
+        s.Quad("back", V(0, 0, 4), V(0, 0, 0), V(0, 4, 0), V(0, 4, 4));                                          // opaque, faces +X
+        s.Quad("pane", V(0, 0, 0), V(0, 0, 4), V(0, 4, 4), V(0, 4, 0));                                          // glass, faces -X
+        s.Box("east", V(0.01, -1, -1), V(6, 6, 5)); s.Box("west", V(-6, -1, -1), V(-0.01, 6, 5));
+        GlbDisconnectedParts.Result Fuse(string box, string boxMode) => GlbDisconnectedParts.FuseNodes(
+            BuildGlb(Materials(null, alphaMode, boxMode), PartOf("Back", 0, s, t => t == "back"), PartOf("Pane", 1, s, t => t == "pane"), PartOf("Case", 2, s, t => t.StartsWith(box))),
+            new[] { 0, 1 }, 0, "Fused");
+        var throughGlass = Fuse("east", alphaMode);
+        Assert.Equal(0, throughGlass.HiddenFacesRemoved); Assert.Equal(4, throughGlass.OutputTriangles);
+        var boxedIn = Fuse("east", null);
+        Assert.Equal(2, boxedIn.HiddenFacesRemoved); Assert.Equal(2, boxedIn.OutputTriangles);
+        var tris = FusedTriangles(boxedIn.Bytes, boxedIn.FusedNodeName, axis: 0);
+        Assert.False(tris.TryGetValue(0, out var backLeft) && backLeft.Count > 0);                               // the opaque face is gone
+        Assert.Equal(2, tris[1].Count); Assert.All(tris[1], t => Assert.Equal(-1.0, t.normalY, 6));              // the pane, facing -X
+        var paneBoxedIn = Fuse("west", null);
+        Assert.Equal(0, paneBoxedIn.HiddenFacesRemoved); Assert.Equal(4, paneBoxedIn.OutputTriangles);
+    }
+
+    // ...and a glass face the winding passes turned is left as they turned it: not turned back, not left out (the kernel,
+    // handed the ceiling of the crossed fixture as the passes left it - UP, marked as turned - on a deck they did not turn)
+    [Fact]
+    public void A_nonopaque_face_the_passes_turned_is_not_turned_back()
+    {
+        var s = new Soup().Box("house", V(0, 0, 0), V(10, 10, 10), false, "top");
+        s.Quad("house:ceiling", V(0, 10, 10), V(10, 10, 10), V(10, 10, 0), V(0, 10, 0), otherDiagonal: true);   // as the passes left it: UP
+        s.Quad("deck", V(0, 10, 10), V(10, 10, 10), V(10, 10, 0), V(0, 10, 0));                                 // UP, the other diagonal
+        var glass = Find(s, glass: t => t == "house:ceiling", flipped: t => t == "house:ceiling");
+        Assert.Null(glass.Restore); Assert.Empty(s.Dropped(glass));
+        // ...the same ceiling opaque IS turned back and left out: the fixture can tell
+        var opaque = Find(s, flipped: t => t == "house:ceiling");
+        Assert.Equal(2, opaque.Restored); Assert.Equal(new[] { "house:ceiling" }, s.Dropped(opaque));
+    }
+
     // every island row of the report counts the faces written: they add up to the shell
     [Fact]
     public void The_island_rows_count_the_faces_written()

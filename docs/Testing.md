@@ -5221,12 +5221,45 @@ when no camera above the horizon can see its front and the other side of its pla
 (`editor/GlbDisconnectedParts.Covered.cs`, 2026-11-25). The report was the RSS Centurion's upper deck, drawn in game
 with grey patches; the cause, what was ruled out and the versions of the rule that were refused are in the root
 CHANGELOG under the same date. The reporter fused the ship again with the first cut of the rule, baked it and rebuilt
-the mod on 2026-11-25: the deck is clean in game. The measurements below describe the earlier review builds.
+the mod on 2026-11-25: the deck is clean in game. The tables below are of the build before the last two changes ("the tables' build"); what those changes do to
+them is measured in the next paragraphs.
 
-The follow-up review added GLB fixtures for blended and alpha-masked overlays and for alpha-masked geometry in
-another node. The pass preserves those faces and excludes them from coverage and ray tests. The closed-crate
-fixture also covers a panel inset by 0.05 on a ten-unit wall. Checking the actual triangle vertices and edge
-midpoints preserves the wall along that strip. Coverage and visibility still use discrete samples.
+**A follow-up review by another model (2026-11-25)** made two changes and added GLB fixtures for them. (1) A face
+of a BLEND or MASK material is never left out and stops no ray, in the group or in another node. (2) A face is
+turned back to its authored winding only when its actual corners and edge midpoints, not points 0.95 of the way
+to them, lie on the face under it: the closed-crate fixture now also covers a panel inset by 0.05 on a ten-unit
+wall. Coverage and visibility still use discrete samples.
+
+As pushed, (1) also took such faces out of the coincidence test altogether, so an opaque face lying back to back
+on a pane of glass was no candidate any more. Measured on the reported ship, the grey faces lying on its window
+panes came back: from the screenshot's angle 115 pixels with a hidden face of another material under the visible
+one, against 2 in the tables' build and 43,265 before the rule (and 2 in the fused file whose bake was seen right in
+game, `drill/final5/twins_userfile.txt`). **The last head** keeps what that review protects and lets a glass or
+masked face still be what an opaque face lies on: the opaque face's front is asked of the cameras as any other's
+is, through the glass, and when none sees it and the pane's side is seen it is left out. A glass face is never
+left out, never turned back, and is no cover for a turn-back (the other review's fixture: a glass deck on a roof
+the passes had turned up must not replace the roof). From the screenshot's angle: 2 pixels.
+
+The eight models, fused from this morning's backup copies of their sources and groups (the live folders were being
+re-fused meanwhile), by frozen builds of the three versions:
+
+| Model | left out, tables' build | left out, the other review's head | left out, last head | pixels lost against the old fuse, 112 views |
+|---|---|---|---|---|
+| RSS Centurion | 64,361 | 63,275 | 63,492 | 7 of 9,682,180 |
+| SMS Wespe | 76,138 | 76,114 | 76,114 | 12 of 10,743,433 |
+| F-100D Super Sabre | 66 | 66 | 66 | 1 of 8,116,852 |
+| SS Romanic | 271 | 271 | 271 | 3 of 8,808,415 |
+| HMS Svea | 65,633 | 65,633 | 65,633 | 35 of 10,317,268 |
+| Project 50 U-boat | 48,066 | 48,066 | 48,066 | 0 of 5,353,229 |
+| HMS Roberts | 534,953 | 534,729 | 534,729 | 24 of 10,544,496 |
+| España | 230,000 | 225,859 | 225,881 | 3 of 9,380,404 |
+
+The last column is the same for all three versions (85 pixels in all), and no pixel of the 112 views differs
+between any two of them, in either direction, on any of the eight (`round5.sh`, `drill/final6/summary.txt`). What
+differs is under the surface: the tables' build also left out glass faces nothing sees (the Centurion's 869, the
+España's 4,120), and turned back a few more faces whose rim reached past the face under them. None of the 28
+split models in `D:/3DModels` has a MASK material; six have BLEND faces, at most 5.3 % of their triangles
+(`alphamodes.py`). The frozen build of the last head fused all eight a second time to the same bytes.
 
 **What the measurement is.** Each model's split source (the file the Model Fuser opens) is fused twice, by the
 commit before the rule and by the rule, with the groups of its own `.fuse.txt` sidecar, weld 0, *Check mirrored

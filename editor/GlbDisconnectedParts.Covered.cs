@@ -11,7 +11,8 @@
 //
 //   * CANDIDATE - a face most of whose sample points (its centroid and at least four of six more) lie ON a face of the
 //     same group wound the other way: within the fuse's own rounding distance of its plane, inside its outline, normals
-//     opposed. Both faces must be opaque, and they can be triangulated differently.
+//     opposed. The face itself must be opaque; the face it lies on may be glass (BLEND) or alpha-masked (MASK). The two
+//     can be triangulated differently.
 //   * HIDDEN - a face is seen when a ray from one of those points reaches open air along one of the directions the
 //     game's cameras look from (CoveredViews: straight above, and eight ways round at 15, 40 and 65 degrees above the
 //     horizon; more for a larger face), that camera being in front of the face. The rays leave from the face's corners as well as its middle
@@ -43,7 +44,7 @@
 //
 // Rays are stopped by the triangles of the FILE that show their front to the camera (the group's own welded faces in
 // their final winding, and every other node as the file winds it, a mirrored node as glTF renders it). BLEND and
-// MASK can let a surface show through, so the rays pass through them. Two trees of boxes (TriBvh): one per group over its own faces, for the coincidence test and its share of the
+// MASK can let a surface show through, so the rays pass through them, and a face of such a material is never left out. Two trees of boxes (TriBvh): one per group over its own faces, for the coincidence test and its share of the
 // rays, and ONE for the fuse over every other node of the file (OccluderCache.RayTree), built when the first group with
 // a candidate asks and shared by them all.
 //   A UNIFORM GRID was the first structure, and HMS Roberts refused it: one of its groups is 961,668 faces of dense
@@ -242,7 +243,8 @@ public static partial class GlbDisconnectedParts
     /// <param name="tierUnit">the length a face is "small" under, for how many points and directions it is asked from:
     /// a 256th of the MODEL; asked for only when a candidate exists (null or not positive = a 256th of the group)</param>
     /// <param name="tol">how far apart "the same plane" may be: the fuse's rounding distance</param>
-    /// <param name="nonOpaque">per face: BLEND or MASK; preserved and excluded as covers and ray blockers. Null = none.</param>
+    /// <param name="nonOpaque">per face: BLEND or MASK. Such a face is never left out and never turned back, stops no ray, and
+    /// is no cover for a turn-back; an OPAQUE face that lies on it, wound the other way, is a candidate like any other. Null = none.</param>
     /// <param name="others">what else of the file stops a ray; asked for only when a candidate exists (null = nothing)</param>
     internal static CoveredFaces FindCoveredFaces(double[] corners, double tol, bool[] nonOpaque, Func<RayStop> others, int maxParallel = -1, bool[] flipped = null, Func<double> tierUnit = null)
     {
@@ -251,11 +253,15 @@ public static partial class GlbDisconnectedParts
         if (faceCount < 2) return found;
         var options = new ParallelOptions { MaxDegreeOfParallelism = maxParallel };
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        // Only opaque faces participate. Keep BLEND and MASK geometry and let visibility rays through it.
+        // BLEND and MASK geometry is kept, and visibility rays pass through it (review by another model, 2026-11-25).
+        //   It still COUNTS AS WHAT A FACE LIES ON (measured the same day on the reported ship): with such faces out of
+        //   the test altogether, the grey faces lying back to back on the Centurion's window panes stayed in - 113 of
+        //   the screenshot view's pixels had a hidden face of another material under the visible one again, against 2
+        //   in the file whose bake was seen right in game. An opaque face back to back with a pane shows its back to
+        //   whoever looks at the pane, in any renderer that culls; its front is asked of the cameras as any other's is.
         var unit = new double[3 * faceCount]; var valid = new bool[faceCount]; var skip = new bool[faceCount];
         for (int f = 0; f < faceCount; f++)
         {
-            if (nonOpaque != null && nonOpaque[f]) { skip[f] = true; continue; }
             int o = f * 9;
             double ax = corners[o + 3] - corners[o], ay = corners[o + 4] - corners[o + 1], az = corners[o + 5] - corners[o + 2];
             double bx = corners[o + 6] - corners[o], by = corners[o + 7] - corners[o + 1], bz = corners[o + 8] - corners[o + 2];
@@ -265,6 +271,8 @@ public static partial class GlbDisconnectedParts
             unit[3 * f] = nx / l; unit[3 * f + 1] = ny / l; unit[3 * f + 2] = nz / l; valid[f] = true;
         }
         var own = new TriBvh(new[] { corners }, skip, tol);
+        bool[] noStop = null;   // the faces of the group that stop no ray: null when it has none
+        if (nonOpaque != null) for (int f = 0; f < faceCount; f++) if (nonOpaque[f]) { noStop = nonOpaque; break; }
         if (own.Empty) return found;
 
         // the face's sample points: its centroid (0), three towards its corners (1-3) and its edges (4-6), then the same six at the rim (7-12)
@@ -315,7 +323,9 @@ public static partial class GlbDisconnectedParts
                 for (int i = first; i < first + count; i++)
                 {
                     int g = own.RefTri[i];
-                    if (turnedOnto ? !flipped[g] && Holds(f, g, x, y, z, true) : Holds(f, g, x, y, z, false)) return g;
+                    // a turn-back takes an outward front away: what it leaves in its place must be opaque (the other review's
+                    // fixture - a glass deck on a roof the passes had turned up)
+                    if (turnedOnto ? !flipped[g] && (noStop == null || !noStop[g]) && Holds(f, g, x, y, z, true) : Holds(f, g, x, y, z, false)) return g;
                 }
             }
             return -1;
@@ -340,7 +350,7 @@ public static partial class GlbDisconnectedParts
             var back = new bool[faceCount]; int restored = 0;
             Parallel.For(0, faceCount, options, f =>
             {
-                if (!flipped[f] || !valid[f]) return;
+                if (!flipped[f] || !valid[f] || (noStop != null && noStop[f])) return;
                 Sample(f, 0, out double x, out double y, out double z);
                 if (CoverAt(f, x, y, z, true) < 0) return;
                 int on = 1;
@@ -362,7 +372,7 @@ public static partial class GlbDisconnectedParts
         Parallel.For(0, faceCount, options, f =>
         {
             candidateOf[f] = -1;
-            if (!valid[f]) return;
+            if (!valid[f] || (noStop != null && noStop[f])) return;   // glass and masked faces are never left out
             Sample(f, 0, out double x, out double y, out double z);
             int first = CoverAt(f, x, y, z);
             if (first < 0) return;
@@ -375,7 +385,7 @@ public static partial class GlbDisconnectedParts
         found.Candidates = candidateFaces.Count; found.CoincideMs = clock.ElapsedMilliseconds; clock.Restart();
         if (candidateFaces.Count == 0) return found;
 
-        // rays, against the whole file: the group's own opaque faces (the tree above) and whatever else the
+        // rays, against the whole file: the group's own opaque faces (the tree above, its glass and masked faces passed through) and whatever else the
         // caller has. Is the face's FRONT seen by a camera? Stops at the first ray that gets out.
         RayStop rest = others?.Invoke();
         double lift = 8 * tol;
@@ -415,7 +425,7 @@ public static partial class GlbDisconnectedParts
                 {
                     Sample(f, k, out double x, out double y, out double z);
                     double ox = x + nx * lift, oy = y + ny * lift, oz = z + nz * lift;
-                    if (!own.Blocked(ox, oy, oz, dx, dy, dz) && (rest == null || !rest(ox, oy, oz, dx, dy, dz))) return true;
+                    if (!own.Blocked(ox, oy, oz, dx, dy, dz, null, noStop) && (rest == null || !rest(ox, oy, oz, dx, dy, dz))) return true;
                 }
             }
             return false;

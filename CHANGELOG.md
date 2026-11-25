@@ -4885,7 +4885,14 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     tests as they stood), a fourth took their fixes apart, and a fifth the fourth's (16 more planted defects, 12
     of which the tests let through). Versions 4 to 10 above, the report's counts, the fixtures for the surviving
     plants and the corrections to this entry are theirs.
-  - **Tests:** 60 (`Tests/GlbFuseHiddenTwinTests.cs`). 61 defects planted one at a time; 61 caught, none let through.
+  - **Two changes after the figures above** (2026-11-25; docs/Testing.md, "Hidden twins", has the measurement).
+    A review by another model: a face of a BLEND or MASK material is never left out and stops no ray, and a face is
+    turned back only when its actual corners and edge midpoints lie on the face under it. As pushed it also took
+    glass out of the coincidence test, and the grey faces lying back to back on the Centurion's window panes came
+    back (115 pixels of the screenshot's view against 2). The last head lets a glass face still be what an opaque
+    face lies on, and keeps the rest: 2 pixels, the Centurion leaves out 63,492 faces (64,361 in the figures above), and no
+    pixel of the 112 views differs between the three versions on any of the eight models.
+  - **Tests:** 70 (`Tests/GlbFuseHiddenTwinTests.cs`). 68 defects planted one at a time; 68 caught, none let through.
 
 - **A definition made in the editor is in the Pick lists at once, and a new Model Factory entry starts on Keep
   Model (2026-11-24).** Reported from the Model Factory: a pawn definition made that session
