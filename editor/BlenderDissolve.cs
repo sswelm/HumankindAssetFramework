@@ -1,10 +1,12 @@
 // BlenderDissolve.cs - bmesh.ops.dissolve_limit in C# (step (c) part 2 of the vehicle_rig port, 2026-10-16; docs/Review-Backlog.md
 // item (5)). Read at Blender 5.1.2: bmesh_decimate_dissolve.cc (BM_mesh_decimate_dissolve_ex: the EDGE phase - a heap of the
-// given edges by minus the cosine between their two faces' stored normals (contiguous winding; a non-manifold edge is never
-// dissolved), the top joined while under minus the cosine of the angle limit, each join's new face normal recomputed and its
+// given edges by minus the cosine between their two faces' stored normals (contiguous winding only: the delimit is NORMAL, the
+// unset flag slot's default, so an edge between faces wound against each other is never dissolved, as a non-manifold edge
+// is not), the top joined while under minus the cosine of the angle limit, each join's new face normal recomputed and its
 // edges re-costed; the cleanup killing every edge the joins left wire and every vertex left alone; the VERTEX phase - a heap of
 // the given vertices by their edge angle (pi minus the angle between the two edges of a two-edge vertex, 90 degrees else)
-// scaled by the face angle across one of them, the top collapsed while under the angle limit unless the collapse would
+// scaled by the face angle across one of them (not scaled when an edge of the vertex is such a delimiter), the top
+// collapsed while under the angle limit unless the collapse would
 // fold a face (the degenerate checks in the face's plane), the normals of the faces around the kept edge recomputed, the
 // edge's vertices re-costed and the vertices of those faces re-costed when they were marked invalid), bmesh_core.cc
 // (BM_faces_join: the region's boundary edges in loop order, BM_face_create_ngon winding from the first boundary loop, a
@@ -132,12 +134,35 @@ public static class BlenderDissolve
         return Deg90;
     }
 
+    // THE DELIMIT IS NORMAL, NOT 0 (2026-11-25, the Roberts monitor's railing: 123,842 vertices here, 124,369 in Blender). The
+    // script calls bmesh.ops.dissolve_limit without a delimit, and an operator's flag slot left unset is NOT empty:
+    // bmo_op_slots_init (bmesh_operators.cc) gives an INT_ENUM or INT_FLAG slot the FIRST value of its enum, and
+    // bmo_enum_dissolve_limit_flags starts with BMO_DELIM_NORMAL. So bm_edge_is_delimiter holds for a manifold edge whose two
+    // faces are wound against each other (BM_edge_is_contiguous false): it is never joined, and a vertex with such an edge in
+    // its disk (bm_vert_is_delimiter) keeps its plain edge angle. Measured in Blender 5.1.2: two coplanar triangles, one wound
+    // the other way, stay two faces with the slot unset or {'NORMAL'} and become one quad with delimit=set().
+
+    /// <summary>bm_edge_is_delimiter at delimit = BMO_DELIM_NORMAL, on a manifold edge: its two faces are wound against each other.</summary>
+    static bool EdgeIsDelimiter(BMesh bm, int e) => !EdgeIsContiguous(bm, e);
+
+    /// <summary>bm_vert_is_delimiter: a manifold edge of the vertex's disk is a delimiter.</summary>
+    static bool VertIsDelimiter(BMesh bm, int v)
+    {
+        int e = bm.VE[v], e0 = e;
+        do
+        {
+            if (bm.EdgeIsManifold(e) && EdgeIsDelimiter(bm, e)) return true;
+            e = bm.DiskEdgeNext(e, v);
+        } while (e != e0);
+        return false;
+    }
+
     static float EdgeCalcDissolveError(BMesh bm, int e)
     {
-        if (!bm.EdgeIsManifold(e)) return CostInvalid;   // delimit is 0: no delimiter
+        if (!bm.EdgeIsManifold(e) || EdgeIsDelimiter(bm, e)) return CostInvalid;
         int f1 = bm.LF[bm.EL[e]], f2 = bm.LF[bm.LRadialNext[bm.EL[e]]];
         float cosNeg = Dot3(bm.FNo[3 * f1], bm.FNo[3 * f1 + 1], bm.FNo[3 * f1 + 2], bm.FNo[3 * f2], bm.FNo[3 * f2 + 1], bm.FNo[3 * f2 + 2]);
-        if (EdgeIsContiguous(bm, e)) cosNeg = (float)(cosNeg * -1f);
+        if (EdgeIsContiguous(bm, e)) cosNeg = (float)(cosNeg * -1f);   // always, past the delimiter; kept as the C has it
         return cosNeg;
     }
 
@@ -145,7 +170,10 @@ public static class BlenderDissolve
     {
         float angle = VertCalcEdgeAngle(bm, v);
         if (bm.VE[v] != BMesh.None && bm.EdgeIsManifold(bm.VE[v]))
-            return (float)((float)((float)(angle * AngleToUnit) * (float)(EdgeCalcFaceAngle(bm, bm.VE[v]) * AngleToUnit)) * UnitToAngle);
+        {
+            if (!VertIsDelimiter(bm, v))
+                return (float)((float)((float)(angle * AngleToUnit) * (float)(EdgeCalcFaceAngle(bm, bm.VE[v]) * AngleToUnit)) * UnitToAngle);
+        }
         return angle;
     }
 
@@ -422,7 +450,7 @@ public static class BlenderDissolve
         return false;
     }
 
-    // ---------------------------------------------------------------- BM_mesh_decimate_dissolve_ex (do_dissolve_boundaries false, delimit 0)
+    // ---------------------------------------------------------------- BM_mesh_decimate_dissolve_ex (do_dissolve_boundaries false, delimit NORMAL)
 
     /// <summary>bmesh.ops.dissolve_limit(bm, angle_limit, use_dissolve_boundaries = False, verts, edges): the edges joined and the
     /// vertices collapsed under the angle, as the C does, on the given elements in their order. The caller recomputes every face
