@@ -115,6 +115,7 @@ axle disagreement, unpaired wheels, turret outliers, and visible interior geomet
 | **Detail** | A plain reduction tier of its own (**Detail reduce (%)**) for ornament/trim geometry that wants a dial between Structure and Body. No exemptions — the winding fix and doubling treat it like Body. |
 | **Shroud** | The *standing* rigging — shrouds, stays, ratlines. Cut like Rigging (dissolve + collapse on the raw mesh, no weld) by its own **Shroud reduce (%)** dial, because ratlines are the densest geometry on a sailing ship and usually want a harder cut than the running rigging. Unlike Rigging it never rides the Sail bone: it holds the mast up and stays standing while the canvas gathers. Auto-guessed from `shroud` / `ratline` in a part name. |
 | **Railing** (`A`) | Deck railings, stanchions, guard wires, ladders — hundreds of thin posts and lines that read as a faint line at game distance. Cut like Rigging and Shroud (dissolve + collapse on the raw mesh, no weld) by its own **Railing reduce (%)** dial, so the railings can take a harder cut than the structure they stand on. Rigid with the hull; never on the Sail bone. Auto-guessed from `railing` / `handrail` / `stanchion` in a part name (these were guessed Structure before). |
+| **Chain** (`N`) | Anchor chains and chain cables — links by the hundred, each a tiny closed ring, that read as one thin line at game distance. Cut like Rigging, Shroud and Railing (dissolve + collapse on the raw mesh, no weld) by its own **Chain reduce (%)** dial, so the chains can take a harder cut than the railings beside them. Rigid with the hull; never on the Sail bone. Auto-guessed from `chain` in a part name. |
 | **Ignore** (`I`) | Deleted from the generated GLB. Use for genuinely invisible internals or unwanted variants. |
 | **Window** | Glazing — portholes, bridge windows, windshields, skylights — as a reduction tier of its own (**Window reduce (%)**): panes are often dense curved or bevelled sheets that read as a flat glint at game distance. Welded within each material, then collapsed, like Detail. Guessed from `window`, `windshield`, `windscreen`, `glass` in part names. |
 | **Default / Edgecase** (`D` / `E`) | Root-weighted review markers: undecided, or deliberately parked for another pass. Default has its own catch-all dial, **Default reduce (%)** — everything you never marked, cut in one move like Body. |
@@ -470,8 +471,8 @@ and duplicate parts. Fix inside-out faces: on (128 parts flagged). Double-sided:
 through them up close; that is the source's own geometry, and doubling the hull would cost a fragment.
 
 **Reduction (%).** Rigging 90 · Shroud 85 · Structure 80 · Body 70 · Oar 63 · Sail 50 · Rudder 40 · Detail 10 ·
-Default, Turret, Gun, Window, Railing, Wheel, Flip, Preserve 0. Structure and Body are weld tiers (seams welded, then
-collapse); Shroud, Rigging and Railing are soup tiers (dissolve first, then collapse) — the dissolve keeps a planked flat
+Default, Turret, Gun, Window, Railing, Chain, Wheel, Flip, Preserve 0. Structure and Body are weld tiers (seams welded, then
+collapse); Shroud, Rigging, Railing and Chain are soup tiers (dissolve first, then collapse) — the dissolve keeps a planked flat
 surface's edges straighter at the same percentage, so a deck that smears on Structure can go to Shroud instead
 (it stays rigid with the hull either way; only the reduction differs).
 

@@ -23,6 +23,12 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   5.0 s before, 7.1 s after. **To get the fix, fuse the model again and bake it again** - nothing changes for a
   model until then. The Bake Tests' Workshop row moves on 19 sources (their fused shells lose hidden twins): re-run
   the row and re-bless those goldens.
+- **Vehicle Lab: a Chain role with its own reduce dial** (2026-11-25, user request). Anchor chains and chain cables
+  can be marked **Chain** (dropdown, or key **N**) and cut by a **Chain reduce (%)** slider in Vertices control. They
+  are reduced like Rigging, Shroud and Railing (dissolve + collapse, no weld), stay rigid with the hull, and have
+  their own Show-only filter. Part names containing `chain` are guessed Chain on a fresh probe; roles already saved
+  in a recipe are untouched. 0 = untouched. A recipe that marks no part Chain generates exactly as before.
+
 - **Model Fuser: a weld that flattens parts now says so** (2026-11-24, user report, the RSS Centurion: "Group U gets
   all messed up", "group K is missing", "the chains are also missing"). The **Fuse — weld seams closer than** dial
   stood at 2.288‰ instead of 0. It sits below the preview and keeps its value from one ship to the next, and its
