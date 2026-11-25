@@ -499,12 +499,16 @@ water plane (0.16), so the blades cross the surface on the pull and clear it on 
 itself (keel → 0) since 2026-09-20; the +2.1 this entry carried from its 09-06 bake was the old hand-dialled lift and
 floated the ship by exactly that much.
 
-**Re-fusing it.** The game's galley is the fused bake (`khelandion_2_split_fused_Spin.glb`, 2026-10-20), 15 groups with
-the three oar meshes in group O. To work on it: load this recipe, **Browse** to `khelandion_2_split_fused.glb` (the
-Output GLB follows it), **Probe**. The roles come back from that bake's lists (§3): Oar `Fused_O_Object_24`, Sail
-`Z`, Rudder `I`, Body `H`, Structure `S`, Rigging `L`, Shroud `D`, Window `A`, the rest Default. The recipe
-`khelandion_2_split_fused` holds the same roles. `tools/recipe_migrate.py` still writes a recipe for a fused file
-from its members' roles. It takes the majority of a mixed group, and on this galley that is wrong for four groups.
+**The fused galley (since 2026-10-20; the recipe since 2026-11-25).** The game's galley is the fused bake
+(`khelandion_2_split_fused_Spin.glb`): 15 groups, the three oar meshes in group O. The recipe `khelandion_2` holds it
+since 2026-11-25 (the unfused recipe above is in its `.bak~` and in `D:\Backups\HAF\2026-11-25_before-hidden-twin-rebake`).
+Roles: Oar `Fused_O_Object_24`, Sail `Z`, Rudder `I` and `F`, Body `H`, Structure `S`, Rigging `L`, Shroud `D`, Window
+`A`, the rest Default. The fused hull `Fused_B_Object_13` (138,357 vertices) is Default, so the Default dial carries the
+hull. Reduction (%): Default 50 · Rigging 85 · Shroud 80 · Structure 80 · Body 70 · Oar 60 · Sail 50 · Rudder 40 ·
+Detail 10; oar stroke, furl and registry as above. It exports 233,172 triangles in 6 meshes, the October bake's 233,398;
+at Default 0 it was 357,974. A Probe after a re-fuse takes the roles back from the last bake's lists (§3).
+`tools/recipe_migrate.py` still writes a recipe for a fused file from its members' roles; it takes the majority of a mixed
+group, and on this galley that is wrong for four groups.
 
 ## Fast symptom map
 
