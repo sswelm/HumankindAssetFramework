@@ -23,6 +23,7 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   5.0 s before, 7.1 s after. **To get the fix, fuse the model again and bake it again** - nothing changes for a
   model until then. The Bake Tests' Workshop row moves on 19 sources (their fused shells lose hidden twins): re-run
   the row and re-bless those goldens.
+
 - **Vehicle Lab: a Chain role with its own reduce dial** (2026-11-25, user request). Anchor chains and chain cables
   can be marked **Chain** (dropdown, or key **N**) and cut by a **Chain reduce (%)** slider in Vertices control. They
   are reduced like Rigging, Shroud and Railing (dissolve + collapse, no weld), stay rigid with the hull, and have
