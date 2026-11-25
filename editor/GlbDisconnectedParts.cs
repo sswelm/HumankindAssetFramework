@@ -3127,8 +3127,14 @@ public static partial class GlbDisconnectedParts
                 TriBvh file = fileCache.RayTree();
                 var ownNodes = new bool[nodes.Count]; foreach (int ni in picked) if (ni >= 0 && ni < ownNodes.Length) ownNodes[ni] = true;
                 return (ox, oy, oz, dx, dy, dz) => file.Blocked(ox, oy, oz, dx, dy, dz, ownNodes, null);
-            }, FuseParallel.MaxDegreeOfParallelism);
+            }, FuseParallel.MaxDegreeOfParallelism, flip, () => fileCache.Size(mn, mx) / 256.0);   // the model's size: the group's own box and every other node's
             drop = hiddenTwins.Drop; result.HiddenFacesRemoved = hiddenTwins.Removed;
+            if (hiddenTwins.Restore != null)
+            {
+                for (int f = 0; f < faceCount; f++) if (hiddenTwins.Restore[f]) flip[f] = false;
+                plan.TwinsRestoredLine = (plan.TwinsRestoredLine == null ? "" : plan.TwinsRestoredLine + "\n") + string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "twins: {0} face(s) the winding passes had turned lie on a face wound the same way that they had not turned - a pair authored wound both ways, cut differently - and keep their authored winding instead", hiddenTwins.Restored);
+            }
             if (hiddenTwins.Candidates > 0)
             {
                 var removedOf = new int[picked.Count];
@@ -3172,7 +3178,8 @@ public static partial class GlbDisconnectedParts
                 foreach (int f in isl) { int pp = partOf[tris[f * 3]]; byPart[pp] = byPart.TryGetValue(pp, out int pc) ? pc + 1 : 1; }
                 string parts = string.Join(", ", byPart.OrderByDescending(kv => kv.Value).Take(4).Select(kv => partNames[kv.Key] + " ×" + kv.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)))
                              + (byPart.Count > 4 ? ", +" + (byPart.Count - 4).ToString(System.Globalization.CultureInfo.InvariantCulture) + " more" : "");
-                string line = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2}, {3} rewound; {4}) — parts: {5}", isl.Count, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, islandRule[ii], turned, islandConflict[ii], parts);
+                int leftOut = 0; foreach (int f in isl) if (drop[f]) { leftOut++; if (flip[f]) turned--; }   // the row counts the faces WRITTEN, as the lines above do
+                string line = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} faces ({1:0}% boundary, {2}, {3} rewound; {4}) — parts: {5}" + (leftOut > 0 ? " — " + leftOut.ToString(System.Globalization.CultureInfo.InvariantCulture) + " more left out as hidden twins" : ""), isl.Count - leftOut, keys.Count > 0 ? 100.0 * boundary / keys.Count : 100.0, islandRule[ii], turned, islandConflict[ii], parts);
                 result.IslandLines.Add(line);   // all of them, for the report (review of 0097bd5: the report promised every island and carried six)
                 if (rows.Count < 6) rows.Add(line);
             }

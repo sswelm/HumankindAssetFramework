@@ -62,6 +62,8 @@ public static partial class GlbDisconnectedParts
     {
         public bool[] Drop;                 // per face: left out of the fused mesh
         public int Candidates, Removed, TwoSidedKept, BuriedKept, OtherKept;
+        public bool[] Restore;              // per face: the winding passes had turned it onto a face it was authored opposite to; it is back as authored (null = none)
+        public int Restored;
         public long CoincideMs, RayMs;      // finding the coincident faces (the group's tree included); the rays (the file's tree included, for the first group to ask)
     }
 
@@ -234,11 +236,14 @@ public static partial class GlbDisconnectedParts
 
     /// <summary>The faces a fuse leaves out because they lie exactly on a face wound the other way and no camera sees
     /// them (see the head of this file).</summary>
-    /// <param name="corners">nine doubles a face, in its FINAL winding</param>
+    /// <param name="corners">nine doubles a face, in its FINAL winding (a face restored to its authored winding is rewound IN this array)</param>
+    /// <param name="flipped">per face: the winding passes turned it (null = none were)</param>
+    /// <param name="tierUnit">the length a face is "small" under, for how many points and directions it is asked from:
+    /// a 256th of the MODEL; asked for only when a candidate exists (null or not positive = a 256th of the group)</param>
     /// <param name="tol">how far apart "the same plane" may be: the fuse's rounding distance</param>
     /// <param name="glass">per face: it stops no ray (a BLEND material); null = none</param>
     /// <param name="others">what else of the file stops a ray; asked for only when a candidate exists (null = nothing)</param>
-    internal static CoveredFaces FindCoveredFaces(double[] corners, double tol, bool[] glass, Func<RayStop> others, int maxParallel = -1)
+    internal static CoveredFaces FindCoveredFaces(double[] corners, double tol, bool[] glass, Func<RayStop> others, int maxParallel = -1, bool[] flipped = null, Func<double> tierUnit = null)
     {
         int faceCount = corners.Length / 9;
         var found = new CoveredFaces { Drop = new bool[faceCount] };
@@ -272,12 +277,14 @@ public static partial class GlbDisconnectedParts
             else { int c = (j - 4) * 3, n = ((j - 4 + 1) % 3) * 3; tx = (corners[o + c] + corners[o + n]) * 0.5; ty = (corners[o + c + 1] + corners[o + n + 1]) * 0.5; tz = (corners[o + c + 2] + corners[o + n + 2]) * 0.5; }
             x = cx + reach * (tx - cx); y = cy + reach * (ty - cy); z = cz + reach * (tz - cz);
         }
-        // does face g, wound the other way than f, hold the point: in its plane within the rounding, inside its outline
-        bool Holds(int f, int g, double x, double y, double z)
+        // does face g, wound the other way than f, hold the point: in its plane within the rounding, inside its outline.
+        // (`sameWay`: wound the SAME way instead - what a face the passes turned onto its authored twin looks like.)
+        bool Holds(int f, int g, double x, double y, double z, bool sameWay)
         {
             if (g == f) return false;
             double gx = unit[3 * g], gy = unit[3 * g + 1], gz = unit[3 * g + 2];
-            if (unit[3 * f] * gx + unit[3 * f + 1] * gy + unit[3 * f + 2] * gz > -0.999) return false;
+            double facing = unit[3 * f] * gx + unit[3 * f + 1] * gy + unit[3 * f + 2] * gz;
+            if (sameWay ? facing < 0.999 : facing > -0.999) return false;
             int o = g * 9;
             double px = x - corners[o], py = y - corners[o + 1], pz = z - corners[o + 2];
             if (Math.Abs(px * gx + py * gy + pz * gz) > tol) return false;
@@ -292,7 +299,7 @@ public static partial class GlbDisconnectedParts
         }
         // the face of the group, wound the other way, that the point lies on: -1 when there is none. Every leaf of the
         // group's tree whose box (widened by the rounding) holds the point is read; the tree holds only faces with a normal.
-        int CoverAt(int f, double x, double y, double z)
+        int CoverAt(int f, double x, double y, double z, bool turnedOnto = false)
         {
             int[] st = TriBvh.Stack(); int sp = 0; st[sp++] = 0;
             double[] box = own.Box;
@@ -302,9 +309,41 @@ public static partial class GlbDisconnectedParts
                 if (x < box[b] || x > box[b + 3] || y < box[b + 1] || y > box[b + 4] || z < box[b + 2] || z > box[b + 5]) continue;
                 int count = own.Count[node], first = own.First[node];
                 if (count == 0) { st[sp++] = first; st[sp++] = first + 1; continue; }
-                for (int i = first; i < first + count; i++) { int g = own.RefTri[i]; if (Holds(f, g, x, y, z)) return g; }
+                for (int i = first; i < first + count; i++)
+                {
+                    int g = own.RefTri[i];
+                    if (turnedOnto ? !flipped[g] && Holds(f, g, x, y, z, true) : Holds(f, g, x, y, z, false)) return g;
+                }
             }
             return -1;
+        }
+        // AN AUTHORED PAIR THE PASSES TURNED INTO A SAME-WAY PAIR IS TURNED BACK (second review, a fixture: a ceiling under a
+        // deck triangulated the OTHER way). The fuse keeps the authored winding of a pair wound both ways on the same
+        // corners - "an authored opposite pair is already two-sided" - but tells such a pair by its corners, and a deck
+        // cut along the other diagonal than the ceiling under it is not one by that test: the direction pass turned the
+        // ceiling up, and the fused shell carried two surfaces of two materials facing the sky in one plane, which fight
+        // under any renderer. A face the passes turned, most of which now lies on a face they did NOT turn and wound the
+        // same way, was authored opposite to it: it gets its authored winding back, and is then judged like any twin.
+        if (flipped != null)
+        {
+            var back = new bool[faceCount]; int restored = 0;
+            Parallel.For(0, faceCount, options, f =>
+            {
+                if (!flipped[f] || !valid[f]) return;
+                Sample(f, 0, out double x, out double y, out double z);
+                if (CoverAt(f, x, y, z, true) < 0) return;
+                int on = 1;
+                for (int k = 1; k < CoveredSamples; k++) { Sample(f, k, out x, out y, out z); if (CoverAt(f, x, y, z, true) >= 0) on++; }
+                if (on >= 5) back[f] = true;
+            });
+            for (int f = 0; f < faceCount; f++)
+            {
+                if (!back[f]) continue;
+                restored++;
+                int o = f * 9;   // rewound in place: the tree's boxes hold positions, which do not move
+                for (int a = 0; a < 3; a++) { double t = corners[o + 3 + a]; corners[o + 3 + a] = corners[o + 6 + a]; corners[o + 6 + a] = t; unit[3 * f + a] = -unit[3 * f + a]; }
+            }
+            if (restored > 0) { found.Restore = back; found.Restored = restored; }
         }
         // flat, by face: seven covers each and the candidate's number (review of the first cut: an int[7] and two dictionary
         // entries per candidate were a million small objects on a group of a million doubled faces)
@@ -333,11 +372,16 @@ public static partial class GlbDisconnectedParts
         double lift = 8 * tol;
         // HOW MANY POINTS OF A FACE ASK (measured on the Centurion, 2026-11-24: seven points of every face cost 36 s of
         // rays over 22 groups, most of it on faces far smaller than anything that could stand in front of part of them):
-        // the centroid and the three corners for a face shorter than a 256th of the group, the inner corner points too up
+        // the centroid and the three corners for a face shorter than a 256th of the MODEL, the inner corner points too up
         // to eight times that, all thirteen beyond.
+        //   Of the model, not of the group (second review): a group of small parts made every face of it "large" - 35 of
+        //   the Centurion's 58 million rays were asked of such faces, and 40,000 buried faces cost 39 million rays as a
+        //   hundred small groups against 1.6 million as one. What stands in front of a face is the model's, whatever
+        //   group the face is in.
         var askPoints = new int[faceCount][];
         {
-            double small = own.Extent / 256.0, large = 8 * small;
+            double unitLength = tierUnit == null ? 0 : tierUnit();
+            double small = unitLength > 0 ? unitLength : own.Extent / 256.0, large = 8 * small;
             foreach (int f in candidateFaces)
             {
                 int o = f * 9; double longest2 = 0;

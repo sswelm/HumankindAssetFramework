@@ -51,9 +51,10 @@ public class GlbFuseHiddenTwinTests
 
     static double[] V(double x, double y, double z) => new[] { x, y, z };
 
-    static GlbDisconnectedParts.CoveredFaces Find(Soup soup, Soup others = null, Func<string, bool> glass = null) =>
+    static GlbDisconnectedParts.CoveredFaces Find(Soup soup, Soup others = null, Func<string, bool> glass = null, Func<string, bool> flipped = null, double tierUnit = 0) =>
         GlbDisconnectedParts.FindCoveredFaces(soup.Corners.ToArray(), Tol, glass == null ? null : soup.Tags.Select(glass).ToArray(),
-            () => others == null ? null : new GlbDisconnectedParts.RayStop(new GlbDisconnectedParts.TriBvh(new[] { others.Corners.ToArray() }, null, 0).Blocked));
+            () => others == null ? null : new GlbDisconnectedParts.RayStop(new GlbDisconnectedParts.TriBvh(new[] { others.Corners.ToArray() }, null, 0).Blocked),
+            -1, flipped == null ? null : soup.Tags.Select(flipped).ToArray(), tierUnit > 0 ? () => tierUnit : (Func<double>)null);
 
     // every face normal points away from the box's centre: the fixture is what its comments say
     [Fact]
@@ -70,13 +71,53 @@ public class GlbFuseHiddenTwinTests
         }
     }
 
-    // THE SHIP'S CASE: a house whose own top face is wound down, and a deck laid on it, triangulated the other way
+    // THE SHIP'S CASE: a house whose own top face is wound down, and a deck laid on it. The two are cut along the SAME
+    // diagonal here (the deck's `otherDiagonal` undoes its reversed corner order), so through the fuse they are a pair
+    // on the same corners; the deck cut the other way is `CrossedHouseWithDeck` below (second review: this helper was
+    // first described as the crossed one, and the crossed one did not get through the fuse).
     static Soup HouseWithDeck(params string[] skipWalls)
     {
         var s = new Soup().Box("house", V(0, 0, 0), V(10, 10, 10), false, skipWalls.Concat(new[] { "top" }).ToArray());
         s.Quad("house:ceiling", V(0, 10, 0), V(10, 10, 0), V(10, 10, 10), V(0, 10, 10));                 // the top, wound DOWN
         s.Quad("deck", V(0, 10, 10), V(10, 10, 10), V(10, 10, 0), V(0, 10, 0), otherDiagonal: true);     // the deck, wound UP
         return s;
+    }
+
+    static Soup CrossedHouseWithDeck()
+    {
+        var s = new Soup().Box("house", V(0, 0, 0), V(10, 10, 10), false, "top");
+        s.Quad("house:ceiling", V(0, 10, 0), V(10, 10, 0), V(10, 10, 10), V(0, 10, 10));   // wound DOWN, cut (0,0)-(10,10) in x and z
+        s.Quad("deck", V(0, 10, 10), V(10, 10, 10), V(10, 10, 0), V(0, 10, 0));            // wound UP, cut (0,10)-(10,0): the other diagonal
+        return s;
+    }
+
+    [Fact]
+    public void A_ceiling_under_a_deck_cut_the_other_way_is_left_out()
+    {
+        Soup s = CrossedHouseWithDeck();
+        var found = Find(s);
+        Assert.Equal(new[] { "house:ceiling" }, s.Dropped(found));
+        Assert.Equal(2, found.Removed); Assert.Equal(4, found.Candidates);
+    }
+
+    // THE PASSES TURNED IT, AND IT IS TURNED BACK: the same ceiling handed over as the winding passes left it in the fuse -
+    // wound UP, marked as turned - on a deck they did not turn. It was authored opposite to the deck: back it goes, and out.
+    [Fact]
+    public void A_face_the_passes_turned_onto_its_authored_twin_is_turned_back_and_left_out()
+    {
+        var s = new Soup().Box("house", V(0, 0, 0), V(10, 10, 10), false, "top");
+        s.Quad("house:ceiling", V(0, 10, 10), V(10, 10, 10), V(10, 10, 0), V(0, 10, 0), otherDiagonal: true);   // as the passes left it: UP
+        s.Quad("deck", V(0, 10, 10), V(10, 10, 10), V(10, 10, 0), V(0, 10, 0));                                 // UP, the other diagonal
+        var found = Find(s, flipped: t => t == "house:ceiling");
+        Assert.Equal(2, found.Restored);
+        Assert.Equal(new[] { "house:ceiling" }, Enumerable.Range(0, s.Count).Where(f => found.Restore[f]).Select(f => s.Tags[f]).Distinct().ToArray());
+        Assert.Equal(new[] { "house:ceiling" }, s.Dropped(found));
+        // ...not turned by the passes, the same two surfaces are a pair wound the same way: a different defect, left alone
+        var same = Find(s);
+        Assert.Null(same.Restore); Assert.Equal(0, same.Candidates); Assert.Empty(s.Dropped(same));
+        // ...and BOTH turned by the passes they are no authored pair either: nothing to turn back
+        var both = Find(s, flipped: t => t == "house:ceiling" || t == "deck");
+        Assert.Null(both.Restore); Assert.Empty(s.Dropped(both));
     }
 
     [Fact]
@@ -443,6 +484,9 @@ public class GlbFuseHiddenTwinTests
         var found = Find(s);
         Assert.Empty(s.Dropped(found));
         Assert.Equal(4, found.TwoSidedKept);
+        // ...and the size that makes a face "large" is the MODEL's when the fuse gives it: in a model 20,000 units long this
+        // strip is a small face, asked from the eight directions, and the slit lies between them
+        Assert.Equal(new[] { "strip:slit" }, s.Dropped(Find(s, tierUnit: 20000.0 / 256)));
         // ...and with the slit closed it is hidden: the fixture can tell
         var shut = new Soup();
         shut.Quad("strip:slit", V(0, 0, 40), V(0, 0, 0), V(0, 1, 0), V(0, 1, 40));
@@ -582,8 +626,8 @@ public class GlbFuseHiddenTwinTests
     static JArray Materials(params string[] alphaModes) =>
         new JArray(alphaModes.Select((m, i) => { var j = new JObject { ["name"] = "m" + i }; if (m != null) j["alphaMode"] = m; return j; }));
 
-    // per material of the fused node: the triangles as written, each with its normal's Y and its centroid's Y
-    static Dictionary<int, List<(double normalY, double height)>> FusedTriangles(byte[] glb, string nodeName)
+    // per material of the fused node: the triangles as written, each with its normal's Y and its centroid's Y (or X, or Z: `axis`)
+    static Dictionary<int, List<(double normalY, double height)>> FusedTriangles(byte[] glb, string nodeName, int axis = 1)
     {
         uint jsonLen = BitConverter.ToUInt32(glb, 12);
         JObject root = JObject.Parse(Encoding.UTF8.GetString(glb, 20, (int)jsonLen));
@@ -602,7 +646,7 @@ public class GlbFuseHiddenTwinTests
                 for (int c = 0; c < 3; c++) { int i = (int)BitConverter.ToUInt32(glb, idxAt + 4 * (t + c)); for (int a = 0; a < 3; a++) p[3 * c + a] = BitConverter.ToSingle(glb, posAt + 12 * i + 4 * a); }
                 double nx = (p[4] - p[1]) * (p[8] - p[2]) - (p[5] - p[2]) * (p[7] - p[1]), ny = (p[5] - p[2]) * (p[6] - p[0]) - (p[3] - p[0]) * (p[8] - p[2]), nz = (p[3] - p[0]) * (p[7] - p[1]) - (p[4] - p[1]) * (p[6] - p[0]);
                 double l = Math.Sqrt(nx * nx + ny * ny + nz * nz);
-                list.Add((ny / l, (p[1] + p[4] + p[7]) / 3));
+                list.Add(((axis == 0 ? nx : axis == 1 ? ny : nz) / l, (p[axis] + p[3 + axis] + p[6 + axis]) / 3));
             }
             result[prim.Value<int?>("material") ?? -1] = list;
         }
@@ -746,19 +790,105 @@ public class GlbFuseHiddenTwinTests
         Assert.All(top, v => Assert.Equal(0.0, v.ny, 6));
     }
 
-    // JUDGED ON THE FINAL WINDING: a house stored inside out with a deck on it. The fuse turns the house, top included, so
-    // the top and the deck end up wound the SAME way - a different defect, left alone. Judged as stored, the top would
-    // have been the deck's twin and gone.
+    // TURNED BACK AND KEPT (a planted defect the fixtures below let through: they all leave the face out, and a face left
+    // out is written in no winding at all). A crate stored inside out and open at the top, its east wall on a larger panel
+    // that faces away from it. The fuse turns the crate; the wall then faces the same way as the panel, and is turned
+    // back - and it stays, because the crate is open and its inside shows. It is WRITTEN as authored, facing into the crate.
     [Fact]
-    public void Twins_are_judged_after_the_winding_passes()
+    public void A_face_turned_back_and_kept_is_written_as_authored()
+    {
+        var s = new Soup().Box("crate", V(0, 0, 0), V(10, 10, 10), true, "top");
+        s.Quad("panel", V(10, -5, 15), V(10, -5, -5), V(10, 15, -5), V(10, 15, 15));                             // faces +X
+        byte[] glb = BuildGlb(Materials(null, null), PartOf("Crate", 0, s, t => t.StartsWith("crate")), PartOf("Panel", 1, s, t => t == "panel"));
+        var r = GlbDisconnectedParts.FuseNodes(glb, new[] { 0, 1 }, 0, "Fused");
+        Assert.Equal(0, r.HiddenFacesRemoved); Assert.Equal(12, r.OutputTriangles);
+        Assert.Contains(r.Details, d => d.Contains("keep their authored winding instead") && d.Contains("2 face(s) the winding passes had turned"));
+        Assert.Contains("kept: 2 whose pair shows on both sides", Assert.Single(r.Details, d => d.StartsWith("hidden twins:")));
+        Assert.Equal(8, r.FacesRewound);                                                                         // the floor and three walls
+        var tris = FusedTriangles(r.Bytes, r.FusedNodeName, axis: 0);
+        var east = tris[0].Where(t => Math.Abs(t.height - 10) < 1e-6).ToList();
+        Assert.Equal(2, east.Count);
+        Assert.All(east, t => Assert.Equal(-1.0, t.normalY, 6));                                                 // into the crate, as stored
+        Assert.All(tris[0].Where(t => Math.Abs(t.height) < 1e-6), t => Assert.Equal(-1.0, t.normalY, 6));        // the west wall was turned: outward
+        Assert.All(tris[1], t => Assert.Equal(1.0, t.normalY, 6));                                               // the panel, untouched
+    }
+
+    // A GROUP IS JUDGED AS FUSED, NOT AS STORED (a planted defect the glass fixture above stopped catching once glass was
+    // left out of the file's tree per primitive): a flag beside a trough stored inside out and open at the top, in one
+    // group. As fused, the trough's near wall has its back to every camera the flag's far side is seen from, and the rays
+    // leave through the open top. The file's copy of that wall is wound as stored - front to those cameras - and a group
+    // that asked the file about its own nodes would take the flag's far side for hidden.
+    [Fact]
+    public void A_group_is_judged_as_fused_not_as_stored()
+    {
+        Soup Fixture(params string[] open)
+        {
+            var s = new Soup();
+            s.Quad("flag:a", V(10, 0, 10), V(10, 0, 0), V(10, 10, 0), V(10, 10, 10)); s.Quad("flag:b", V(10, 10, 10), V(10, 10, 0), V(10, 0, 0), V(10, 0, 10));
+            return s.Box("trough", V(11, 0, -10), V(21, 40, 20), true, open);
+        }
+        GlbDisconnectedParts.Result Fuse(Soup s)
+        {
+            var other = new Soup().Box("crate", V(-80, 0, 0), V(-70, 10, 10));
+            byte[] glb = BuildGlb(Materials(null, null), PartOf("Flag", 0, s, t => t.StartsWith("flag")), PartOf("Trough", 1, s, t => t.StartsWith("trough")), PartOf("Crate", 0, other, t => true));
+            var jobs = new List<GlbDisconnectedParts.FuseJob>
+            {
+                new GlbDisconnectedParts.FuseJob { NodeIndices = new List<int> { 0, 1 }, Name = "Fused_A" },
+                new GlbDisconnectedParts.FuseJob { NodeIndices = new List<int> { 2 }, Name = "Fused_B" },   // a second group: the cache is the shared one
+            };
+            GlbDisconnectedParts.FuseGroups(glb, jobs, 0, out List<GlbDisconnectedParts.Result> results);
+            return results[0];
+        }
+        var r = Fuse(Fixture("top"));
+        Assert.Equal(10, r.FacesRewound);                                                                        // the trough was turned
+        Assert.Equal(0, r.HiddenFacesRemoved); Assert.Equal(14, r.OutputTriangles);
+        Assert.Contains("kept: 4 whose pair shows on both sides", Assert.Single(r.Details, d => d.StartsWith("hidden twins:")));
+        // ...and with a lid on the trough no ray leaves it: the flag's far side IS hidden, so the fixture can tell
+        var lid = Fuse(Fixture());
+        Assert.Equal(12, lid.FacesRewound); Assert.Equal(2, lid.HiddenFacesRemoved);
+    }
+
+    // THROUGH THE FUSE, THE DECK CUT THE OTHER WAY (second review; it failed on the first two cuts): the fuse's direction
+    // pass turns the ceiling up - cut differently, it is no "pair on the same corners" to the fuse - and the rule turns
+    // it back and leaves it out. One surface, the deck's.
+    [Fact]
+    public void The_fuse_leaves_out_a_ceiling_under_a_deck_cut_the_other_way()
+    {
+        Soup s = CrossedHouseWithDeck();
+        byte[] glb = BuildGlb(Materials(null, null), PartOf("House", 0, s, t => t.StartsWith("house")), PartOf("Deck", 1, s, t => t == "deck"));
+        var r = GlbDisconnectedParts.FuseNodes(glb, new[] { 0, 1 }, 0, "Fused");
+        Assert.Equal(2, r.HiddenFacesRemoved); Assert.Equal(12, r.OutputTriangles); Assert.Equal(0, r.FacesRewound);
+        var tris = FusedTriangles(r.Bytes, r.FusedNodeName);
+        Assert.DoesNotContain(tris[0], t => Math.Abs(t.height - 10) < 1e-6);                                     // nothing of the house in the deck's plane
+        Assert.All(tris[1], t => { Assert.Equal(1.0, t.normalY, 6); Assert.Equal(10.0, t.height, 6); });
+        Assert.Contains(r.Details, d => d.Contains("keep their authored winding instead") && d.Contains("2 face(s) the winding passes had turned"));
+    }
+
+    // A HOUSE STORED INSIDE OUT with a deck on it: the fuse turns the house, its top included - and the top, authored
+    // opposite to the deck, is turned back and left out. The walls and the floor stay turned.
+    [Fact]
+    public void A_top_the_fuse_turned_onto_its_deck_is_turned_back_and_left_out()
     {
         var s = new Soup().Box("house", V(0, 0, 0), V(10, 10, 10), inward: true);
         s.Quad("deck", V(0, 10, 10), V(10, 10, 10), V(10, 10, 0), V(0, 10, 0), otherDiagonal: true);
         byte[] glb = BuildGlb(Materials(null, null), PartOf("House", 0, s, t => t.StartsWith("house")), PartOf("Deck", 1, s, t => t == "deck"));
         var r = GlbDisconnectedParts.FuseNodes(glb, new[] { 0, 1 }, 0, "Fused");
-        Assert.Equal(12, r.FacesRewound); Assert.Equal(0, r.HiddenFacesRemoved); Assert.Equal(14, r.OutputTriangles);
+        Assert.Equal(2, r.HiddenFacesRemoved); Assert.Equal(12, r.OutputTriangles);
+        Assert.Equal(10, r.FacesRewound);                                                                        // four walls and the floor
         var tris = FusedTriangles(r.Bytes, r.FusedNodeName);
-        Assert.Equal(2, tris[0].Count(t => Math.Abs(t.height - 10) < 1e-6 && t.normalY > 0.99));   // the house's top, now up
+        Assert.DoesNotContain(tris[0], t => Math.Abs(t.height - 10) < 1e-6);
+        Assert.Equal(2, tris[1].Count(t => t.normalY > 0.99));
+    }
+
+    // every island row of the report counts the faces written: they add up to the shell
+    [Fact]
+    public void The_island_rows_count_the_faces_written()
+    {
+        Soup s = HouseWithDeck();
+        byte[] glb = BuildGlb(Materials(null, null), PartOf("House", 0, s, t => t.StartsWith("house")), PartOf("Deck", 1, s, t => t == "deck"));
+        var r = GlbDisconnectedParts.FuseNodes(glb, new[] { 0, 1 }, 0, "Fused");
+        Assert.Equal(r.OutputTriangles, r.IslandLines.Sum(l => int.Parse(l.Substring(0, l.IndexOf(' ')))));
+        Assert.Contains(r.IslandLines, l => l.EndsWith("2 more left out as hidden twins"));
     }
 
     // THE ROUNDING IS THE GROUP'S OWN: a pair ten roundings apart (0.00002 on a group two units long) is not a pair of

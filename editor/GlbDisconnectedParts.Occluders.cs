@@ -123,6 +123,17 @@ public static partial class GlbDisconnectedParts
             return r;
         }
 
+        /// <summary>The longest side of the box round every node read (0 when nothing was read).</summary>
+        internal double Size(double[] alsoLo, double[] alsoHi)
+        {
+            if (System.Threading.Volatile.Read(ref nodes) == null) lock (gate) { if (nodes == null) Build(); }
+            var l = (double[])alsoLo.Clone(); var h = (double[])alsoHi.Clone();
+            for (int ni = 0; ni < lo.Length; ni++)
+                if (lo[ni] != null) for (int a = 0; a < 3; a++) { if (lo[ni][a] < l[a]) l[a] = lo[ni][a]; if (hi[ni][a] > h[a]) h[a] = hi[ni][a]; }
+            double size = 0; for (int a = 0; a < 3; a++) if (h[a] - l[a] > size) size = h[a] - l[a];
+            return double.IsInfinity(size) || double.IsNaN(size) ? 0 : size;
+        }
+
         // the array without the runs [first, past) listed: itself when there are none
         static double[] WithoutRuns(double[] corners, int[] runs)
         {

@@ -13,12 +13,13 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   camera above the horizon can see its front and the other side is seen, so one surface remains. Kept as they are: a
   pair that shows on both sides (a flag, a boat's shell with a painted inside), a pair nothing sees, and faces lying on
   each other wound the SAME way. Glass hides nothing. With a non-zero weld the pass is not run and the report says so.
+  A face that the fuse's own winding passes had turned onto its authored twin gets its authored winding back first.
   A fused part can therefore have fewer triangles than its sources: the status line ends with `N hidden twin face(s)
-  left out` and the report's `hidden twins:` line names the parts. On that ship the fuse leaves out 64,955 of 468,161
+  left out` and the report's `hidden twins:` line names the parts. On that ship the fuse leaves out 64,361 of 468,161
   triangles; nine culled views from above the horizon change in 0 of 826,178 pixels, and from the report's screenshot
   angle the hidden faces lying under a visible one of another material go from 43,265 pixels to 2. Fuse time on it:
-  5.8 s before, 11.2 s after. **To get the fix, fuse the model again and bake it again** - nothing changes for a
-  model until then. The Bake Tests' Workshop row moves on 18 sources (their fused shells lose hidden twins): re-run
+  4.9 s before, 6.9 s after. **To get the fix, fuse the model again and bake it again** - nothing changes for a
+  model until then. The Bake Tests' Workshop row moves on 19 sources (their fused shells lose hidden twins): re-run
   the row and re-bless those goldens.
 - **Model Fuser: a weld that flattens parts now says so** (2026-11-24, user report, the RSS Centurion: "Group U gets
   all messed up", "group K is missing", "the chains are also missing"). The **Fuse — weld seams closer than** dial
