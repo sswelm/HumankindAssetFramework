@@ -142,6 +142,14 @@ first member, so changing the membership renames it — a re-Probe carries the r
 fresh row with the same `Fused_<group>_` prefix and says so in the status. The source-skeleton fast path leaves meshes as authored, so it ignores placement
 and says so in the log.
 
+**Re-pointed at a fused file.** A fuse renames every part it groups, so the roles kept by name have nothing to land on.
+A re-Probe gives each part that is new to the session the role it was last generated with (the lists Generate writes
+beside the Output GLB: `<output>_oars.txt`, `_sails.txt`, ...). A part never generated takes the role its fuse-group
+members share, read from `<source>.fuse-report.txt`; a group whose members disagree stays undecided and the status names
+it with its members' roles. A part the session already listed keeps the role it has, Default included, and
+**＜new model＞** starts from nothing. So after a probe that came back undecided, **Reload** the recipe before
+probing again.
+
 ## 4. Tune and generate
 
 For ordinary wheels, leave **Axle axis = Auto**, **Spin frames = 15**, and start with one full turn. If the wheels roll
@@ -491,11 +499,12 @@ water plane (0.16), so the blades cross the surface on the pull and clear it on 
 itself (keel → 0) since 2026-09-20; the +2.1 this entry carried from its 09-06 bake was the old hand-dialled lift and
 floated the ship by exactly that much.
 
-**Re-fusing it.** The source predates the Fuser. If it is ever fused, leave the oar, sail and rudder meshes OUT of every
-⊕ group — unfused parts keep their names and so keep their recipe entries — and run
-`python tools/recipe_migrate.py <recipe.json> <fused.glb.fuse-report.txt> <new recipe.json>` for the rest: each group
-becomes one entry carrying its members' role (a mixed group is flagged), the dials and clips are untouched, the Lab's
-Probe refreshes the part boxes on the next load.
+**Re-fusing it.** The game's galley is the fused bake (`khelandion_2_split_fused_Spin.glb`, 2026-10-20), 15 groups with
+the three oar meshes in group O. To work on it: load this recipe, **Browse** to `khelandion_2_split_fused.glb` (the
+Output GLB follows it), **Probe**. The roles come back from that bake's lists (§3): Oar `Fused_O_Object_24`, Sail
+`Z`, Rudder `I`, Body `H`, Structure `S`, Rigging `L`, Shroud `D`, Window `A`, the rest Default. The recipe
+`khelandion_2_split_fused` holds the same roles. `tools/recipe_migrate.py` still writes a recipe for a fused file
+from its members' roles. It takes the majority of a mixed group, and on this galley that is wrong for four groups.
 
 ## Fast symptom map
 

@@ -291,5 +291,78 @@ namespace HumankindAssetFramework.Tests
             Assert.Null(VehicleLabRules.SourceGuardRefusal("C:/Models/tank.glb", "  ", "C:/Models/tank_rig.glb"));   // no second model
             Assert.Null(VehicleLabRules.SourceGuardRefusal("C:/Models/ta\0nk.glb", "", "C:/Models/tank_rig.glb"));  // malformed: not this guard's verdict
         }
+
+        // THE RE-FUSED GALLEY (2026-11-25): the report's own lines, cut from khelandion_2_split_fused.glb.fuse-report.txt.
+        const string GalleyReport =
+            "Model Workshop fuse report\r\nsource: D:/3DModels/Khalandion/khelandion_2_split.glb\r\noutput: D:/3DModels/Khalandion/khelandion_2_split_fused.glb\r\ngroups: 15\r\n\r\n" +
+            "== group O — 3 part(s)\r\nparts: Object_24, Object_25, Object_26\r\n" +
+            "Fused 3 part(s) -> 'Fused_O_Object_24': 26130 -> 25644 verts (seams welded within 0 = 0‰ of 10); islands 192 -> 192\r\n" +
+            "rewound by part: Object_24 0/8640; Object_25 0/11328; Object_26 0/7680\r\n  1144 faces (parts: Object_24 ×9)\r\n\r\n" +
+            "== group B — 3 part(s)\r\nparts: Object_13, Object_21, Object_20_Part_003\r\n" +
+            "Fused 3 part(s) -> 'Fused_B_Object_13': 295026 -> 138357 verts\r\n\r\n" +
+            "== group Q — 2 part(s)\r\nparts: Object_90, Object_91\r\n" +
+            "Fused 2 part(s) -> 'Fused_Q_Object_90': 10 -> 8 verts\r\n";
+
+        [Fact]
+        public void A_fuse_report_names_each_fused_part_with_its_members()
+        {
+            var g = VehicleLabRules.FuseReportGroups(GalleyReport);
+            Assert.Equal(new[] { "Fused_B_Object_13", "Fused_O_Object_24", "Fused_Q_Object_90" }, g.Keys.OrderBy(k => k).ToArray());
+            Assert.Equal(new[] { "Object_24", "Object_25", "Object_26" }, g["Fused_O_Object_24"]);
+            Assert.Equal(new[] { "Object_13", "Object_21", "Object_20_Part_003" }, g["Fused_B_Object_13"]);
+            Assert.Empty(VehicleLabRules.FuseReportGroups("parts: a, b\nFused 2 part(s) -> 'X'\n"));   // no group header: not a group
+            Assert.Empty(VehicleLabRules.FuseReportGroups(null));
+        }
+
+        [Fact]
+        public void The_last_Generate_s_lists_name_the_roles_and_a_name_in_two_lists_decides_nothing()
+        {
+            var got = VehicleLabRules.LastGenerateRoles(new[] {
+                new KeyValuePair<int, IEnumerable<string>>(13, new[] { "Fused_O_Object_24", "", "  " }),
+                new KeyValuePair<int, IEnumerable<string>>(14, new[] { "Fused_Z_Object_6 ", "Torn" }),
+                new KeyValuePair<int, IEnumerable<string>>(3, new[] { "Torn", "Torn" }),
+                new KeyValuePair<int, IEnumerable<string>>(3, new[] { "Torn" }),   // a third list cannot bring a torn name back
+                new KeyValuePair<int, IEnumerable<string>>(4, null),
+            });
+            Assert.Equal(2, got.Count);
+            Assert.Equal(13, got["Fused_O_Object_24"]);
+            Assert.Equal(14, got["Fused_Z_Object_6"]);
+            Assert.False(got.ContainsKey("Torn"));
+        }
+
+        [Fact]
+        public void A_part_new_to_the_session_takes_the_last_Generate_s_role_else_its_members_one_role()
+        {
+            const int Default = 4, Ignore = 3, Oar = 13, Structure = 16, Rigging = 15;
+            var groups = VehicleLabRules.FuseReportGroups(GalleyReport);
+            var session = new Dictionary<string, int> {
+                { "Object_24", Oar }, { "Object_25", Oar }, { "Object_26", Oar },
+                { "Object_13", Ignore }, { "Object_21", Structure }, { "Object_20_Part_003", Structure },
+                { "Object_90", Default }, { "Object_91", Default },
+            };
+            // no Generate yet: the oars come back from their members, the mixed hull group is named, the all-Default group decides nothing
+            var got = VehicleLabRules.RecoverFreshRoles(new[] { "Fused_O_Object_24", "Fused_B_Object_13", "Fused_Q_Object_90", "Unrelated" },
+                null, groups, session, Default, out var undecided);
+            Assert.Single(got);
+            Assert.Equal(("Fused_O_Object_24", Oar, "fuse group"), (got[0].Name, got[0].Role, got[0].From));
+            Assert.Single(undecided);
+            Assert.Equal("Fused_B_Object_13", undecided[0].Name);
+            Assert.Equal(1, undecided[0].MemberRoles[Ignore]);
+            Assert.Equal(2, undecided[0].MemberRoles[Structure]);
+
+            // a member the session never listed does not vote: one listed Structure member decides the group
+            var partial = new Dictionary<string, int> { { "Object_21", Structure } };
+            var got2 = VehicleLabRules.RecoverFreshRoles(new[] { "Fused_B_Object_13" }, null, groups, partial, Default, out var und2);
+            Assert.Equal(Structure, Assert.Single(got2).Role);
+            Assert.Empty(und2);
+
+            // the last Generate's record wins over the members: the galley's hull group was baked as Rigging
+            var last = new Dictionary<string, int> { { "Fused_B_Object_13", Rigging }, { "Fused_Q_Object_90", Default } };
+            var got3 = VehicleLabRules.RecoverFreshRoles(new[] { "Fused_O_Object_24", "Fused_B_Object_13", "Fused_Q_Object_90" },
+                last, groups, session, Default, out var und3);
+            Assert.Equal(new[] { ("Fused_O_Object_24", Oar, "fuse group"), ("Fused_B_Object_13", Rigging, "last Generate"), ("Fused_Q_Object_90", Default, "last Generate") },
+                got3.Select(r => (r.Name, r.Role, r.From)).ToArray());
+            Assert.Empty(und3);
+        }
     }
 }

@@ -1652,6 +1652,10 @@ public class VehicleLabWindow : EditorWindow
         var keptBones = new Dictionary<string, Role>();
         foreach (var b0 in boneParts) if (b0.role != Role.Default) keptBones[b0.name] = b0.role;
         bool hadBones = boneParts.Count > 0;
+        // every part the session listed, Default included: a name not in here is NEW to the session (see RecoverFreshRoles below)
+        var sessionRoles = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var p0 in parts) sessionRoles[p0.name] = (int)p0.role;
+        var fresh = new List<Part>();
         // The session is NOT touched until a probe has actually succeeded (external review P1: the old
         // clear-first flow meant a failed probe — a typo'd second-model path, a crashed Blender — erased
         // every marking and the preview before the error was even known). Parse into fresh lists; swap in
@@ -1731,6 +1735,7 @@ public class VehicleLabWindow : EditorWindow
                    : low.Contains("rotor") || low.Contains("helix") || low.Contains("blade") || low.Contains("propeller") ? Role.Rotor
                    : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
                    : low.Contains("turret") ? Role.Turret : Role.Default;
+            if (!rigBone && !inherited.HasValue && !sessionRoles.ContainsKey(p.name)) fresh.Add(p);
             (rigBone ? newBoneParts : newParts).Add(p);
         }
         if (rejected.Count > 0)
@@ -1763,8 +1768,50 @@ public class VehicleLabWindow : EditorWindow
                 if (kept.TryGetValue(old, out var r0)) { t.role = r0; what.Add("role " + r0); }
                 if (keptPlace.TryGetValue(old, out var pl)) { t.offset = pl.off; t.scale = pl.scl; what.Add("placement"); }
                 migrated.Add($"{old} → {t.name} ({string.Join(" + ", what)})");
+                fresh.Remove(t);   // the rename is the session's own word for this part
+
             }
             if (migrated.Count > 0) Debug.Log("[VehicleLab] fused group(s) renamed by the Fuser — markings carried over by group: " + string.Join("; ", migrated));
+        }
+        // PARTS NEW TO THE SESSION (2026-11-25, the re-fused Khelandion: every row came back Default) take the role the last
+        // Generate of the Output GLB baked them with, else the one role their fuse group's members hold (VehicleLabRules.
+        // RecoverFreshRoles). Only when the session HAD parts: <new model> is the deliberate fresh start.
+        string recoveredNote = "";
+        if (fresh.Count > 0 && sessionRoles.Count > 0)
+        {
+            Dictionary<string, int> lastGen = null;
+            if (!string.IsNullOrEmpty(outGlb))
+            {
+                string bn = Path.GetFileNameWithoutExtension(outGlb);
+                var lists = new List<KeyValuePair<int, IEnumerable<string>>>();
+                foreach (var kv in VehicleRigArgLine.RoleOfNamesFile)
+                {
+                    string f = Path.Combine(projRoot, prevDir, bn + "_" + kv.Key + ".txt");
+                    try { if (File.Exists(f)) lists.Add(new KeyValuePair<int, IEnumerable<string>>(kv.Value, File.ReadAllLines(f))); }
+                    catch (Exception e) { Debug.LogWarning("[VehicleLab] probe: could not read the last Generate's role list " + f + ": " + e.Message); }
+                }
+                lastGen = VehicleLabRules.LastGenerateRoles(lists);
+            }
+            Dictionary<string, string[]> groups = null;
+            string report = (srcFile ?? "").Trim() + ".fuse-report.txt";
+            try { if (File.Exists(report)) groups = VehicleLabRules.FuseReportGroups(File.ReadAllText(report)); }
+            catch (Exception e) { Debug.LogWarning("[VehicleLab] probe: could not read the fuse report " + report + ": " + e.Message); }
+            var got = VehicleLabRules.RecoverFreshRoles(fresh.Select(x => x.name), lastGen, groups, sessionRoles, (int)Role.Default, out var undecided);
+            var byName = fresh.ToDictionary(x => x.name, StringComparer.Ordinal);
+            foreach (var g in got) byName[g.Name].role = (Role)g.Role;
+            var notes = new List<string>();
+            int fromGen = got.Count(g => g.From == "last Generate" && g.Role != (int)Role.Default), fromGroup = got.Count(g => g.From == "fuse group");
+            if (fromGen > 0) notes.Add($"{fromGen} from the last Generate of {Path.GetFileName(outGlb)}");
+            if (fromGroup > 0) notes.Add($"{fromGroup} from their fuse group's members");
+            string undecidedText = string.Join("; ", undecided.Select(u => u.Name + " (" + string.Join(", ", u.MemberRoles.OrderByDescending(kv => kv.Value).Select(kv => (Role)kv.Key + " ×" + kv.Value)) + ")"));
+            if (notes.Count > 0 || undecided.Count > 0)
+            {
+                recoveredNote = (notes.Count > 0 ? $" · {fresh.Count} part(s) new to this session; roles taken: {string.Join(", ", notes)}" : "") +
+                                (undecided.Count > 0 ? $" · {undecided.Count} fused part(s) left undecided, their members disagree: {undecidedText}" : "");
+                Debug.Log("[VehicleLab] probe: roles for the parts new to this session —\n  " +
+                    string.Join("\n  ", got.Select(g => $"{g.Name} = {(Role)g.Role} ({g.From})")) +
+                    (undecided.Count > 0 ? "\n  undecided (members disagree): " + undecidedText : ""));
+            }
         }
         parts.Clear(); parts.AddRange(newParts);
         boneParts.Clear(); boneParts.AddRange(newBoneParts);
@@ -1785,6 +1832,7 @@ public class VehicleLabWindow : EditorWindow
               $"Probed {parts.Count} part(s); {parts.Count(x => x.role == Role.Wheel)} wheel(s), {parts.Count(x => x.role == Role.Turret)} turret(s)" +
               (kept.Count > 0 ? $" ({parts.Count(x => kept.ContainsKey(x.name) && x.role == kept[x.name])} of {kept.Count} earlier markings kept)" : " (auto-guessed)") +
               (migrated.Count > 0 ? $" · {migrated.Count} renamed fused group(s) carried over: {string.Join("; ", migrated)}" : "") +
+              recoveredNote +
               ". Click a row to see WHICH part it is (zoom + yellow highlight), assign roles, then Generate rig.";
         // THE PREVIEW WAS EXPORTED BEFORE THE MIGRATION (PR #74 review P2). Blender ran with the placement list
         // written from the OLD names: it warned "no such part", exported unplaced geometry, and only then did the
