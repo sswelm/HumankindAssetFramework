@@ -1403,13 +1403,58 @@ public static class WorkshopRules
         public IList<string> Islands;   // EVERY island's verdict (Details carries the largest six for the status) — review of 0097bd5
     }
 
+    /// <summary>
+    /// The first lines of the Fuser's status when a non-zero weld took the detail out of groups (2026-11-24, RSS
+    /// Centurion: the dial stood at 2.288‰ under the preview, three groups came out as shards or not at all, and the
+    /// only trace was a "collapsed" count inside a 29 MB report). Null when no group was damaged. One entry per
+    /// damaged group: its letter, the faces flattened to nothing, and the face and part counts with area at dial 0.
+    /// The surface and part losses are measured against the dial-0 fuse.
+    /// </summary>
+    public static string WeldDamageSummary(double weldPermille, IList<(string letter, int flattened, int faces, double before, double after, int partsGone, int parts)> damaged)
+    {
+        if (damaged == null || damaged.Count == 0) return null;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var sb = new System.Text.StringBuilder();
+        sb.Append("⚠ WELD DAMAGE IN ").Append(damaged.Count).Append(damaged.Count == 1 ? " GROUP" : " GROUPS").Append(": the weld dial is at ")
+          .Append(WeldText(weldPermille)).Append("‰, not 0. Unless you raised it to close gaps, set \"Fuse — weld seams closer than\" (below the preview) to 0 and Fuse again.\n");
+        // The worst first, and six at most: the Centurion had twenty, and the status box is for the one thing to do next
+        // (the report file carries every group's own warning line). Worst = the smaller of the surface kept and the faces
+        // kept: a group stretched into shards keeps its surface (the Centurion's U: 91% kept, 87% of its faces flat) and
+        // sorted LAST by surface alone (review of the first cut).
+        const int shown = 6;
+        double Kept((string letter, int flattened, int faces, double before, double after, int partsGone, int parts) d)
+            => Math.Min(d.before > 0 ? d.after / d.before : 1.0, d.faces > 0 ? 1.0 - (double)d.flattened / d.faces : 1.0);
+        foreach (var d in damaged.OrderBy(Kept).Take(shown))
+        {
+            sb.Append("   ⊕").Append(d.letter).Append(": ").Append(d.flattened.ToString("N0", inv)).Append(" of ").Append(d.faces.ToString("N0", inv))
+              .Append(" faces flattened to nothing, ").Append((d.before > 0 ? 100.0 * d.after / d.before : 100.0).ToString("0.#", inv)).Append("% of its surface kept");
+            if (d.partsGone > 0) sb.Append(", ").Append(d.partsGone.ToString("N0", inv)).Append(" of ").Append(d.parts.ToString("N0", inv)).Append(d.parts == 1 ? " part" : " parts").Append(" mostly gone");
+            sb.Append('\n');
+        }
+        if (damaged.Count > shown) sb.Append("   … and ").Append(damaged.Count - shown).Append(" more (each group's line is in the report)\n");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The weld dial as text: three decimals, and as many as it takes for a dial typed smaller than that — "0‰, not 0"
+    /// was what 0.0004 printed (review of the first cut).
+    /// </summary>
+    public static string WeldText(double permille)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        string text = permille.ToString("0.###", inv);
+        if (text != "0" || !(permille > 0)) return text;
+        text = permille.ToString("0.############", inv);
+        return text != "0" ? text : permille.ToString("G2", inv);
+    }
+
     public static string FuseReport(string sourcePath, string outputPath, double weldPermille, IList<FuseGroupReport> groups)
     {
         var sb = new System.Text.StringBuilder();
         sb.Append("Model Workshop fuse report\n");
         sb.Append("source: ").Append(sourcePath).Append('\n');
         sb.Append("output: ").Append(outputPath).Append('\n');
-        sb.Append("weld: ").Append(weldPermille.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append(" permille of the model's length\n");
+        sb.Append("weld: ").Append(WeldText(weldPermille)).Append(" permille of each group's own length\n");
         sb.Append("groups: ").Append(groups.Count).Append('\n');
         foreach (FuseGroupReport g in groups)
         {
