@@ -172,13 +172,32 @@ class RailingTierGuard(unittest.TestCase):
         self.assertIn("shroud_names, window_names, railing_names,", SOURCE)
         loop = SOURCE[SOURCE.index("for _rlabel, _rnames, _rpct in ("):]
         loop = loop[:loop.index(chr(10))]
-        self.assertIn('("SHROUD", shroud_names, shroud_reduce), ("RAILING", railing_names, railing_reduce), ("STRUCTURE"', loop)
-        self.assertIn('_weld = _rlabel not in ("RIGGING", "SHROUD", "RAILING")', SOURCE)
+        self.assertIn('("SHROUD", shroud_names, shroud_reduce), ("RAILING", railing_names, railing_reduce), ("CHAIN"', loop)
+        self.assertIn('_weld = _rlabel not in ("RIGGING", "SHROUD", "RAILING", "CHAIN")', SOURCE)   # CHAIN joined the soup tiers 2026-11-25
 
     def test_railingreduce_tag_carries_the_names_file_and_the_percent(self):
         tag = NAMESPACE["_tagged_names_pct"]
         self.assertEqual(("@C:/p/x_railing.txt", 60.0), tag(["rig", "windowreduce=@w.txt|10", "railingreduce=@C:/p/x_railing.txt|60"], "railingreduce"))
         self.assertEqual(("", 0.0), tag(["rig", "windowreduce=@w.txt|10"], "railingreduce"))
+
+
+class ChainTierGuard(unittest.TestCase):
+    # 2026-11-25 (user: "add an additional Reduce group called Chains"): chainreduce=@<names>|<percent> is parsed right after
+    # railingreduce, its names join _role_marked, and the CHAIN tier runs right after RAILING as a SOUP tier (no weld).
+
+    def test_chain_is_parsed_after_railing_marked_and_a_soup_tier_after_railing(self):
+        rai = SOURCE.index('_tagged_names_pct(argv, "railingreduce")')
+        cha = SOURCE.index('_tagged_names_pct(argv, "chainreduce")')
+        two = SOURCE.index('a.startswith("twosided=")')
+        self.assertLess(rai, cha); self.assertLess(cha, two)
+        self.assertIn("chain_names, twosided_names):", SOURCE)
+        self.assertIn('("RAILING", railing_names, railing_reduce), ("CHAIN", chain_names, chain_reduce), ("STRUCTURE"', SOURCE)
+        self.assertIn('_weld = _rlabel not in ("RIGGING", "SHROUD", "RAILING", "CHAIN")', SOURCE)
+
+    def test_chainreduce_tag_carries_the_names_file_and_the_percent_and_is_nothing_when_absent(self):
+        tag = NAMESPACE["_tagged_names_pct"]
+        self.assertEqual(("@C:/p/x_chain.txt", 85.0), tag(["rig", "railingreduce=@r.txt|10", "chainreduce=@C:/p/x_chain.txt|85"], "chainreduce"))
+        self.assertEqual(("", 0.0), tag(["rig", "railingreduce=@r.txt|10"], "chainreduce"))
 
 
 class TurretTierGuard(unittest.TestCase):

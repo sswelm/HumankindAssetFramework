@@ -1036,6 +1036,17 @@ try:
     railing_names = namelist(_rlnames) if _rlnames.strip() else []
 except Exception as _e:
     print("VEHICLE ERROR: malformed railingreduce argument: %s" % _e); sys.exit(1)
+# CHAIN (2026-11-25, user: "add an additional Reduce group called Chains"): anchor chains and chain cables - links by
+# the hundred, each its own tiny closed island, which read as one thin line at game distance. A SOUP tier like RIGGING,
+# SHROUD and RAILING (a welded link bottoms out at its minimum topology; the soup pass thins it to the dial), with its
+# own percentage, right after RAILING. Never on the Sail bone. The tag carries the names file and is sent only when a
+# part is marked, like twosided= below, so an unmarked recipe's argument line is unchanged.
+#   chainreduce=@<names file>|<percent>
+try:
+    _chnames, chain_reduce = _tagged_names_pct(argv, "chainreduce")
+    chain_names = namelist(_chnames) if _chnames.strip() else []
+except Exception as _e:
+    print("VEHICLE ERROR: malformed chainreduce argument: %s" % _e); sys.exit(1)
 # TWO-SIDED (tagged, 2026-11-14, user: "the double walling should be applied discriminately"): parts that mix closed
 # solids with single sheets in ONE welded mesh (a conning tower: thick walls, periscope tubes, and a wall that is one
 # sheet). Sail/Flag/Rudder double EVERY face and inset the copy by a fraction of the whole model, which fattens or
@@ -1303,7 +1314,7 @@ _role_marked = set()
 for _rl in (wheel_names, turret_names, track_names, gun_names, rotor_names, tailrotor_names, trail_names,
             muzzle_names, cradle_names, oar_names, sail_names, rigging_names, structure_names, body_names,
             flag_names, rudder_names, preserve_names, flip_names, detail_names, shroud_names, window_names, railing_names,
-            twosided_names):
+            chain_names, twosided_names):
     _role_marked.update(_rl)
 for _fo in mesh_objects():
     # the import-time Icosphere purge is conservative (skips skinned ones); on THIS path all skinning is
@@ -1497,7 +1508,7 @@ _lap("prep")
 _by_name = {}
 for _o in objs:
     _by_name.setdefault(_o.name, _o)   # first wins, matching find_opt's linear-scan order
-for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RIGGING", rigging_names, rigging_reduce), ("SHROUD", shroud_names, shroud_reduce), ("RAILING", railing_names, railing_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce), ("TURRET", turret_names, turret_reduce), ("GUN", gun_names, gun_reduce), ("WINDOW", window_names, window_reduce), ("FLIP", flip_names, flip_reduce), ("PRESERVE", preserve_names, preserve_reduce), ("DETAIL", detail_names, detail_reduce)):
+for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RIGGING", rigging_names, rigging_reduce), ("SHROUD", shroud_names, shroud_reduce), ("RAILING", railing_names, railing_reduce), ("CHAIN", chain_names, chain_reduce), ("STRUCTURE", structure_names, structure_reduce), ("BODY", body_names, body_reduce), ("OAR", oar_names, oar_reduce), ("SAIL", sail_names, sail_reduce), ("RUDDER", rudder_names, rudder_reduce), ("WHEEL", wheel_names, wheel_reduce), ("TURRET", turret_names, turret_reduce), ("GUN", gun_names, gun_reduce), ("WINDOW", window_names, window_reduce), ("FLIP", flip_names, flip_reduce), ("PRESERVE", preserve_names, preserve_reduce), ("DETAIL", detail_names, detail_reduce)):
     if not _rnames or _rpct <= 0.5:
         continue
     try:
@@ -1512,7 +1523,7 @@ for _rlabel, _rnames, _rpct in (("DEFAULT", default_names, default_reduce), ("RI
             print("VEHICLE WARN: %s part '%s' not found — skipped" % (_rlabel.lower(), _rn)); continue
         _vraw = len(_ro2.data.vertices)
         _rb = bmesh.new(); _rb.from_mesh(_ro2.data)
-        _weld = _rlabel not in ("RIGGING", "SHROUD", "RAILING")   # all three are rope/post soup: no weld, dissolve + collapse on the raw mesh
+        _weld = _rlabel not in ("RIGGING", "SHROUD", "RAILING", "CHAIN")   # all four are rope/post/link soup: no weld, dissolve + collapse on the raw mesh
         if _weld:
             _dim = max(_ro2.dimensions) or 1.0
             # Weld WITHIN each material only. A ripped hull paints its plating, boot-topping stripe and portholes as

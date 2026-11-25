@@ -93,6 +93,9 @@ public class VehicleRigStage1Tests
     [InlineData("railingreduce=nopipe", "VEHICLE ERROR: malformed railingreduce argument: no '|' between the names and the percent: 'railingreduce=nopipe'")]
     [InlineData("railingreduce=|inf", "VEHICLE ERROR: malformed railingreduce argument: not a finite percent: 'railingreduce=|inf'")]
     [InlineData("railingreduce=|abc", "VEHICLE ERROR: malformed railingreduce argument: could not convert string to float: 'abc'")]
+    [InlineData("chainreduce=nopipe", "VEHICLE ERROR: malformed chainreduce argument: no '|' between the names and the percent: 'chainreduce=nopipe'")]
+    [InlineData("chainreduce=|nan", "VEHICLE ERROR: malformed chainreduce argument: not a finite percent: 'chainreduce=|nan'")]
+    [InlineData("chainreduce=|abc", "VEHICLE ERROR: malformed chainreduce argument: could not convert string to float: 'abc'")]
     public void A_malformed_reduce_tag_is_the_scripts_error_line_after_the_merge(string token, string line)
     {
         var argv = Argv(); argv.Add(token);

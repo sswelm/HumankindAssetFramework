@@ -10,6 +10,47 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Vehicle Lab: the limited dissolve leaves faces wound against each other apart, as Blender does (2026-11-25).**
+  Found by the Blender-parity run: the vehicle_rig drill failed on one recipe, `hms_roberts_1940_split_fused`, on one
+  part of its RAILING tier.
+  - **The failure.** `Fused_R_Material2_10_Part_005`, 133,133 vertices: after the limited dissolve at 5 degrees the C#
+    left 123,842 and Blender 124,369, so the decimate that follows ended at 38,854 against 38,623. Every other part of
+    the recipe and every other job of the drill was equal. The recipe had never been in the drill's default sample:
+    its source was 45.5 MB against the 40 MB limit until a re-fuse that morning made it 32.2 MB. The source from
+    before that re-fuse shows the same defect on the same part (165,706 against 166,270).
+  - **The cause: `delimit` is not empty when it is not given.** `vehicle_rig.py` calls `bmesh.ops.dissolve_limit`
+    without a `delimit`, and the port read that as delimit 0. Blender gives an operator's unset flag slot the FIRST
+    value of its enum (`bmo_op_slots_init`, bmesh_operators.cc), and the dissolve's enum starts with `NORMAL`. So in
+    Blender an edge whose two faces are wound against each other is never joined (`bm_edge_is_delimiter`), and a vertex
+    with such an edge keeps its plain edge angle instead of the angle scaled by the faces' (`bm_vert_is_delimiter`). The
+    port joined those faces: in the part's first cell of 2,230 faces it dissolved six edges Blender keeps, each between
+    two triangles wound the opposite way (ten more edges of the cell ended differently around them; all sixteen are
+    equal now). The cell split, the faces' centres and the edge and vertex lists handed to each of the 64 cells were
+    equal to the bit; only the dissolve differed.
+  - **Measured in Blender 5.1.2**, two coplanar triangles sharing an edge, the second wound the other way: two faces
+    with the slot unset, two with `delimit={'NORMAL'}`, one quad with `delimit=set()`. The old port gave the quad.
+  - **The fix** is in both implementations, `editor/BlenderDissolve.cs` and `native/hafbmesh.cpp` (the DLL is rebuilt;
+    a fresh build of `native/` is byte-equal to it). They were wrong alike, so the native kernel's comparison with the
+    managed code could not see it.
+  - **Held by** `Tests/DissolveDelimitTests.cs`, 14 cases on the managed code and the kernel, each count Blender's on
+    the same shape: 12 fail on the code before the fix, the two controls (faces wound alike) pass on both. And by a
+    drill fixture, `fx_c_soup_wound`, so the rule no longer depends on one saved recipe staying under the size limit:
+    the code before the fix fails it (6 vertices against Blender's 29 on its first part), and with only the vertex half
+    of the fix taken out its second part fails (11 against 6).
+  - **What changes in a bake:** a part in a soup tier (rigging, shroud, railing and the like) that has faces wound
+    against each other comes out as Blender made it. Of the 37 saved recipes the Roberts is the only one that changes:
+    the other 36 were equal to Blender through the reduction before the fix and are after it (the eight over the size
+    limit were run for this, with both builds).
+  - **Verified:** the recipe alone on four copies of its source (the one from before the re-fuse and three re-fuses of
+    that day), equal through all five stages with a byte-identical GLB each time, the native kernel and the managed
+    code both on the failing copy; the whole drill with Blender live, default sample: 196 of 206 jobs equal, 10 left by
+    name as before, no failure; with every recipe (`FULL=1`) and the new fixture: 205 of 215 equal, 10 left by name,
+    157 exported files byte-identical; 3,173 unit tests.
+  - **A trap met on the way:** the drill reads each source twice, once in Blender and minutes later in C#. The model
+    was re-fused between the two in one run, and the drill reported a stage 1 difference on it (3,031 vertices against
+    12,843 on one part) that was two different files, not a defect. The run was repeated on a recipes folder whose
+    Roberts source is a copy. The drill itself does not guard against this.
+
 - **A damaged pack.json keeps the models after the damage (2026-11-24).** Recorded as not fixed by PR #315, asked
   for by the user the same day.
   - **The defect:** when a pack does not parse, `ParseModels` reads one object per model, found by counting braces
@@ -4820,6 +4861,132 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   [docs/District-Visuals.md](docs/District-Visuals.md).
 
 ## Authoring tools
+
+- **The Model Fuser leaves out a face that lies exactly on another, wound the other way, where no camera sees it
+  (2026-11-25).** Reported from the game: "weird Z fighting on the upper deck" of the Pre-Dreadnought (RSS Centurion).
+  Seen fixed in game on 2026-11-25 by the reporter, on the first cut of the rule, after fusing again, baking and
+  rebuilding the mod: the upper deck is clean, the aft mast grey, the two boats no longer brown.
+  - **What was measured.** The wood deck (`Material2_3910`, 64 triangles facing up, 1,154,682 square units) lies in
+    the plane of the superstructure's own top face (`Material2_3907`, 58 triangles wound DOWN, 1,092,539): the same
+    height to the last digit of the OBJ the bake hands to Unity. The pair is in the original download, before split,
+    fuse or Lab, and every stage carried both faces to the game. The aft mast is built the same way (4,908 grey
+    triangles, each with an exact reversed `Brown_Rope` copy), and so are two boats. Those three places are where the
+    screenshot was wrong: grey polygon-shaped patches on the deck, a brown mast, brown boats.
+  - **The explanation, and what does not fit it.** The game drew the hidden face through the visible one; where the
+    two are triangulated differently each won in places. That the fix removes exactly those faces and the picture is
+    then right is the evidence for it. One place does not fit: the superstructure walls are built like the mast
+    (3,816 white triangles with an exact reversed charcoal copy) and, as far as the screenshot can be read, it
+    shows them light. WHY the engine lets a back face through, and why not there, is not established; our docs
+    say it culls back faces.
+  - **Ruled out by measurement:** a back-face-culled render of the game's own data (the eight `_ModelMesh` assets,
+    the skeleton's stored quads, the baked atlas) shows a clean deck, so it is neither a hole nor the atlas. The
+    engine's triangle-to-quad pairing (`BuildStripificationQuad` pairs any two triangles that share two vertex
+    indices and never checks that they are wound the same way) turns over 61 of 221,446 triangles here.
+  - **The rule** (`editor/GlbDisconnectedParts.Covered.cs`, after every winding pass, at weld 0 only):
+    - A face is a *candidate* when its centroid and at least four of six more points lie on a face of the same
+      fuse group wound the other way: in its plane within the fuse's rounding (a millionth of the group's longest
+      side), inside its outline.
+    - It is *seen* when a ray from its middle or its corners reaches open air towards a camera in front of it. The
+      cameras are straight above and eight ways round at 65, 40 and 15 degrees above the horizon; a face longer
+      than a 256th of the model is asked from 16 ways round, one eight times that from 32 ways round on five rings.
+    - A ray is stopped by a triangle that shows its front to that camera: the group's own faces as the fuse has
+      wound them, and every other node of the file as it renders (one tree of boxes for the whole fuse,
+      `OccluderCache.RayTree`). Glass (a BLEND material) stops nothing.
+    - A candidate that is not seen is left out when the other side of its plane is seen. A pair seen on both
+      sides stays, and so does a pair seen on neither.
+    - Before any of that, a face the winding passes turned, ALL of which then lies on faces they did not turn and
+      wound the same way (thirteen points of it, the rim's included), gets its authored winding back: the two
+      were authored as a pair wound both ways, on different triangles. The report's `twins:` line counts them.
+  - **Versions the measurements refused, in order.** Each was built, measured on real models and replaced.
+    1. *A vote per connected patch of candidates* left out faces in plain view (about 300 of 2.4 million pixels over
+       26 culled views of the Centurion): the inside of a tube open at the top is hidden low down and seen at the rim.
+    2. *Rays over the face's whole hemisphere* left part of the ceiling in place (36 of that part's faces went where
+       59 went with cameras above the horizon): a ray gets out sideways from under the deck, where no camera is.
+    3. *A uniform grid* for the rays took HMS Roberts 159 s where the fuse had taken 43 s: one of its groups is
+       961,668 faces of dense detail, nearly all doubled, and a grid cell there holds thousands of triangles.
+    4. *Rays from the middle of a face only* (review): a doubled panel with a plate three quarters its size in front
+       lost a side with 45 % of its area in view. The corners are asked now.
+    5. *Rays stopped by either side of a triangle, at any weld* (review, on real models): at a weld of 1 to 2 permille
+       about a tenth of the faces left out could still be seen from above. Rays now stop on fronts only, and the pass
+       does not run at a non-zero weld at all: with fronts only it was still 323 of 4,906 and 114 of 1,311 there.
+    6. *The same 25 directions for every face* (review): HMS Svea's mast has a face 388 units long and 5 wide inside
+       its tube, seen through a slit between those directions (225 of 10.3 million pixels over 112 views, a dashed
+       line down the mast). Larger faces are asked from more directions.
+    7. *Glass left out per node* (review): a canopy stored as the BLEND primitive of a node that also holds its frame
+       counted as solid. Glass is left out per primitive.
+    8. *Twins told by their corners only* (second review, a fixture): a deck cut along the other diagonal than the
+       ceiling under it is not "a pair on the same corners" to the fuse, so its direction pass turned the ceiling
+       up and the shell carried two surfaces of two materials facing the sky in one plane. A face the passes turned
+       onto a face they did not turn, wound the same way, gets its authored winding back and is judged as a twin.
+    9. *Face sizes measured against the group* (second review): a group of small parts made every face "large", and
+       35 of the Centurion's 58 million rays were asked of such faces. Sizes are measured against the model: the
+       Centurion's fuse goes from 9.6 s to 7.1 s, HMS Roberts' from 47.0 s to 45.7 s. The price is that a face
+       small against the model is asked from fewer directions than before; over the 112 views the pixels lost
+       go: RSS Centurion 6 to 7, SMS Wespe 10 to 12, HMS Roberts 0 to 24.
+    10. *Turned back when most of it was covered* (third review, a fixture): five of the seven inner points were
+       enough, as for a candidate - but a candidate is only left out when no camera sees its front, and the
+       turn-back took the outward front the passes had given the face without asking. A closed crate stored inside
+       out, with a panel over one wall from 0.9 of 10 up, came out open over that strip. All thirteen points must
+       be covered now; a face partly covered stays as the passes left it, which is what the fuse did before this
+       change. On real models it shows in counts only (Bell H-13: 170 faces turned back before, 23 now; no surveyed
+       pixel different either way).
+    The figures in 1 to 3 were printed by those runs; their files were overwritten by the next version's.
+  - **Fronts only, checked against the alternative** (second review asked): with either side of a triangle stopping
+    a ray, everything else equal, 112 views lose 225 pixels on the Svea against 35, 1 on the Centurion against 6, and
+    the same on the Wespe and the U-boat (10 and 0), on the build before 8 and 9. Fronts only stays. Its price on
+    the Centurion is that more same-material pairs remain under the visible surface; pairs of two materials are
+    the same either way.
+  - **Measured on the last version, old fuse against new, the Model Fuser's own groups** (docs/Testing.md, "Hidden
+    twins"): on the Centurion 64,361 of 468,161 triangles are left out. Over eight models, back-face-culled views from 112
+    directions between 15 and 75 degrees change in 85 of 72,946,277 pixels (28 of the 1,026,724 faces left out or
+    turned back are behind them). Hidden
+    faces lying under a visible one of another material, from the screenshot's angle: 43,265 pixels before, 2 after.
+  - **What it changes:** a fused shell can have fewer triangles than its sources (`Result.HiddenFacesRemoved`; the
+    preservation check is now source = output + left out; the status line says `N hidden twin face(s) left out`;
+    the report's counts are of the faces written). A model already fused is unchanged until it is fused again.
+    The vertex normals of the faces that stay no longer average in a face that is gone. The Bake Tests' Workshop
+    row accounts for the faces exactly instead of asking for "at least half"; 19 of its goldens move in their
+    FUSE line and need a re-bless in Unity: `1861_us_convederate_navy_ship_split_fused` 149,912→149,790, `Ribauldequin_textured` rewound 642→640, `bell_h-13_animation-ready` 126,098→125,742, `french_submarine_cruiser_surcouf_split_fused` 72,716→55,794, `gymnote_1888_split_fused` 9,487→9,295, `hms_roberts_1940_split_fused` 149,858→105,062, `hms_svea_cut_split_fused` 149,952→94,026, `jagdpanzer_iv_late_prod2` 24,039→23,905, `m114_gun_only` 11,244→11,237, `project_50_u-boat_split_fused` 149,921→108,519, `rah66` 11,906→11,885, `rms_teutonic_cut2_split` 150,000→149,862, `salegs_revenge_split_fused` 149,838→134,414, `sms_wespe_split_fused` 149,976→112,236, `sns_dragon_split_fused` 149,999→131,573, `spanish_battleship_espana_split_fused` 149,616→98,513, `ss._great_eastern_transport_fever_2_mod` 148,908→148,856, `ss_romanic_split_fused` 149,907→149,850, `triconter_split` 149,996→149,609.
+  - **Not covered.**
+    - Faces lying on each other wound the SAME way: a different defect, which fights under any renderer (of
+      another material and within 0.05 units, 84 of 340,344 cells of a top-down census of this ship's fused file;
+      7 within the fuse's rounding).
+    - A pair whose two faces are in different fuse groups, or in none. The Centurion has them: the turret group's
+      down-wound faces lie under the main deck's wood (410,297 square units, none open to the sky), and the upper
+      deck still lies on down-wound faces of five other groups over about a twelfth of its area (a reviewer's
+      count on the first cut). HMS Svea shows what that costs: from one angle 4,488 pixels still have a hidden
+      face of another material under the visible one, and in each pair the hidden face belongs to a part that is
+      in no fuse group. Such a part has to be put in the group for its hidden faces to go.
+    - A part marked X (for deletion) in the Fuser still stops rays: marks are applied after the fuse.
+    - A face seen only from below 15 degrees goes: on the Centurion the deckhouse's glass panes, seen from 10
+      degrees and below.
+    - What is in the way is judged in the rest pose; a part an animation moves is counted where the file puts it.
+    - A fuse with a non-zero weld.
+    - The pass runs twice for a group that the mirrored-parts verdict re-plans (15 of the Centurion's 22 groups);
+      the first result is thrown away. Measured by the second review, not removed.
+  - **Review.** Three reviewers took the first cut apart (the code; ten more real models and the first eight again,
+    from 176 directions each; every claim against its evidence, with 27 planted defects of which 19 survived the
+    tests as they stood), a fourth took their fixes apart, and a fifth the fourth's (16 more planted defects, 12
+    of which the tests let through). Versions 4 to 10 above, the report's counts, the fixtures for the surviving
+    plants and the corrections to this entry are theirs.
+  - **Two changes after the figures above** (2026-11-25; docs/Testing.md, "Hidden twins", has the measurement).
+    A review by another model: a face of a BLEND or MASK material is never left out and stops no ray, and a face is
+    turned back only when its actual corners and edge midpoints lie on the face under it. As pushed it also took
+    glass out of the coincidence test, and the grey faces lying back to back on the Centurion's window panes came
+    back (115 pixels of the screenshot's view against 2). The last head lets a glass face still be what an opaque
+    face lies on, and keeps the rest: 2 pixels, the Centurion leaves out 63,492 faces (64,361 in the figures above), and no
+    pixel of the 112 views differs between the three versions on any of the eight models.
+  - **Tests:** 70 (`Tests/GlbFuseHiddenTwinTests.cs`). 68 defects planted one at a time; 68 caught, none let through.
+
+- **A Chain role with its own reduce dial (2026-11-25; Vehicle Lab role *Chain*, key `N`, recipe `chainReducePct`,
+  the script's `chainreduce=@names|percent`).** "Could you add an additional Reduce group called Chains": anchor
+  chains and chain cables are a role of their own (enum value 26, appended last so saved recipes keep their roles).
+  A SOUP tier like Rigging, Shroud and Railing - limited dissolve, then collapse, no weld - that runs right after
+  RAILING, in the script and in the C# stage 2 alike. The tag is sent only when a part is marked Chain (as
+  `twosided=` is), so a recipe without the role keeps its argument line and nothing regenerates. Part names with
+  `chain` are now guessed Chain on a fresh probe; roles already saved in a recipe are untouched. Drill fixtures:
+  `fx_c_soup_chain` (the tier, Blender against C#) and `fx_x_chainreduce` (an infinite percent is the script's
+  error). Not done: no bake of a real ship with the role has been looked at in game.
 
 - **A definition made in the editor is in the Pick lists at once, and a new Model Factory entry starts on Keep
   Model (2026-11-24).** Reported from the Model Factory: a pawn definition made that session

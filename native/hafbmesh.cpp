@@ -602,9 +602,22 @@ struct Dissolve
         }
         return Deg90;
     }
+    // The delimit is BMO_DELIM_NORMAL, not 0 (BlenderDissolve.cs has the measurement): an operator's unset flag slot takes the
+    // first value of its enum (bmo_op_slots_init), so a manifold edge whose faces are wound against each other is a delimiter.
+    bool EdgeIsDelimiter(int e) { return !EdgeIsContiguous(e); }
+    bool VertIsDelimiter(int v)
+    {
+        int e = bm.VE[v], e0 = e;
+        do
+        {
+            if (bm.EdgeIsManifold(e) && EdgeIsDelimiter(e)) return true;
+            e = bm.DiskEdgeNext(e, v);
+        } while (e != e0);
+        return false;
+    }
     float EdgeCalcDissolveError(int e)
     {
-        if (!bm.EdgeIsManifold(e)) return CostInvalid;
+        if (!bm.EdgeIsManifold(e) || EdgeIsDelimiter(e)) return CostInvalid;
         int f1 = bm.LF[bm.EL[e]], f2 = bm.LF[bm.LRadialNext[bm.EL[e]]];
         float cosNeg = Dot3(bm.FNo[3 * f1], bm.FNo[3 * f1 + 1], bm.FNo[3 * f1 + 2], bm.FNo[3 * f2], bm.FNo[3 * f2 + 1], bm.FNo[3 * f2 + 2]);
         if (EdgeIsContiguous(e)) cosNeg = (float)(cosNeg * -1.f);
@@ -614,7 +627,10 @@ struct Dissolve
     {
         float angle = VertCalcEdgeAngle(v);
         if (bm.VE[v] != None && bm.EdgeIsManifold(bm.VE[v]))
-            return (float)((float)((float)(angle * AngleToUnit) * (float)(EdgeCalcFaceAngle(bm.VE[v]) * AngleToUnit)) * UnitToAngle);
+        {
+            if (!VertIsDelimiter(v))
+                return (float)((float)((float)(angle * AngleToUnit) * (float)(EdgeCalcFaceAngle(bm.VE[v]) * AngleToUnit)) * UnitToAngle);
+        }
         return angle;
     }
     int DiskCountAtMost(int v, int max)
@@ -866,7 +882,7 @@ struct Dissolve
         return false;
     }
 
-    // BM_mesh_decimate_dissolve_ex (do_dissolve_boundaries false, delimit 0) on the given elements in their order
+    // BM_mesh_decimate_dissolve_ex (do_dissolve_boundaries false, delimit NORMAL: the unset slot's default) on the given elements in their order
     void DissolveLimit(float angleLimit, const int* vinput, int nv, const int* einput, int ne)
     {
         angleLimit = std::min((float)(3.14159265358979323846 / 2), angleLimit);

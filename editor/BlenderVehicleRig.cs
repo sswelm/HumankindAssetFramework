@@ -44,7 +44,7 @@ public static partial class BlenderVehicleRig
         public readonly List<string> Logs = new List<string>();   // the VEHICLE lines the rig path prints at argument time (a bad orientation, static tracks), after the merge
         public string Problem;                      // the script's own exit on its arguments before the import (bright=, flagfold=: a VEHICLE ERROR), or null
         public string PreDie;                       // an exception before the import (int(float(inf)) of a flagfold frame count), or null
-        public string TagError;                     // the first malformed reduce tag's VEHICLE ERROR after the merge (defaultreduce, shroudreduce, gunreduce, turretreduce, windowreduce, railingreduce), or null
+        public string TagError;                     // the first malformed reduce tag's VEHICLE ERROR after the merge (defaultreduce, shroudreduce, gunreduce, turretreduce, windowreduce, railingreduce, chainreduce), or null
         public string NamesDie;                     // a positional names file the script cannot open: the FileNotFoundError it dies of after the merge, or null
         public string Unsupported;                  // an argument the C# does not read as Python does (a names file that is not UTF-8): left to Blender by name
         public string FoldDie;                      // a sail-fold or oar dial (argv 72, 73, 75, 56-59, read unconditionally) Python cannot parse: the exception, or null
@@ -179,11 +179,11 @@ public static partial class BlenderVehicleRig
         a.WheelCentreArea = argv.Any(x => VehicleProbe.Input.PyStrip(x) == "wheelcentre=area");
         a.DoubleSided = VehicleProbe.Input.PyStrip(At(41)) == "1";
         a.FixInsideOut = VehicleProbe.Input.PyStrip(At(46)) == "1";
-        // the reduce tags in the script's order - defaultreduce, shroudreduce, gunreduce, turretreduce, windowreduce, railingreduce -, the names before the LAST
+        // the reduce tags in the script's order - defaultreduce, shroudreduce, gunreduce, turretreduce, windowreduce, railingreduce, chainreduce -, the names before the LAST
         // '|', the percent after it; the first malformed one is the script's VEHICLE ERROR after the merge (its exit)
-        foreach (var tag in new[] { "defaultreduce", "shroudreduce", "gunreduce", "turretreduce", "windowreduce", "railingreduce" })
+        foreach (var tag in new[] { "defaultreduce", "shroudreduce", "gunreduce", "turretreduce", "windowreduce", "railingreduce", "chainreduce" })
         {
-            string role = tag == "shroudreduce" ? "shroud" : tag == "windowreduce" ? "window" : tag == "railingreduce" ? "railing" : tag == "defaultreduce" ? "default" : null;
+            string role = tag == "shroudreduce" ? "shroud" : tag == "windowreduce" ? "window" : tag == "railingreduce" ? "railing" : tag == "chainreduce" ? "chain" : tag == "defaultreduce" ? "default" : null;
             if (role != null) a.Names[role] = new List<string>();
             // Python never opens a later tagged file after a positional error or the first malformed tag.
             if (a.NamesDie != null || a.Unsupported != null || a.TagError != null) continue;
@@ -199,7 +199,7 @@ public static partial class BlenderVehicleRig
                     if (double.IsNaN(pct) || double.IsInfinity(pct)) err = "not a finite percent: " + PyStrRepr(arg);
                     else a.Reduce[tag == "gunreduce" ? "guns" : "turrets"] = PyClamp95(pct);
                 }
-                else if (tag == "windowreduce" || tag == "railingreduce")   // both parse through the script's _tagged_names_pct
+                else if (tag == "windowreduce" || tag == "railingreduce" || tag == "chainreduce")   // all three parse through the script's _tagged_names_pct
                 {
                     if (bar < 0) err = "no '|' between the names and the percent: " + PyStrRepr(arg);
                     else
@@ -229,7 +229,7 @@ public static partial class BlenderVehicleRig
                 else err = death.Substring(death.IndexOf(": ", StringComparison.Ordinal) + 2);   // str(exception), without its type
             }
             if (err != null && a.TagError == null)
-                a.TagError = tag == "gunreduce" || tag == "turretreduce" || tag == "windowreduce" || tag == "railingreduce" ? "VEHICLE ERROR: malformed " + tag + " argument: " + err
+                a.TagError = tag == "gunreduce" || tag == "turretreduce" || tag == "windowreduce" || tag == "railingreduce" || tag == "chainreduce" ? "VEHICLE ERROR: malformed " + tag + " argument: " + err
                            : "VEHICLE ERROR: malformed " + tag + " argument: " + arg + " (" + err + ")";
         }
         // twosided=@<names file> (2026-11-14; modelled 2026-11-16): `namelist(arg[9:]) if arg[9:].strip() else []`, after every
@@ -241,7 +241,7 @@ public static partial class BlenderVehicleRig
             try { a.Names["twosided"] = NameList(two.Substring(9)); }
             catch (Exception e) when (NamesFileException(e)) { a.Unsupported = TwoSidedLeave; }
         }
-        // _role_marked: every role list but ignore (the tagged shroud/window/railing lists too); static tracks are emptied before it is built
+        // _role_marked: every role list but ignore (the tagged shroud/window/railing/chain lists too); static tracks are emptied before it is built
         foreach (var kv in a.Names) if (kv.Key != "ignore" && kv.Key != "default" && !(kv.Key == "tracks" && a.TracksStatic)) a.Marked.UnionWith(kv.Value);
         string m2 = argv.FirstOrDefault(x => x.StartsWith("merge2=", StringComparison.Ordinal));
         if (m2 != null) a.Merge2 = m2.Substring(7);
