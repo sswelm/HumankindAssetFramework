@@ -314,20 +314,58 @@ namespace HumankindAssetFramework.Tests
             Assert.Empty(VehicleLabRules.FuseReportGroups(null));
         }
 
+        static VehicleLabRules.RoleList L(int role, int minute, params string[] names)
+            => new VehicleLabRules.RoleList { Role = role, Written = new System.DateTime(2026, 11, 25, 20, minute, 0, System.DateTimeKind.Utc), Names = names };
+
         [Fact]
         public void The_last_Generate_s_lists_name_the_roles_and_a_name_in_two_lists_decides_nothing()
         {
             var got = VehicleLabRules.LastGenerateRoles(new[] {
-                new KeyValuePair<int, IEnumerable<string>>(13, new[] { "Fused_O_Object_24", "", "  " }),
-                new KeyValuePair<int, IEnumerable<string>>(14, new[] { "Fused_Z_Object_6 ", "Torn" }),
-                new KeyValuePair<int, IEnumerable<string>>(3, new[] { "Torn", "Torn" }),
-                new KeyValuePair<int, IEnumerable<string>>(3, new[] { "Torn" }),   // a third list cannot bring a torn name back
-                new KeyValuePair<int, IEnumerable<string>>(4, null),
-            });
+                L(13, 0, "Fused_O_Object_24", "", "  "),
+                L(14, 0, "Fused_Z_Object_6 ", "Torn"),
+                L(3, 0, "Torn", "Torn"),
+                L(3, 0, "Torn"),   // a third list cannot bring a torn name back
+                new VehicleLabRules.RoleList { Role = 4, Written = new System.DateTime(2026, 11, 25, 20, 0, 0, System.DateTimeKind.Utc), Names = null },
+            }, 4);
             Assert.Equal(2, got.Count);
             Assert.Equal(13, got["Fused_O_Object_24"]);
             Assert.Equal(14, got["Fused_Z_Object_6"]);
             Assert.False(got.ContainsKey("Torn"));
+        }
+
+        [Fact]
+        public void A_Default_list_an_earlier_Generate_left_is_not_read()
+        {
+            // Generate writes the Default list only at a Default dial above 0: a bake at dial 0 leaves the older one in place
+            var stale = VehicleLabRules.LastGenerateRoles(new[] { L(14, 30, "Fused_Z_Object_6"), L(4, 10, "Fused_Z_Object_6", "Fused_B_Object_13") }, 4);
+            Assert.Equal(14, stale["Fused_Z_Object_6"]);       // not torn by the old list
+            Assert.False(stale.ContainsKey("Fused_B_Object_13"));
+            var same = VehicleLabRules.LastGenerateRoles(new[] { L(14, 30, "Fused_Z_Object_6"), L(4, 30, "Fused_B_Object_13") }, 4);
+            Assert.Equal(4, same["Fused_B_Object_13"]);        // written by the same Generate: read
+            var alone = VehicleLabRules.LastGenerateRoles(new[] { L(4, 10, "Fused_B_Object_13") }, 4);
+            Assert.Equal(4, alone["Fused_B_Object_13"]);       // nothing newer to be stale against
+        }
+
+        [Fact]
+        public void A_member_name_with_a_comma_or_a_fused_name_with_a_quote_is_read_whole()
+        {
+            const string report = "== group A — 3 part(s)\nparts: Rope, long, Mast, Hull\nFused 3 part(s) -> 'Fused_A_Captain's oar': 10 -> 8 verts\n";
+            var known = new[] { "Rope, long", "Rope", "Mast", "Hull" };
+            var g = VehicleLabRules.FuseReportGroups(report, known);
+            Assert.Equal(new[] { "Rope, long", "Mast", "Hull" }, g["Fused_A_Captain's oar"]);
+            // without the session's names the list can only split at every ", "
+            Assert.Equal(new[] { "Rope", "long", "Mast", "Hull" }, VehicleLabRules.FuseReportGroups(report)["Fused_A_Captain's oar"]);
+        }
+
+        [Fact]
+        public void A_member_the_session_never_listed_votes_with_the_part_it_was_cut_from()
+        {
+            const int Default = 4, Ignore = 3, Structure = 16;
+            var groups = new Dictionary<string, string[]> { { "Fused_B_Object_12_Part_005", new[] { "Object_12_Part_005", "Object_12_Part_006", "Object_21" } } };
+            var session = new Dictionary<string, int> { { "Object_12", Ignore }, { "Object_21", Structure } };
+            var got = VehicleLabRules.RecoverFreshRoles(new[] { "Fused_B_Object_12_Part_005" }, null, groups, session, Default, out var undecided);
+            Assert.Empty(got);   // the Ignored parent's children disagree with Structure: not decided for the user
+            Assert.Equal(2, Assert.Single(undecided).MemberRoles[Ignore]);
         }
 
         [Fact]
@@ -356,7 +394,7 @@ namespace HumankindAssetFramework.Tests
             Assert.Equal(Structure, Assert.Single(got2).Role);
             Assert.Empty(und2);
 
-            // the last Generate's record wins over the members: the galley's hull group was baked as Rigging
+            // the last Generate's record wins over the members (a made-up bake: the group baked as Rigging)
             var last = new Dictionary<string, int> { { "Fused_B_Object_13", Rigging }, { "Fused_Q_Object_90", Default } };
             var got3 = VehicleLabRules.RecoverFreshRoles(new[] { "Fused_O_Object_24", "Fused_B_Object_13", "Fused_Q_Object_90" },
                 last, groups, session, Default, out var und3);

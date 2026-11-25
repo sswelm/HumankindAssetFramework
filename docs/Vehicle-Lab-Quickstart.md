@@ -143,12 +143,17 @@ fresh row with the same `Fused_<group>_` prefix and says so in the status. The s
 and says so in the log.
 
 **Re-pointed at a fused file.** A fuse renames every part it groups, so the roles kept by name have nothing to land on.
-A re-Probe gives each part that is new to the session the role it was last generated with (the lists Generate writes
-beside the Output GLB: `<output>_oars.txt`, `_sails.txt`, ...). A part never generated takes the role its fuse-group
-members share, read from `<source>.fuse-report.txt`; a group whose members disagree stays undecided and the status names
-it with its members' roles. A part the session already listed keeps the role it has, Default included, and
-**＜new model＞** starts from nothing. So after a probe that came back undecided, **Reload** the recipe before
-probing again.
+A re-Probe gives each part that is new to the session the role it was last generated with: every Generate writes one
+list per role to `Assets/FactorySource/VehicleLab/<Output GLB file name>_oars.txt`, `_sails.txt`, ... (named after the
+output's file name only, and written when Generate starts, so a Generate that failed still counts). The Default list
+is written only when the Default dial is above 0; a Default list older than the other lists is an earlier Generate's
+and is not read. A part not in those lists takes the role its fuse-group members share, read from
+`<source>.fuse-report.txt`; a member split since the fuse votes with the part it was cut from. A group whose members
+disagree stays undecided, and the status names it with its members' roles. A group whose members are all Default
+decides nothing and is not named. The last Generate wins over the members, even when they were re-marked since.
+A part the session already listed keeps the role it has, Default included, and **＜new model＞** starts from nothing.
+So after a probe that came back undecided, **Reload** the recipe before probing again. Not covered: a second model's
+fuse report (only the Raw model's is read), and source bones on the source-skeleton fast path.
 
 ## 4. Tune and generate
 
@@ -501,7 +506,7 @@ floated the ship by exactly that much.
 
 **The fused galley (since 2026-10-20; the recipe since 2026-11-25).** The game's galley is the fused bake
 (`khelandion_2_split_fused_Spin.glb`): 15 groups, the three oar meshes in group O. The recipe `khelandion_2` holds it
-since 2026-11-25 (the unfused recipe above is in its `.bak~` and in `D:\Backups\HAF\2026-11-25_before-hidden-twin-rebake`).
+since 2026-11-25; the unfused recipe above is kept only in `D:\Backups\HAF\2026-11-25_before-hidden-twin-rebake`.
 Roles: Oar `Fused_O_Object_24`, Sail `Z`, Rudder `I` and `F`, Body `H`, Structure `S`, Rigging `L`, Shroud `D`, Window
 `A`, the rest Default. The fused hull `Fused_B_Object_13` (138,357 vertices) is Default, so the Default dial carries the
 hull. Reduction (%): Default 50 · Rigging 85 · Shroud 80 · Structure 80 · Body 70 · Oar 60 · Sail 50 · Rudder 40 ·

@@ -1783,18 +1783,18 @@ public class VehicleLabWindow : EditorWindow
             if (!string.IsNullOrEmpty(outGlb))
             {
                 string bn = Path.GetFileNameWithoutExtension(outGlb);
-                var lists = new List<KeyValuePair<int, IEnumerable<string>>>();
+                var lists = new List<VehicleLabRules.RoleList>();
                 foreach (var kv in VehicleRigArgLine.RoleOfNamesFile)
                 {
                     string f = Path.Combine(projRoot, prevDir, bn + "_" + kv.Key + ".txt");
-                    try { if (File.Exists(f)) lists.Add(new KeyValuePair<int, IEnumerable<string>>(kv.Value, File.ReadAllLines(f))); }
+                    try { if (File.Exists(f)) lists.Add(new VehicleLabRules.RoleList { Role = kv.Value, Written = File.GetLastWriteTimeUtc(f), Names = File.ReadAllLines(f) }); }
                     catch (Exception e) { Debug.LogWarning("[VehicleLab] probe: could not read the last Generate's role list " + f + ": " + e.Message); }
                 }
-                lastGen = VehicleLabRules.LastGenerateRoles(lists);
+                lastGen = VehicleLabRules.LastGenerateRoles(lists, (int)Role.Default);
             }
             Dictionary<string, string[]> groups = null;
             string report = (srcFile ?? "").Trim() + ".fuse-report.txt";
-            try { if (File.Exists(report)) groups = VehicleLabRules.FuseReportGroups(File.ReadAllText(report)); }
+            try { if (File.Exists(report)) groups = VehicleLabRules.FuseReportGroups(File.ReadAllText(report), sessionRoles.Keys); }
             catch (Exception e) { Debug.LogWarning("[VehicleLab] probe: could not read the fuse report " + report + ": " + e.Message); }
             var got = VehicleLabRules.RecoverFreshRoles(fresh.Select(x => x.name), lastGen, groups, sessionRoles, (int)Role.Default, out var undecided);
             var byName = fresh.ToDictionary(x => x.name, StringComparer.Ordinal);
@@ -1845,7 +1845,8 @@ public class VehicleLabWindow : EditorWindow
             reprobingForMigration = true;
             try { Probe(); }
             finally { reprobingForMigration = false; }
-            status = $"Re-probed once so the preview shows the {migrated.Count} migrated placement(s).  " + status;
+            // the re-probe finds every name in the session, so it recovers nothing: the first run's note is the one to keep
+            status = $"Re-probed once so the preview shows the {migrated.Count} migrated placement(s).  " + status + recoveredNote;
         }
     }
 

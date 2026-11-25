@@ -908,15 +908,17 @@ public static class VehicleLabRules
     // A PROBE THAT FINDS NONE OF THE NAMES (2026-11-25, the Khelandion: "when I probe I lose everything again, now fix
     // it"). The roles are kept by part name, and a fuse renames every part it groups: the galley's recipe held 149
     // Object_* names, the re-fused source had 15 Fused_* parts, and every row came back Default - oars, sail and all.
-    // Two records still knew the roles. The role lists the last Generate of the Output GLB wrote beside it
-    // (<output>_oars.txt, _sails.txt, ...) name the parts exactly as they were baked; the fuse report beside the source
+    // Two records still knew the roles. The role lists the last Generate wrote (Assets/FactorySource/VehicleLab/
+    // <output name>_oars.txt, _sails.txt, ...) name the parts exactly as they were baked; the fuse report beside the source
     // names each fused part's members, whose roles the session still holds. A part NEW to the session takes its role
     // from the first, else from its members when they all agree. A group whose members disagree is left undecided and
     // named: picking the majority put a group of five Ignored parts and three kept ones in the bin.
 
     /// <summary>The fused parts a Model Fuser report names, each with its members: "== group A" opens a group, "parts: a, b"
-    /// lists its members, "Fused N part(s) -> 'name'" names the part the fuse made of them.</summary>
-    public static Dictionary<string, string[]> FuseReportGroups(string reportText)
+    /// lists its members, "Fused N part(s) -> 'name': ..." names the part the fuse made of them. The writer joins members
+    /// with ", " and does not quote them, so a name holding ", " is ambiguous: a name in <paramref name="knownNames"/> that
+    /// matches there is taken whole (the longest), anything else splits at ", ".</summary>
+    public static Dictionary<string, string[]> FuseReportGroups(string reportText, ICollection<string> knownNames = null)
     {
         var groups = new Dictionary<string, string[]>(StringComparer.Ordinal);
         string[] members = null; bool open = false;
@@ -925,31 +927,57 @@ public static class VehicleLabRules
             string line = raw.TrimEnd('\r');
             if (line.StartsWith("== group ", StringComparison.Ordinal)) { open = true; members = null; continue; }
             if (!open) continue;
-            if (line.StartsWith("parts: ", StringComparison.Ordinal))
-            {
-                members = line.Substring(7).Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
-                continue;
-            }
-            var m = System.Text.RegularExpressions.Regex.Match(line, @"^Fused \d+ part\(s\) -> '([^']+)'");
+            if (line.StartsWith("parts: ", StringComparison.Ordinal)) { members = SplitMembers(line.Substring(7), knownNames); continue; }
+            // the name runs to the "': <count>" after it, so a quote inside the name stays in it
+            var m = System.Text.RegularExpressions.Regex.Match(line, @"^Fused \d+ part\(s\) -> '(.+?)': \d");
+            if (!m.Success) m = System.Text.RegularExpressions.Regex.Match(line, @"^Fused \d+ part\(s\) -> '(.+)'");
             if (m.Success && members != null) { groups[m.Groups[1].Value] = members; open = false; members = null; }
         }
         return groups;
     }
 
-    /// <summary>The roles the last Generate baked, from its role lists: (role, the names in that role's list). A name in
-    /// two lists with different roles is left out - the record contradicts itself, so it decides nothing.</summary>
-    public static Dictionary<string, int> LastGenerateRoles(IEnumerable<KeyValuePair<int, IEnumerable<string>>> lists)
+    static string[] SplitMembers(string list, ICollection<string> known)
     {
+        var got = new List<string>();
+        int pos = 0;
+        while (pos < list.Length)
+        {
+            string best = null;
+            if (known != null)
+                foreach (string k in known)
+                    if (!string.IsNullOrEmpty(k) && (best == null || k.Length > best.Length) && pos + k.Length <= list.Length &&
+                        string.CompareOrdinal(list, pos, k, 0, k.Length) == 0 &&
+                        (pos + k.Length == list.Length || string.CompareOrdinal(list, pos + k.Length, ", ", 0, 2) == 0)) best = k;
+            if (best == null) { int c = list.IndexOf(", ", pos, StringComparison.Ordinal); best = c < 0 ? list.Substring(pos) : list.Substring(pos, c - pos); }
+            if (best.Trim().Length > 0) got.Add(best.Trim());
+            pos += best.Length + 2;   // past the name and its ", "
+        }
+        return got.ToArray();
+    }
+
+    public sealed class RoleList { public int Role; public DateTime Written; public IEnumerable<string> Names; }
+
+    /// <summary>The roles the last Generate baked, from its role lists. A name in two lists with different roles is left out:
+    /// the record contradicts itself, so it decides nothing. Generate writes the Default list only when the Default dial is
+    /// above 0, so one older than the newest other list by more than a minute is an earlier Generate's and is not read.</summary>
+    public static Dictionary<string, int> LastGenerateRoles(IEnumerable<RoleList> lists, int defaultRole)
+    {
+        var all = (lists ?? Enumerable.Empty<RoleList>()).Where(l => l != null).ToList();
+        var others = all.Where(l => l.Role != defaultRole).ToList();
+        DateTime newest = others.Count > 0 ? others.Max(l => l.Written) : DateTime.MinValue;
         var roles = new Dictionary<string, int>(StringComparer.Ordinal);
         var torn = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var l in lists)
-            foreach (string n0 in l.Value ?? Enumerable.Empty<string>())
+        foreach (var l in all)
+        {
+            if (l.Role == defaultRole && others.Count > 0 && l.Written < newest.AddMinutes(-1)) continue;
+            foreach (string n0 in l.Names ?? Enumerable.Empty<string>())
             {
                 string n = (n0 ?? "").Trim();
                 if (n.Length == 0 || torn.Contains(n)) continue;
-                if (roles.TryGetValue(n, out int had)) { if (had != l.Key) { roles.Remove(n); torn.Add(n); } continue; }
-                roles[n] = l.Key;
+                if (roles.TryGetValue(n, out int had)) { if (had != l.Role) { roles.Remove(n); torn.Add(n); } continue; }
+                roles[n] = l.Role;
             }
+        }
         return roles;
     }
 
@@ -958,9 +986,11 @@ public static class VehicleLabRules
 
     /// <summary>The roles for the parts NEW to the session (<paramref name="freshNames"/>: not in the session's last part list,
     /// no role kept or inherited). <paramref name="sessionRoles"/> is every part the session listed with its role, Default
-    /// (<paramref name="defaultRole"/>) included. From the last Generate first; else, for a fused part, the one role every member
-    /// the session listed carries - a member never listed does not vote, a Default one does. Members that disagree: the part
-    /// is in <paramref name="undecided"/> and keeps what the probe gave it.</summary>
+    /// (<paramref name="defaultRole"/>) included. From the last Generate first; else, for a fused part, the one role its
+    /// members carry. A member votes with its own session role or, when the session never listed it, with the role of the
+    /// nearest part it was cut from (ParentNames: a split child of an Ignored part votes Ignore); a member with neither does
+    /// not vote. Members that disagree: the part is in <paramref name="undecided"/> and keeps what the probe gave it. Members
+    /// that all vote Default decide nothing either.</summary>
     public static List<RecoveredRole> RecoverFreshRoles(IEnumerable<string> freshNames, IReadOnlyDictionary<string, int> lastGenerate,
         IReadOnlyDictionary<string, string[]> fuseGroups, IReadOnlyDictionary<string, int> sessionRoles, int defaultRole,
         out List<UndecidedGroup> undecided)
@@ -973,7 +1003,12 @@ public static class VehicleLabRules
             if (fuseGroups == null || !fuseGroups.TryGetValue(n, out var members)) continue;
             var tally = new Dictionary<int, int>();
             foreach (string mem in members)
-                if (sessionRoles != null && sessionRoles.TryGetValue(mem, out int r)) tally[r] = tally.TryGetValue(r, out int c) ? c + 1 : 1;
+            {
+                if (sessionRoles == null) break;
+                int? vote = sessionRoles.TryGetValue(mem, out int r) ? r : (int?)null;
+                if (vote == null) foreach (string anc in ParentNames(mem)) if (sessionRoles.TryGetValue(anc, out int ar)) { vote = ar; break; }
+                if (vote != null) tally[vote.Value] = tally.TryGetValue(vote.Value, out int c) ? c + 1 : 1;
+            }
             if (tally.Count == 1 && tally.Keys.First() != defaultRole) got.Add(new RecoveredRole { Name = n, Role = tally.Keys.First(), From = "fuse group" });
             else if (tally.Count > 1) undecided.Add(new UndecidedGroup { Name = n, MemberRoles = tally });
         }

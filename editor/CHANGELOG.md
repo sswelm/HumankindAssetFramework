@@ -9,8 +9,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   probe I lose everything again"). Roles are kept by part name, and a fuse renames every part it groups: the galley's
   recipe named 149 parts, the fused file has 15, and all 15 came back Default, oars and sail included. A part new to
   the session now takes the role the last Generate of the Output GLB gave it, from the role lists Generate writes
-  beside it; a part never generated takes the role its fuse-group members share, from the fuse report beside the
-  source. A group whose members disagree stays undecided and the status names it. On the galley, the first record
+  to `Assets/FactorySource/VehicleLab` under the output's file name; a part not in them takes the role its fuse-group
+  members share, from the fuse report beside the source. A group whose members disagree stays undecided and the
+  status names it. On the galley, the first record
   restores all 15 parts to their 2026-10-20 roles, and the fuse groups alone restore 9 and name the other 6. A part
   the session already listed keeps its role, Default included, and ＜new model＞ still starts from nothing.
 
