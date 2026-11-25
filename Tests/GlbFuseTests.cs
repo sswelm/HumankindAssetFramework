@@ -767,6 +767,36 @@ public class GlbFuseTests
         Assert.DoesNotContain(off[1].Warnings, w => w.Contains("Check mirrored parts"));  // nothing is see-through: nothing is said
     }
 
+    // STILL REVERSED, AND LEFT OUT AS A HIDDEN TWIN (2026-11-25, the re-land on the master that has the hidden-twin rule):
+    // the lone mirrored strip of the test below, with a plain quad lying on it, wound the other way and cut differently
+    // (two triangles over the strip's six), and a wall close behind the strip. No camera sees the strip's front and the
+    // quad's side is seen, so the strip's six faces are not in the fused shell - and a face that is not written cannot be
+    // see-through: nothing is counted and nothing is announced.
+    [Fact]
+    public void A_mirrored_face_left_out_as_a_hidden_twin_is_not_counted_as_still_reversed()
+    {
+        GlbDisconnectedParts.Result Fuse(bool cover, bool wall)
+        {
+            var parts = MirrorPairs(true, true, true).ToList();                                                          // nodes 0..5
+            var lone = Strip("Lone", 0, 1, 40, inward: true); lone.Scale = new double[] { -1, 1, 1 }; parts.Add(lone);   // 6: world x -1..0, facing -Z
+            parts.Add(cover ? Quad("Cover", -1, 0, 0, 3, 40) : Quad("Cover", 5, 6, 0, 3, 40));                           // 7: +Z, on the strip or beside it
+            if (wall) parts.Add(Box("Wall", 12, -6.5f, -3, 27.9f, false));                                               // 8: z 27.9..39.9, not in the group
+            return GlbDisconnectedParts.FuseNodes(BuildGlb(parts.ToArray()), AllNodes(8), 0.0, null, false);
+        }
+        var hidden = Fuse(cover: true, wall: true);
+        Assert.Equal(6, hidden.HiddenFacesRemoved); Assert.Equal(0, FacesDown(hidden.Bytes, "P0_Fused"));
+        Assert.Equal(0, hidden.MirroredStillReversedFaces); Assert.Equal(0, hidden.MirroredStillReversedParts);
+        Assert.DoesNotContain(hidden.Warnings, w => w.Contains("still reversed"));
+        // ...the same strip and quad without the wall: both sides show, nothing is left out, and the six faces are announced
+        var seen = Fuse(cover: true, wall: false);
+        Assert.Equal(0, seen.HiddenFacesRemoved); Assert.Equal(6, FacesDown(seen.Bytes, "P0_Fused"));
+        Assert.Equal(6, seen.MirroredStillReversedFaces); Assert.Equal(1, seen.MirroredStillReversedParts);
+        Assert.Contains(seen.Warnings, w => w.Contains("6 mirrored face(s) are still reversed"));
+        // ...and with the wall but the quad beside the strip there is no twin: the wall alone leaves nothing out
+        var noTwin = Fuse(cover: false, wall: true);
+        Assert.Equal(0, noTwin.HiddenFacesRemoved); Assert.Equal(6, noTwin.MirroredStillReversedFaces);
+    }
+
     [Fact]
     public void The_count_follows_the_box_for_every_shape_of_evidence()
     {
