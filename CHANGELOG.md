@@ -195,10 +195,10 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   - **The change** writes no different byte. With the box off, `FuseGroups` pools the groups' evidence as it does
     with the box on (jobs that share the setting, which is what the window sends) and gives each group the box would
     act on two numbers: the parts whose reversal the box would undo (`Result.MirroredCheckWouldUndo`), and the parts
-    and faces STILL reversed in what was written (`MirroredStillReversedParts/Faces`: faces of those parts that no
-    winding pass turned back, doubled pairs left out). A group with faces still reversed carries a warning, and the
-    window's status leads with those groups, most faces first. A group with evidence of its own against the verdict
-    is left out, as the box leaves it alone.
+    and faces STILL reversed in what was written (`MirroredStillReversedParts/Faces`). A face removed as a hidden
+    twin contributes to neither count. Faces retained as a doubled pair contribute to the total output of their
+    part when deciding whether a majority of its nondegenerate faces are reversed. The window lists groups with
+    reversed faces, most faces first. Groups with evidence against the pooled verdict follow their own evidence.
   - **A review by a second agent changed it before the push.** The first cut announced the parts the box would
     un-reverse as "facing inward": 846 parts in 18 groups on this ship, where the box changes seven. The winding
     passes turn many of them back by themselves; two mirrored closed boxes were announced as see-through in an output

@@ -834,6 +834,55 @@ public class GlbFuseTests
     }
 
     [Fact]
+    public void Retained_two_sided_faces_count_toward_the_mirrored_parts_majority()
+    {
+        var parts = MirrorPairs(true, true, true).ToList();
+        var lone = Strip("Mirrored", 0, 1, 40, inward: true);
+        var front = Strip("Front", 0, 1, 60, inward: false);
+        var back = Strip("Back", 0, 1, 60, inward: true);
+        int vertices = lone.Positions.Length / 3, stripVertices = front.Positions.Length / 3;
+        lone.Positions = lone.Positions.Concat(front.Positions).Concat(back.Positions).ToArray();
+        lone.Indices = lone.Indices.Concat(front.Indices.Select(i => i + vertices))
+            .Concat(back.Indices.Select(i => i + vertices + stripVertices)).ToArray();
+        lone.Scale = new double[] { -1, 1, 1 };
+        parts.Add(lone);
+
+        GlbDisconnectedParts.FuseGroups(BuildGlb(parts.ToArray()), new List<GlbDisconnectedParts.FuseJob>
+        {
+            new GlbDisconnectedParts.FuseJob { NodeIndices = AllNodes(6), Name = "Fused_A" },
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 6 }, Name = "Fused_B" }
+        }, 0.0, out var off);
+        Assert.Equal(18, off[1].OutputTriangles);
+        Assert.Equal(1, off[1].MirroredCheckWouldUndo);
+        Assert.Equal(6, off[1].MirroredStillReversedFaces);
+        Assert.Equal(0, off[1].MirroredStillReversedParts);
+    }
+
+    [Fact]
+    public void A_hidden_twin_left_out_of_the_output_does_not_count_as_reversed()
+    {
+        var parts = MirrorPairs(true, true, true).ToList();
+        var underside = Level("Mirrored underside", 0, 1, 40, 41, 10, down: true);
+        underside.Scale = new double[] { -1, 1, 1 };
+        parts.Add(underside);
+        // The larger cover shares no vertices with the mirrored face. It can hide it without creating an
+        // exact paired triangle or supplying seam evidence about the mirrored part.
+        parts.Add(Level("Deck", -2, 1, 39, 42, 10, down: false));
+
+        GlbDisconnectedParts.FuseGroups(BuildGlb(parts.ToArray()), new List<GlbDisconnectedParts.FuseJob>
+        {
+            new GlbDisconnectedParts.FuseJob { NodeIndices = AllNodes(6), Name = "Fused_A" },
+            new GlbDisconnectedParts.FuseJob { NodeIndices = new[] { 6, 7 }, Name = "Fused_B" }
+        }, 0.0, out var off);
+        Assert.Equal(2, off[1].HiddenFacesRemoved);
+        Assert.Equal(2, off[1].OutputTriangles);
+        Assert.Equal(1, off[1].MirroredCheckWouldUndo);
+        Assert.Equal(0, off[1].MirroredStillReversedFaces);
+        Assert.Equal(0, off[1].MirroredStillReversedParts);
+        Assert.DoesNotContain(off[1].Warnings, w => w.Contains("Check mirrored parts"));
+    }
+
+    [Fact]
     public void A_group_with_evidence_of_its_own_against_the_verdict_is_not_named()
     {
         // The box leaves such a group alone (the Romanic's group H), so the announcement must too. Group A: nine pre-flipped

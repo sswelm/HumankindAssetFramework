@@ -44,7 +44,7 @@ public static partial class GlbDisconnectedParts
         // a fuse with "Check mirrored parts" OFF on a file that stores its mirrored parts already facing outward (0 = not
         // such a file, or the box is on): the parts of this group whose glTF reversal the box would undo; and, of those,
         // the parts and faces still reversed in what was written - the winding passes turn some back by themselves, and
-        // only these can be see-through (doubled pairs left out; a part counts when most of its faces are still reversed)
+        // only these can be see-through. A part counts when most of its nondegenerate output faces are still reversed.
         public int MirroredCheckWouldUndo, MirroredStillReversedParts, MirroredStillReversedFaces;
         public Compaction Compaction;   // what writing the output left out (never null on a written result); its line is the LAST of Details when it has one
     }
@@ -3199,17 +3199,18 @@ public static partial class GlbDisconnectedParts
         // MIRRORED PARTS STILL REVERSED (option off; review of the first cut, 2026-11-24). Counting the parts the box would
         // un-reverse said "846 parts face inward" for parts the passes above had already turned back: two mirrored closed
         // boxes were announced as see-through in an output byte-identical to the box-on one. What can be see-through is a
-        // face the gather reversed and nothing turned back - flip false - on a part the box would un-reverse. A doubled
-        // pair shows from both sides whatever its winding and a flat face has no visible side. A part counts when most
-        // of its measured faces are reversed.
+        // face the gather reversed and nothing turned back - flip false - on a part the box would un-reverse.
+        // A doubled pair contributes to the part's output face count. Its faces show from both sides, so they
+        // contribute nothing to the reversed count. Exclude flat and dropped faces from both counts.
         if (boxWouldUnreverse != null)
         {
             var facesOfPart = new int[partNames.Count]; var stillOfPart = new int[partNames.Count];
             for (int f = 0; f < faceCount; f++)
             {
                 int pp = partOf[tris[f * 3]];
-                if (!boxWouldUnreverse[pp] || twinFace[f] || drop[f] || !(FaceArea(f, pos) > 0)) continue;   // a face left out as a hidden twin is not in the output
-                facesOfPart[pp]++; if (!flip[f]) stillOfPart[pp]++;
+                if (!boxWouldUnreverse[pp] || drop[f] || !(FaceArea(f, pos) > 0)) continue;
+                facesOfPart[pp]++;
+                if (!flip[f] && !twinFace[f]) stillOfPart[pp]++;
             }
             for (int pp = 0; pp < facesOfPart.Length; pp++)
             {
