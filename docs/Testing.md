@@ -5221,7 +5221,12 @@ when no camera above the horizon can see its front and the other side of its pla
 (`editor/GlbDisconnectedParts.Covered.cs`, 2026-11-25). The report was the RSS Centurion's upper deck, drawn in game
 with grey patches; the cause, what was ruled out and the versions of the rule that were refused are in the root
 CHANGELOG under the same date. The reporter fused the ship again with the first cut of the rule, baked it and rebuilt
-the mod on 2026-11-25: the deck is clean in game. The measurements below are of the last version.
+the mod on 2026-11-25: the deck is clean in game. The measurements below describe the earlier review builds.
+
+The follow-up review added GLB fixtures for blended and alpha-masked overlays and for alpha-masked geometry in
+another node. The pass preserves those faces and excludes them from coverage and ray tests. The closed-crate
+fixture also covers a panel inset by 0.05 on a ten-unit wall. Checking the actual triangle vertices and edge
+midpoints preserves the wall along that strip. Coverage and visibility still use discrete samples.
 
 **What the measurement is.** Each model's split source (the file the Model Fuser opens) is fused twice, by the
 commit before the rule and by the rule, with the groups of its own `.fuse.txt` sidecar, weld 0, *Check mirrored

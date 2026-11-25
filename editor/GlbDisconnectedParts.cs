@@ -3110,7 +3110,7 @@ public static partial class GlbDisconnectedParts
         }
         else
         {
-            var finalCorners = new double[9 * faceCount]; var glassFace = new bool[faceCount];
+            var finalCorners = new double[9 * faceCount]; var nonOpaque = new bool[faceCount];
             JArray materialsJson = root["materials"] as JArray;
             for (int f = 0; f < faceCount; f++)
             {
@@ -3119,9 +3119,9 @@ public static partial class GlbDisconnectedParts
                     Vec3 v = P(f, flip[f] && c > 0 ? 3 - c : c);
                     finalCorners[9 * f + 3 * c] = v.X; finalCorners[9 * f + 3 * c + 1] = v.Y; finalCorners[9 * f + 3 * c + 2] = v.Z;
                 }
-                glassFace[f] = MaterialIsBlend(materialsJson, mat[tris[f * 3]]);
+                nonOpaque[f] = MaterialUsesAlpha(materialsJson, mat[tris[f * 3]]);
             }
-            CoveredFaces hiddenTwins = FindCoveredFaces(finalCorners, rounding, glassFace, () =>
+            CoveredFaces hiddenTwins = FindCoveredFaces(finalCorners, rounding, nonOpaque, () =>
             {
                 // every other node of the file, as the exposure tests above read them: the fuse's one ray tree, this group's own nodes left out
                 TriBvh file = fileCache.RayTree();

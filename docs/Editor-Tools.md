@@ -584,11 +584,12 @@ windows. **Deep dive:**
   already done to them, and the source's own winding is what is in question. A part *double-sided by duplication* (every
   face twice, wound both ways) is kept as two copies through the weld, so each is judged and emitted whole — welded
   together they made four-face edges everywhere and an importer then dropped one copy at random. **Hidden twins are left out** (0.5.7, at weld 0 only; with a non-zero weld the report says the pass was not run): where a face lies
-  exactly on a face wound the other way — a ceiling under the deck laid on it, the inner copy of a doubled mast — and no
+  exactly on an opaque face wound the other way — a ceiling under the deck laid on it, the inner copy of a doubled mast — and no
   camera above the horizon can see its front while the other side is seen, the fused shell carries the visible face only.
   The game drew the hidden one through the visible one (the RSS Centurion's upper deck, in grey patches). A pair that
-  shows on both sides (a flag, a boat's shell with a painted inside) keeps both, and so does a pair nothing sees; glass
-  hides nothing. The fused part then has FEWER triangles than its sources: the status line ends with
+  shows on both sides (a flag, a boat's shell with a painted inside) keeps both, and so does a pair nothing sees.
+  The pass preserves blended and alpha-masked geometry and looks through it when checking visibility.
+  The fused part then has FEWER triangles than its sources: the status line ends with
   `N hidden twin face(s) left out`, and the report's `hidden twins:` line names the parts they came from and what was kept.
   It also follows that the underside of a level sheet doubled in the open (an awning) is left out. Faces lying on each
   other and wound the SAME way are a different defect and are not touched. Every sheet's report line now carries its

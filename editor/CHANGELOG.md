@@ -12,7 +12,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   A fuse **at weld 0** now leaves out a face that lies exactly on a face of the same group wound the other way, when no
   camera above the horizon can see its front and the other side is seen, so one surface remains. Kept as they are: a
   pair that shows on both sides (a flag, a boat's shell with a painted inside), a pair nothing sees, and faces lying on
-  each other wound the SAME way. Glass hides nothing. With a non-zero weld the pass is not run and the report says so.
+  each other wound the SAME way. The pass preserves BLEND and MASK faces and treats them as transparent to its
+  rays. Reversing a face back to its authored winding requires support at its vertices and edge midpoints as
+  well as its interior samples. With a non-zero weld the pass is not run and the report says so.
   A face that the fuse's own winding passes had turned onto its authored twin gets its authored winding back first.
   A fused part can therefore have fewer triangles than its sources: the status line ends with `N hidden twin face(s)
   left out` and the report's `hidden twins:` line names the parts. On that ship the fuse leaves out 64,361 of 468,161

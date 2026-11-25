@@ -11,7 +11,7 @@
 //
 //   * CANDIDATE - a face most of whose sample points (its centroid and at least four of six more) lie ON a face of the
 //     same group wound the other way: within the fuse's own rounding distance of its plane, inside its outline, normals
-//     opposed. Triangulation and material do not matter; position and winding do.
+//     opposed. Both faces must be opaque, and they can be triangulated differently.
 //   * HIDDEN - a face is seen when a ray from one of those points reaches open air along one of the directions the
 //     game's cameras look from (CoveredViews: straight above, and eight ways round at 15, 40 and 65 degrees above the
 //     horizon; more for a larger face), that camera being in front of the face. The rays leave from the face's corners as well as its middle
@@ -42,8 +42,8 @@
 // switch: the pass runs in every fuse.
 //
 // Rays are stopped by the triangles of the FILE that show their front to the camera (the group's own welded faces in
-// their final winding, and every other node as the file winds it, a mirrored node as glTF renders it), except glass: a face of a BLEND material hides nothing, in the group or in
-// any other node. Two trees of boxes (TriBvh): one per group over its own faces, for the coincidence test and its share of the
+// their final winding, and every other node as the file winds it, a mirrored node as glTF renders it). BLEND and
+// MASK can let a surface show through, so the rays pass through them. Two trees of boxes (TriBvh): one per group over its own faces, for the coincidence test and its share of the
 // rays, and ONE for the fuse over every other node of the file (OccluderCache.RayTree), built when the first group with
 // a candidate asks and shared by them all.
 //   A UNIFORM GRID was the first structure, and HMS Roberts refused it: one of its groups is 961,668 faces of dense
@@ -71,7 +71,7 @@ public static partial class GlbDisconnectedParts
     internal delegate bool RayStop(double ox, double oy, double oz, double dx, double dy, double dz);
 
     const int CoveredSamples = 7;   // the coincidence test's points: the centroid, three towards the corners, three towards the edges (0.7 of the way)
-    const int TurnBackSamples = 13;  // the turn-back's: those seven and the six rim points (0.95 of the way) - ALL of them must be covered
+    const int TurnBackSamples = 13;  // the turn-back's: those seven plus the vertices and edge midpoints
     // WHICH POINTS OF A FACE THE RAYS LEAVE FROM. The seven above all lie in the middle half of the face, and a face is
     // seen as soon as its RIM is (review of the first cut: a doubled panel with a plate three quarters its size in front
     // of it was left out with 45 % of its area in plain view). So six more, 0.95 of the way to the corners (7-9) and to
@@ -242,19 +242,20 @@ public static partial class GlbDisconnectedParts
     /// <param name="tierUnit">the length a face is "small" under, for how many points and directions it is asked from:
     /// a 256th of the MODEL; asked for only when a candidate exists (null or not positive = a 256th of the group)</param>
     /// <param name="tol">how far apart "the same plane" may be: the fuse's rounding distance</param>
-    /// <param name="glass">per face: it stops no ray (a BLEND material); null = none</param>
+    /// <param name="nonOpaque">per face: BLEND or MASK; preserved and excluded as covers and ray blockers. Null = none.</param>
     /// <param name="others">what else of the file stops a ray; asked for only when a candidate exists (null = nothing)</param>
-    internal static CoveredFaces FindCoveredFaces(double[] corners, double tol, bool[] glass, Func<RayStop> others, int maxParallel = -1, bool[] flipped = null, Func<double> tierUnit = null)
+    internal static CoveredFaces FindCoveredFaces(double[] corners, double tol, bool[] nonOpaque, Func<RayStop> others, int maxParallel = -1, bool[] flipped = null, Func<double> tierUnit = null)
     {
         int faceCount = corners.Length / 9;
         var found = new CoveredFaces { Drop = new bool[faceCount] };
         if (faceCount < 2) return found;
         var options = new ParallelOptions { MaxDegreeOfParallelism = maxParallel };
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        // unit normals; a face without one (collapsed, a needle) is neither covered nor a cover
+        // Only opaque faces participate. Keep BLEND and MASK geometry and let visibility rays through it.
         var unit = new double[3 * faceCount]; var valid = new bool[faceCount]; var skip = new bool[faceCount];
         for (int f = 0; f < faceCount; f++)
         {
+            if (nonOpaque != null && nonOpaque[f]) { skip[f] = true; continue; }
             int o = f * 9;
             double ax = corners[o + 3] - corners[o], ay = corners[o + 4] - corners[o + 1], az = corners[o + 5] - corners[o + 2];
             double bx = corners[o + 6] - corners[o], by = corners[o + 7] - corners[o + 1], bz = corners[o + 8] - corners[o + 2];
@@ -267,7 +268,7 @@ public static partial class GlbDisconnectedParts
         if (own.Empty) return found;
 
         // the face's sample points: its centroid (0), three towards its corners (1-3) and its edges (4-6), then the same six at the rim (7-12)
-        void Sample(int f, int k, out double x, out double y, out double z)
+        void Sample(int f, int k, out double x, out double y, out double z, bool onBoundary = false)
         {
             int o = f * 9;
             double cx = (corners[o] + corners[o + 3] + corners[o + 6]) / 3.0, cy = (corners[o + 1] + corners[o + 4] + corners[o + 7]) / 3.0, cz = (corners[o + 2] + corners[o + 5] + corners[o + 8]) / 3.0;
@@ -276,6 +277,7 @@ public static partial class GlbDisconnectedParts
             double reach = k <= 6 ? 0.7 : 0.95; int j = k <= 6 ? k : k - 6;
             if (j <= 3) { int c = (j - 1) * 3; tx = corners[o + c]; ty = corners[o + c + 1]; tz = corners[o + c + 2]; }
             else { int c = (j - 4) * 3, n = ((j - 4 + 1) % 3) * 3; tx = (corners[o + c] + corners[o + n]) * 0.5; ty = (corners[o + c + 1] + corners[o + n + 1]) * 0.5; tz = (corners[o + c + 2] + corners[o + n + 2]) * 0.5; }
+            if (onBoundary && k > 6) { x = tx; y = ty; z = tz; return; }
             x = cx + reach * (tx - cx); y = cy + reach * (ty - cy); z = cz + reach * (tz - cz);
         }
         // does face g, wound the other way than f, hold the point: in its plane within the rounding, inside its outline.
@@ -325,7 +327,8 @@ public static partial class GlbDisconnectedParts
         // ceiling up, and the fused shell carried two surfaces of two materials facing the sky in one plane, which fight
         // under any renderer. A face the passes turned, which now lies on faces they did NOT turn and wound the same
         // way, was authored opposite to them: it gets its authored winding back, and is then judged like any twin.
-        //   ALL of it must lie on them: every one of the thirteen points, the rim's included (third review, a fixture).
+        //   All thirteen samples must be supported, including the actual vertices and edge midpoints. Insetting the
+        //   boundary samples let a panel miss a thin strip of the face and still turn it back.
         //   The first cut of this step asked for five of the seven inner points, as a candidate does - but a candidate is
         //   only left out when no camera sees its front, and this step takes the outward front the passes gave the face
         //   away without asking anyone. Where the face reached past the one it lay on, that part of the shell was then
@@ -341,7 +344,7 @@ public static partial class GlbDisconnectedParts
                 Sample(f, 0, out double x, out double y, out double z);
                 if (CoverAt(f, x, y, z, true) < 0) return;
                 int on = 1;
-                for (int k = 1; k < TurnBackSamples; k++) { Sample(f, k, out x, out y, out z); if (CoverAt(f, x, y, z, true) < 0) break; on++; }
+                for (int k = 1; k < TurnBackSamples; k++) { Sample(f, k, out x, out y, out z, onBoundary: true); if (CoverAt(f, x, y, z, true) < 0) break; on++; }
                 if (on == TurnBackSamples) back[f] = true;
             });
             for (int f = 0; f < faceCount; f++)
@@ -372,11 +375,9 @@ public static partial class GlbDisconnectedParts
         found.Candidates = candidateFaces.Count; found.CoincideMs = clock.ElapsedMilliseconds; clock.Restart();
         if (candidateFaces.Count == 0) return found;
 
-        // rays, against the whole file: the group's own faces (the tree above; glass stops nothing) and whatever else the
+        // rays, against the whole file: the group's own opaque faces (the tree above) and whatever else the
         // caller has. Is the face's FRONT seen by a camera? Stops at the first ray that gets out.
         RayStop rest = others?.Invoke();
-        bool[] noStop = null;
-        if (glass != null) for (int f = 0; f < faceCount; f++) if (glass[f]) { noStop = glass; break; }
         double lift = 8 * tol;
         // HOW MANY POINTS OF A FACE ASK (measured on the Centurion, 2026-11-24: seven points of every face cost 36 s of
         // rays over 22 groups, most of it on faces far smaller than anything that could stand in front of part of them):
@@ -414,7 +415,7 @@ public static partial class GlbDisconnectedParts
                 {
                     Sample(f, k, out double x, out double y, out double z);
                     double ox = x + nx * lift, oy = y + ny * lift, oz = z + nz * lift;
-                    if (!own.Blocked(ox, oy, oz, dx, dy, dz, null, noStop) && (rest == null || !rest(ox, oy, oz, dx, dy, dz))) return true;
+                    if (!own.Blocked(ox, oy, oz, dx, dy, dz) && (rest == null || !rest(ox, oy, oz, dx, dy, dz))) return true;
                 }
             }
             return false;
@@ -452,7 +453,10 @@ public static partial class GlbDisconnectedParts
         return found;
     }
 
-    // a BLEND material is glass: it hides nothing behind it
-    static bool MaterialIsBlend(JArray materials, int material) =>
-        materials != null && material >= 0 && material < materials.Count && (string)(materials[material] as JObject)?["alphaMode"] == "BLEND";
+    static bool MaterialUsesAlpha(JArray materials, int material)
+    {
+        string mode = materials != null && material >= 0 && material < materials.Count
+            ? (string)(materials[material] as JObject)?["alphaMode"] : null;
+        return mode == "BLEND" || mode == "MASK";
+    }
 }

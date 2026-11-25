@@ -754,14 +754,16 @@ public class GlbFuseHiddenTwinTests
     // GLASS IS GLASS IN ANY NODE (review of the first cut): a canopy that is the BLEND primitive of a node which also has an
     // opaque frame, 50 units away. Only nodes made wholly of glass were left out of the file's tree then, so the canopy
     // stopped rays and the panel seen through it lost a side.
-    [Fact]
-    public void Glass_that_shares_a_node_with_opaque_parts_still_stops_nothing()
+    [Theory]
+    [InlineData("BLEND")]
+    [InlineData("MASK")]
+    public void A_nonopaque_primitive_that_shares_a_node_with_opaque_parts_stops_no_ray(string alphaMode)
     {
         var s = new Soup();
         s.Quad("panel:a", V(0, 0, 4), V(0, 0, 0), V(0, 4, 0), V(0, 4, 4)); s.Quad("panel:b", V(0, 0, 0), V(0, 0, 4), V(0, 4, 4), V(0, 4, 0));
         s.Box("canopy", V(0.01, -1, -1), V(6, 6, 5)); s.Box("frame", V(50, 0, 0), V(51, 1, 1));
         Part cabin = PartOf("Cabin", 1, s, t => t.StartsWith("canopy")); cabin.Second = PartOf("Cabin", 0, s, t => t.StartsWith("frame"));
-        byte[] glb = BuildGlb(Materials(null, "BLEND"), PartOf("Panel", 0, s, t => t.StartsWith("panel")), cabin);
+        byte[] glb = BuildGlb(Materials(null, alphaMode), PartOf("Panel", 0, s, t => t.StartsWith("panel")), cabin);
         var r = GlbDisconnectedParts.FuseNodes(glb, new[] { 0 }, 0, "Fused");
         Assert.Equal(0, r.HiddenFacesRemoved); Assert.Equal(4, r.OutputTriangles);
         Assert.Contains("kept: 4 whose pair shows on both sides", Assert.Single(r.Details, d => d.StartsWith("hidden twins:")));
@@ -944,11 +946,13 @@ public class GlbFuseHiddenTwinTests
     // ...through the fuse (the third review's fixture): a CLOSED crate stored inside out, a panel on its east wall that
     // covers the wall only from z = 0.9 up. Turned back on five points of seven, the wall then faced into the closed crate,
     // nothing saw it, and it was left out: the crate stood open over a strip 0.9 wide. It stays as the passes left it.
-    [Fact]
-    public void A_wall_only_partly_under_a_panel_stays_as_the_passes_left_it()
+    [Theory]
+    [InlineData(0.9)]
+    [InlineData(0.05)]
+    public void A_wall_only_partly_under_a_panel_stays_as_the_passes_left_it(double gap)
     {
         var s = new Soup().Box("crate", V(0, 0, 0), V(10, 10, 10), true);
-        s.Quad("panel", V(10, -5, 15), V(10, -5, 0.9), V(10, 15, 0.9), V(10, 15, 15));                           // faces +X
+        s.Quad("panel", V(10, -5, 15), V(10, -5, gap), V(10, 15, gap), V(10, 15, 15));                           // faces +X
         byte[] glb = BuildGlb(Materials(null, null), PartOf("Crate", 0, s, t => t.StartsWith("crate")), PartOf("Panel", 1, s, t => t == "panel"));
         var r = GlbDisconnectedParts.FuseNodes(glb, new[] { 0, 1 }, 0, "Fused");
         Assert.Equal(0, r.HiddenFacesRemoved); Assert.Equal(14, r.OutputTriangles); Assert.Equal(12, r.FacesRewound);
@@ -1023,6 +1027,22 @@ public class GlbFuseHiddenTwinTests
         var tris = FusedTriangles(r.Bytes, r.FusedNodeName);
         Assert.DoesNotContain(tris[0], t => Math.Abs(t.height - 10) < 1e-6);
         Assert.Equal(2, tris[1].Count(t => t.normalY > 0.99));
+    }
+
+    [Theory]
+    [InlineData("BLEND")]
+    [InlineData("MASK")]
+    public void A_nonopaque_overlay_cannot_replace_an_opaque_roof(string alphaMode)
+    {
+        var s = new Soup().Box("house", V(0, 0, 0), V(10, 10, 10), inward: true);
+        s.Quad("deck", V(0, 10, 10), V(10, 10, 10), V(10, 10, 0), V(0, 10, 0), otherDiagonal: true);
+        byte[] glb = BuildGlb(Materials(null, alphaMode), PartOf("House", 0, s, t => t.StartsWith("house")), PartOf("Deck", 1, s, t => t == "deck"));
+        var r = GlbDisconnectedParts.FuseNodes(glb, new[] { 0, 1 }, 0, "Fused");
+        Assert.Equal(0, r.HiddenFacesRemoved);
+        Assert.Equal(14, r.OutputTriangles);
+        var roof = FusedTriangles(r.Bytes, r.FusedNodeName)[0].Where(t => Math.Abs(t.height - 10) < 1e-6).ToList();
+        Assert.Equal(2, roof.Count);
+        Assert.All(roof, t => Assert.Equal(1.0, t.normalY, 6));
     }
 
     // every island row of the report counts the faces written: they add up to the shell
@@ -1107,6 +1127,7 @@ public class GlbFuseHiddenTwinTests
     // and the house's ceiling beside them goes either way
     [Theory]
     [InlineData("BLEND", "show on both sides")]
+    [InlineData("MASK", "show on both sides")]
     [InlineData(null, "buried on both sides")]
     public void The_fuse_reads_glass_from_the_materials(string caseAlpha, string expected)
     {

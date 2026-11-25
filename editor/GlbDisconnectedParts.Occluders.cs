@@ -26,7 +26,7 @@ public static partial class GlbDisconnectedParts
         readonly byte[] source; readonly object gate = new object();
         readonly HashSet<int> excluded;
         double[][] nodes;   // published last: a reader that sees it non-null sees every array
-        int[][] glassRuns;  // per node: the runs of its array (first double, one past the last) that came from a BLEND primitive; null = none
+        int[][] alphaRuns;  // per node: ranges of corners from BLEND or MASK primitives
         bool[] mirroredNode; // per node: its world transform mirrors, so glTF renders its triangles the other way round
         double[][] lo, hi;  // per node: the bounds of its corners (a group's bounds are those of the nodes it sees, as the per-group read's were)
 
@@ -80,10 +80,8 @@ public static partial class GlbDisconnectedParts
 
         // THE FILE IN ONE RAY TREE (2026-11-24, the hidden twins - GlbDisconnectedParts.Covered.cs): every node read, one
         // segment a node (so a group leaves its own nodes out by index), shared read-only by every group of the fuse.
-        //   * GLASS IS LEFT OUT PER PRIMITIVE (review of the first cut): a canopy that is the BLEND primitive of a node
-        //     which also has a frame was solid while only whole-glass nodes were left out, and a panel seen through it
-        //     was left out of the fuse. A node with glass gets a copy of its array without those runs; the others are
-        //     shared as they are.
+        //   * BLEND and MASK are filtered per primitive. A canopy can share a node with an opaque frame. Copy its
+        //     corners without the alpha-tested or blended runs and keep the frame in the tree.
         //   * BUILT OFF THE CACHE LOCK (same review): the build is seconds on a file of millions of triangles, and under
         //     `gate` every other group's Belly and View waited for it. The nodes are read under `gate`, the tree is built
         //     under its own lock and published last.
@@ -105,7 +103,7 @@ public static partial class GlbDisconnectedParts
                 var solid = new double[all.Length][]; double size = 0;
                 for (int ni = 0; ni < all.Length; ni++)
                 {
-                    solid[ni] = WithoutRuns(all[ni], glassRuns[ni]);
+                    solid[ni] = WithoutRuns(all[ni], alphaRuns[ni]);
                     if (mirroredNode[ni] && solid[ni].Length > 0) solid[ni] = Rewound(solid[ni], ReferenceEquals(solid[ni], all[ni]));
                     if (lo[ni] != null) for (int a = 0; a < 3; a++) if (hi[ni][a] - lo[ni][a] > size) size = hi[ni][a] - lo[ni][a];
                 }
@@ -165,7 +163,7 @@ public static partial class GlbDisconnectedParts
 
         void Build()
         {
-            var read = new List<double[]>(); var readLo = new List<double[]>(); var readHi = new List<double[]>(); var readGlass = new List<int[]>(); var readMirrored = new List<bool>();
+            var read = new List<double[]>(); var readLo = new List<double[]>(); var readHi = new List<double[]>(); var readAlpha = new List<int[]>(); var readMirrored = new List<bool>();
             try
             {
                 Parsed();   // the fuse's one parse (already done when a plan is reading; a cache asked first parses here)
@@ -178,7 +176,7 @@ public static partial class GlbDisconnectedParts
                 {
                     if (excluded != null && excluded.Contains(ni))
                     {
-                        read.Add(Array.Empty<double>()); readLo.Add(null); readHi.Add(null); readGlass.Add(null); readMirrored.Add(false);
+                        read.Add(Array.Empty<double>()); readLo.Add(null); readHi.Add(null); readAlpha.Add(null); readMirrored.Add(false);
                         continue;
                     }
                     var corners = new List<double>(); List<int> runs = null; bool mirrored = false;
@@ -193,7 +191,7 @@ public static partial class GlbDisconnectedParts
                         foreach (JObject prim in TrianglesOnly(pl))
                         {
                             var attrs = prim["attributes"] as JObject; if (attrs?["POSITION"] == null) continue;
-                            int runStart = corners.Count; bool blend = MaterialIsBlend(materials, prim["material"] == null ? -1 : prim.Value<int>("material"));
+                            int runStart = corners.Count; bool usesAlpha = MaterialUsesAlpha(materials, prim["material"] == null ? -1 : prim.Value<int>("material"));
                             int posAcc = attrs.Value<int>("POSITION"); int vertCount = reader.Count(posAcc);
                             int idxAcc = prim["indices"] == null ? -1 : prim.Value<int>("indices");
                             int faceN = (idxAcc < 0 ? vertCount : reader.Count(idxAcc)) / 3;
@@ -205,14 +203,14 @@ public static partial class GlbDisconnectedParts
                                 corners.Add(a.X); corners.Add(a.Y); corners.Add(a.Z); corners.Add(b.X); corners.Add(b.Y); corners.Add(b.Z); corners.Add(c.X); corners.Add(c.Y); corners.Add(c.Z);
                                 UpdateBounds(l, h, a); UpdateBounds(l, h, b); UpdateBounds(l, h, c);
                             }
-                            if (blend && corners.Count > runStart) { (runs ?? (runs = new List<int>())).Add(runStart); runs.Add(corners.Count); }
+                            if (usesAlpha && corners.Count > runStart) { (runs ?? (runs = new List<int>())).Add(runStart); runs.Add(corners.Count); }
                         }
                     }
-                    read.Add(corners.ToArray()); readLo.Add(l); readHi.Add(h); readGlass.Add(runs?.ToArray()); readMirrored.Add(mirrored);
+                    read.Add(corners.ToArray()); readLo.Add(l); readHi.Add(h); readAlpha.Add(runs?.ToArray()); readMirrored.Add(mirrored);
                 }
             }
-            catch (Exception) { read.Clear(); readLo.Clear(); readHi.Clear(); readGlass.Clear(); readMirrored.Clear(); }
-            lo = readLo.ToArray(); hi = readHi.ToArray(); glassRuns = readGlass.ToArray(); mirroredNode = readMirrored.ToArray();
+            catch (Exception) { read.Clear(); readLo.Clear(); readHi.Clear(); readAlpha.Clear(); readMirrored.Clear(); }
+            lo = readLo.ToArray(); hi = readHi.ToArray(); alphaRuns = readAlpha.ToArray(); mirroredNode = readMirrored.ToArray();
             System.Threading.Volatile.Write(ref nodes, read.ToArray());
         }
     }
