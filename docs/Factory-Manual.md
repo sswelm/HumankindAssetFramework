@@ -247,8 +247,8 @@ their settings and work together**:
   invisible. Lightest fix; assumes a roughly convex hull (vehicles/ships).
 - **Multi-fragment split (over-ceiling bake)** — *opt-in; **both** bake paths (static since 0.5.7, **animated since
   2026-09-20**).* A bake over the engine's 16,320-quad
-  per-fragment draw ceiling splits into spatial chunks (`…_ModelMesh_B`, …, up to 8; as few as fit, each cut placed
-  where the quads of its two sides balance, so the chunks fill evenly), each drawn as its own fragment on
+  per-fragment draw ceiling splits into spatial chunks (`…_ModelMesh_B`, …, up to 8). The splitter targets balanced
+  quad counts and checks neighboring cuts before trying another chunk. Each chunk draws as its own fragment on
   the unit, so the whole model renders instead of the tail silently clipping. Every split bake raises a **budget
   warning** (console + dialog) with the total — "N quads across K fragments, K.K× the normal per-unit budget" — because
   more fragments are more draw work: reduce first, split only when further reduction would visibly hurt. Unchecked
