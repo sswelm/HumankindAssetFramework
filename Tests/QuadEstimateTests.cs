@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
@@ -131,6 +132,51 @@ namespace HumankindAssetFramework.Tests
             Assert.All(two, c => Assert.True(QuadEstimate.EstimateQuads(tris, c) <= 50));
             Assert.Equal(sum > whole ? 3 : 2, two.Count);                            // ...unless the cut cost a quad
             Assert.Null(QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 12, maxCells: 8));   // 100 quads need nine cells of 12
+        }
+
+        // THE STARTING k IS JUDGED IN THE ORDER THE CUTS SEE (review of PR #322): a strip of 124 quads whose triangles are
+        // stored in scattered order. In that order the greedy estimate is 140, over 2 x 63, so the first version started at
+        // k = 3 and made three cells of 42; sorted along the strip it pairs every quad, and two cells of 62 do.
+        [Fact]
+        public void The_first_k_is_estimated_in_centroid_order_not_in_the_stored_order()
+        {
+            int[] grid = Grid(124, 1, out float[] gc);
+            var order = Enumerable.Range(0, 248).ToList();
+            var rng = new Random(7);
+            for (int i = order.Count - 1; i > 0; i--) { int j = rng.Next(i + 1); int t = order[i]; order[i] = order[j]; order[j] = t; }
+            var tris = new int[grid.Length]; var cent = new float[gc.Length];
+            for (int i = 0; i < 248; i++) { Array.Copy(grid, order[i] * 3, tris, i * 3, 3); Array.Copy(gc, order[i] * 3, cent, i * 3, 3); }
+            Assert.Equal(140, QuadEstimate.EstimateQuads(tris, Enumerable.Range(0, 248).ToList()));   // the fixture: scattered (124 in order)
+            var cells = QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 63, maxCells: 8);
+            Assert.Equal(2, cells.Count);
+            Assert.All(cells, c => Assert.True(QuadEstimate.EstimateQuads(tris, c) <= 63));
+            // ...and when the stored order's estimate is past the cap, the cap is still tried: two cells, not null
+            Assert.Equal(2, QuadEstimate.PartitionByQuadBudget(tris, cent, budget: 63, maxCells: 2).Count);
+        }
+
+        // a budget of nothing: null, as before the PR (the first version divided by it)
+        [Theory]
+        [InlineData(0)][InlineData(-5)]
+        public void A_budget_of_nothing_fits_nothing(int budget)
+        {
+            int[] tris = Grid(10, 4, out float[] cent);
+            Assert.Null(QuadEstimate.PartitionByQuadBudget(tris, cent, budget, maxCells: 8));
+        }
+
+        // the left side of every cut comes from one pass: its count at every position equals a fresh estimate of that prefix
+        [Fact]
+        public void The_prefix_counts_equal_a_fresh_estimate_of_every_prefix()
+        {
+            int[] tris = HalfWeldedHalfFaceted(out float[] cent);
+            var order = Enumerable.Range(0, tris.Length / 3).ToList();
+            var rng = new Random(3);
+            for (int i = order.Count - 1; i > 0; i--) { int j = rng.Next(i + 1); int t = order[i]; order[i] = order[j]; order[j] = t; }
+            foreach (var cell in new[] { Enumerable.Range(0, tris.Length / 3).ToList(), order })
+            {
+                int[] prefix = QuadEstimate.PrefixQuads(tris, cell);
+                Assert.Equal(cell.Count + 1, prefix.Length);
+                for (int m = 0; m <= cell.Count; m++) Assert.Equal(QuadEstimate.EstimateQuads(tris, cell.GetRange(0, m)), prefix[m]);
+            }
         }
 
         // x 0..10: a welded 10 x 10 grid (200 triangles, 100 quads); x 10..20: the same grid with no shared vertex (200
