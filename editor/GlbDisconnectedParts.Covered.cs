@@ -14,14 +14,21 @@
 //     opposed. Triangulation and material do not matter; position and winding do.
 //   * HIDDEN - a face is seen when a ray from one of those points reaches open air along one of the directions the
 //     game's cameras look from (CoveredViews: straight above, and eight ways round at 15, 40 and 65 degrees above the
-//     horizon), that camera being in front of the face. A candidate none of whose rays get out is left out when the
+//     horizon; more for a larger face), that camera being in front of the face. The rays leave from the face's corners as well as its middle
+//     (RayPoints*): a face is seen as soon as its rim is. A candidate none of whose rays get out is left out when the
 //     other side of its plane IS seen: the front of a face it lies on.
+//   * IN THE REST POSE. What stands in front of a face is where the file puts it; a part that an animation later moves
+//     away is still counted. The face that goes is the inner copy of a pair, so a neighbour moving off shows the outer
+//     copy that stayed - but this was reasoned, not measured.
 //   * FROM ABOVE THE HORIZON, not from everywhere. Rays over the face's whole hemisphere were the second cut, and the
 //     ship refused that too: of the part whose ceiling this was written for, 36 faces went where 59 go now - the rest
 //     let a ray out sideways from under the deck, and stayed. No camera of the game is down there. The fuse's other
 //     exposure tests ask the same thing the same way (from above, from the side). It follows that the UNDERSIDE of a
 //     level sheet doubled in the open (an awning, a wing made of two coincident skins) is left out: nothing above the
 //     horizon faces it.
+//   * AT WELD 0 ONLY. A non-zero weld crumples small parts into faces that lie every way, and what is in the way of a
+//     face is then no longer what the model shows: on real models at 1 and 2 permille, a tenth of the faces this pass
+//     left out could still be seen from above (review; docs/Testing.md). The fuse does not run the pass there, and says so.
 //   * PER FACE, not per patch. A vote over a connected patch was the first cut and the drill refused it: over 26 culled
 //     views of the Centurion, 284 pixels of 2.4 million lost a grey face that had plainly been visible, the deck showing
 //     behind it. The inside of a tube open at the top is the shape of that mistake: hidden over most of its height,
@@ -30,11 +37,13 @@
 // What is KEPT, on purpose: a pair both of whose sides see the outside (a sheet made two-sided by duplication - a
 // flag, a boat's shell with a painted inside - needs both under back-face culling), and a pair neither side of which
 // does (buried: whatever the renderer does with it, nobody sees it). Removing a face whose front no camera can see
-// changes nothing a culling renderer draws for those cameras; that is the rule's whole safety, and why it needs no switch.
+// changes nothing a culling renderer draws ALONG THE 25 DIRECTIONS ASKED, from the points asked; between them the
+// drill still finds a few pixels in millions (docs/Testing.md). That is the rule's safety and its limit. It has no
+// switch: the pass runs in every fuse.
 //
-// Rays are stopped by every triangle of the FILE (the group's own welded faces and every other node, as the exposure
-// tests of the winding pass read them), except glass: a face of a BLEND material, or a node made only of them, hides
-// nothing. Two trees of boxes (TriBvh): one per group over its own faces, for the coincidence test and its share of the
+// Rays are stopped by the triangles of the FILE that show their front to the camera (the group's own welded faces in
+// their final winding, and every other node as the file winds it, a mirrored node as glTF renders it), except glass: a face of a BLEND material hides nothing, in the group or in
+// any other node. Two trees of boxes (TriBvh): one per group over its own faces, for the coincidence test and its share of the
 // rays, and ONE for the fuse over every other node of the file (OccluderCache.RayTree), built when the first group with
 // a candidate asks and shared by them all.
 //   A UNIFORM GRID was the first structure, and HMS Roberts refused it: one of its groups is 961,668 faces of dense
@@ -59,21 +68,34 @@ public static partial class GlbDisconnectedParts
     /// <summary>Does anything stop a ray from (ox, oy, oz) along the unit direction (dx, dy, dz)?</summary>
     internal delegate bool RayStop(double ox, double oy, double oz, double dx, double dy, double dz);
 
-    const int CoveredSamples = 7;
+    const int CoveredSamples = 7;   // the coincidence test's points: the centroid, three towards the corners, three towards the edges (0.7 of the way)
+    // WHICH POINTS OF A FACE THE RAYS LEAVE FROM. The seven above all lie in the middle half of the face, and a face is
+    // seen as soon as its RIM is (review of the first cut: a doubled panel with a plate three quarters its size in front
+    // of it was left out with 45 % of its area in plain view). So six more, 0.95 of the way to the corners (7-9) and to
+    // the edges (10-12), and every face asks its corners' whatever its size:
+    static readonly int[] RayPointsSmall = { 0, 7, 8, 9 }, RayPointsMedium = { 0, 1, 2, 3, 7, 8, 9 }, RayPointsLarge = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
     // WHERE THE GAME LOOKS FROM: straight above, and eight ways round at 15, 40 and 65 degrees above the horizon (Y is up,
-    // as everywhere in the fuse). A unit is never seen from below the horizon, and a camera sees a face only from in front.
+    // as everywhere in the fuse). That the game's camera stays above the horizon is how the game is played, not something
+    // read from its code; 15 degrees is a choice with room under what play shows. A camera sees a face only from in front.
     internal const double CoveredLowestCamera = 15.0;
     const double CoveredFacing = 0.05;   // a camera within three degrees of edge-on sees nothing of a face
-    static readonly double[] CoveredViews = BuildCoveredViews();
-    static double[] BuildCoveredViews()
+    static readonly double[] CoveredViews = BuildCoveredViews(new[] { 65.0, 40.0, CoveredLowestCamera }, 8, true);
+    // A LARGER FACE IS ASKED FROM MORE DIRECTIONS (review on real models: HMS Svea's mast has a face 388 units long and 5
+    // wide inside its tube, seen through a slit from directions between the 25 - a dashed see-through line down the
+    // mast). The larger the face, the more of it one slit shows and the fewer such faces there are to ask: sixteen ways
+    // round for a face longer than a 256th of its group, thirty-two ways round on five rings for one eight times that.
+    static readonly double[] CoveredViewsMedium = BuildCoveredViews(new[] { 65.0, 40.0, CoveredLowestCamera }, 16, false);
+    static readonly double[] CoveredViewsLarge = BuildCoveredViews(new[] { 65.0, 52.5, 40.0, 27.5, CoveredLowestCamera }, 32, false);
+    // straight above, then `round` directions on each ring (degrees above the horizon), highest first: most of what is
+    // seen at all is seen from high up, and the first ray out ends the question. `stagger` turns every other ring half a step.
+    static double[] BuildCoveredViews(double[] rings, int round, bool stagger)
     {
         var v = new List<double> { 0, 1, 0 };
-        double[] rings = { 65.0, 40.0, CoveredLowestCamera };   // highest first: most of what is seen at all is seen from high up, and the first ray out ends the question
         for (int r = 0; r < rings.Length; r++)
-            for (int k = 0; k < 8; k++)
+            for (int k = 0; k < round; k++)
             {
-                double up = rings[r] * Math.PI / 180.0, round = (k + 0.5 * (r % 2)) * Math.PI / 4.0;
-                v.Add(Math.Cos(up) * Math.Cos(round)); v.Add(Math.Sin(up)); v.Add(Math.Cos(up) * Math.Sin(round));
+                double up = rings[r] * Math.PI / 180.0, turn = (k + (stagger ? 0.5 * (r % 2) : 0)) * 2.0 * Math.PI / round;
+                v.Add(Math.Cos(up) * Math.Cos(turn)); v.Add(Math.Sin(up)); v.Add(Math.Cos(up) * Math.Sin(turn));
             }
         return v.ToArray();
     }
@@ -154,14 +176,20 @@ public static partial class GlbDisconnectedParts
             return true;
         }
 
-        // Möller-Trumbore on the flat corners: does the ray meet this triangle beyond its origin?
+        // Möller-Trumbore on the flat corners: does the ray meet this triangle beyond its origin - and does the triangle
+        // show its FRONT to where the ray is going? The ray runs from a face to a camera, and a camera that culls back
+        // faces draws of this triangle only its front: a triangle seen from behind is not in anyone's way.
+        //   Stopping on either side was the first cut, and a non-zero weld refused it (review of that cut, on real
+        //   models): welding crumples small parts into faces lying every way, and those stopped the rays of faces in
+        //   plain view - on the Wespe at 2 permille, 298 of the 3,172 faces left out could still be seen from above 15
+        //   degrees, one of them over 168 pixels; with fronts only, all seven of that face's points get out.
         static bool Hits(double[] seg, int o, double ox, double oy, double oz, double dx, double dy, double dz)
         {
             double e1x = seg[o + 3] - seg[o], e1y = seg[o + 4] - seg[o + 1], e1z = seg[o + 5] - seg[o + 2];
             double e2x = seg[o + 6] - seg[o], e2y = seg[o + 7] - seg[o + 1], e2z = seg[o + 8] - seg[o + 2];
             double px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
-            double det = e1x * px + e1y * py + e1z * pz;
-            if (Math.Abs(det) < 1e-18) return false;
+            double det = e1x * px + e1y * py + e1z * pz;   // = -(normal . direction): negative when the triangle faces where the ray goes
+            if (det > -1e-18) return false;
             double inv = 1.0 / det;
             double tx = ox - seg[o], ty = oy - seg[o + 1], tz = oz - seg[o + 2];
             double u = (tx * px + ty * py + tz * pz) * inv; if (u < -1e-9 || u > 1 + 1e-9) return false;
@@ -170,7 +198,8 @@ public static partial class GlbDisconnectedParts
             return (e2x * qx + e2y * qy + e2z * qz) * inv > 0;
         }
 
-        /// <summary>Does anything stop a ray from `o` along `d`? `skipSeg` leaves whole segments out (per segment),
+        /// <summary>Does anything stop a ray from `o` along `d` - a triangle it meets that faces the way it goes (see Hits)?
+        /// `skipSeg` leaves whole segments out (per segment),
         /// `skipTri` triangles of the FIRST segment (per triangle); null = none.</summary>
         public bool Blocked(double ox, double oy, double oz, double dx, double dy, double dz, bool[] skipSeg, bool[] skipTri)
         {
@@ -231,16 +260,17 @@ public static partial class GlbDisconnectedParts
         var own = new TriBvh(new[] { corners }, skip, tol);
         if (own.Empty) return found;
 
-        // the face's sample points: its centroid, three points towards its corners, three towards its edges
+        // the face's sample points: its centroid (0), three towards its corners (1-3) and its edges (4-6), then the same six at the rim (7-12)
         void Sample(int f, int k, out double x, out double y, out double z)
         {
             int o = f * 9;
             double cx = (corners[o] + corners[o + 3] + corners[o + 6]) / 3.0, cy = (corners[o + 1] + corners[o + 4] + corners[o + 7]) / 3.0, cz = (corners[o + 2] + corners[o + 5] + corners[o + 8]) / 3.0;
             if (k == 0) { x = cx; y = cy; z = cz; return; }
             double tx, ty, tz;
-            if (k <= 3) { int c = (k - 1) * 3; tx = corners[o + c]; ty = corners[o + c + 1]; tz = corners[o + c + 2]; }
-            else { int c = (k - 4) * 3, n = ((k - 4 + 1) % 3) * 3; tx = (corners[o + c] + corners[o + n]) * 0.5; ty = (corners[o + c + 1] + corners[o + n + 1]) * 0.5; tz = (corners[o + c + 2] + corners[o + n + 2]) * 0.5; }
-            x = cx + 0.7 * (tx - cx); y = cy + 0.7 * (ty - cy); z = cz + 0.7 * (tz - cz);
+            double reach = k <= 6 ? 0.7 : 0.95; int j = k <= 6 ? k : k - 6;
+            if (j <= 3) { int c = (j - 1) * 3; tx = corners[o + c]; ty = corners[o + c + 1]; tz = corners[o + c + 2]; }
+            else { int c = (j - 4) * 3, n = ((j - 4 + 1) % 3) * 3; tx = (corners[o + c] + corners[o + n]) * 0.5; ty = (corners[o + c + 1] + corners[o + n + 1]) * 0.5; tz = (corners[o + c + 2] + corners[o + n + 2]) * 0.5; }
+            x = cx + reach * (tx - cx); y = cy + reach * (ty - cy); z = cz + reach * (tz - cz);
         }
         // does face g, wound the other way than f, hold the point: in its plane within the rounding, inside its outline
         bool Holds(int f, int g, double x, double y, double z)
@@ -276,22 +306,24 @@ public static partial class GlbDisconnectedParts
             }
             return -1;
         }
-        var candidateFaces = new List<int>(); var coversOf = new Dictionary<int, int[]>();
-        var gate = new object();
+        // flat, by face: seven covers each and the candidate's number (review of the first cut: an int[7] and two dictionary
+        // entries per candidate were a million small objects on a group of a million doubled faces)
+        var coverOf = new int[CoveredSamples * faceCount]; var candidateOf = new int[faceCount];
         Parallel.For(0, faceCount, options, f =>
         {
+            candidateOf[f] = -1;
             if (!valid[f]) return;
             Sample(f, 0, out double x, out double y, out double z);
             int first = CoverAt(f, x, y, z);
             if (first < 0) return;
-            var covers = new int[CoveredSamples]; covers[0] = first; int covered = 1;
-            for (int k = 1; k < CoveredSamples; k++) { Sample(f, k, out x, out y, out z); covers[k] = CoverAt(f, x, y, z); if (covers[k] >= 0) covered++; }
-            if (covered < 5) return;
-            lock (gate) { candidateFaces.Add(f); coversOf.Add(f, covers); }
+            coverOf[CoveredSamples * f] = first; int covered = 1;
+            for (int k = 1; k < CoveredSamples; k++) { Sample(f, k, out x, out y, out z); int g = CoverAt(f, x, y, z); coverOf[CoveredSamples * f + k] = g; if (g >= 0) covered++; }
+            if (covered >= 5) candidateOf[f] = 0;   // numbered below, in face order
         });
+        var candidateFaces = new List<int>();
+        for (int f = 0; f < faceCount; f++) if (candidateOf[f] == 0) { candidateOf[f] = candidateFaces.Count; candidateFaces.Add(f); }
         found.Candidates = candidateFaces.Count; found.CoincideMs = clock.ElapsedMilliseconds; clock.Restart();
         if (candidateFaces.Count == 0) return found;
-        candidateFaces.Sort();
 
         // rays, against the whole file: the group's own faces (the tree above; glass stops nothing) and whatever else the
         // caller has. Is the face's FRONT seen by a camera? Stops at the first ray that gets out.
@@ -300,9 +332,10 @@ public static partial class GlbDisconnectedParts
         if (glass != null) for (int f = 0; f < faceCount; f++) if (glass[f]) { noStop = glass; break; }
         double lift = 8 * tol;
         // HOW MANY POINTS OF A FACE ASK (measured on the Centurion, 2026-11-24: seven points of every face cost 36 s of
-        // rays over 22 groups, most of it on faces so small that every point of them sees what the centroid sees): the
-        // centroid alone for a face shorter than a 256th of the group, four points up to eight times that, all seven beyond.
-        var askPoints = new byte[faceCount];
+        // rays over 22 groups, most of it on faces far smaller than anything that could stand in front of part of them):
+        // the centroid and the three corners for a face shorter than a 256th of the group, the inner corner points too up
+        // to eight times that, all thirteen beyond.
+        var askPoints = new int[faceCount][];
         {
             double small = own.Extent / 256.0, large = 8 * small;
             foreach (int f in candidateFaces)
@@ -314,17 +347,18 @@ public static partial class GlbDisconnectedParts
                     double ex = corners[a] - corners[b], ey = corners[a + 1] - corners[b + 1], ez = corners[a + 2] - corners[b + 2];
                     longest2 = Math.Max(longest2, ex * ex + ey * ey + ez * ez);
                 }
-                askPoints[f] = (byte)(longest2 < small * small ? 1 : longest2 < large * large ? 4 : CoveredSamples);
+                askPoints[f] = longest2 < small * small ? RayPointsSmall : longest2 < large * large ? RayPointsMedium : RayPointsLarge;
             }
         }
         bool SeenFrom(int f, double sgn)
         {
             double nx = sgn * unit[3 * f], ny = sgn * unit[3 * f + 1], nz = sgn * unit[3 * f + 2];
-            for (int d = 0; d < CoveredViews.Length; d += 3)
+            double[] views = ReferenceEquals(askPoints[f], RayPointsLarge) ? CoveredViewsLarge : ReferenceEquals(askPoints[f], RayPointsMedium) ? CoveredViewsMedium : CoveredViews;
+            for (int d = 0; d < views.Length; d += 3)
             {
-                double dx = CoveredViews[d], dy = CoveredViews[d + 1], dz = CoveredViews[d + 2];
+                double dx = views[d], dy = views[d + 1], dz = views[d + 2];
                 if (nx * dx + ny * dy + nz * dz < CoveredFacing) continue;   // that camera looks at the back of this side
-                for (int k = 0; k < askPoints[f]; k++)
+                foreach (int k in askPoints[f])
                 {
                     Sample(f, k, out double x, out double y, out double z);
                     double ox = x + nx * lift, oy = y + ny * lift, oz = z + nz * lift;
@@ -333,8 +367,6 @@ public static partial class GlbDisconnectedParts
             }
             return false;
         }
-        var indexOf = new Dictionary<int, int>(candidateFaces.Count);
-        for (int i = 0; i < candidateFaces.Count; i++) indexOf[candidateFaces[i]] = i;
         var frontSeen = new bool[candidateFaces.Count];
         Parallel.For(0, candidateFaces.Count, options, i => frontSeen[i] = SeenFrom(candidateFaces[i], 1));
         // A face goes when its own front is seen from nowhere and the other side of its plane is seen from somewhere: the
@@ -344,12 +376,14 @@ public static partial class GlbDisconnectedParts
         var verdict = new byte[candidateFaces.Count];   // 1 = left out, 2 = both sides seen, 3 = neither side seen
         Parallel.For(0, candidateFaces.Count, options, i =>
         {
-            int f = candidateFaces[i]; int[] covers = coversOf[f];
+            int f = candidateFaces[i];
             bool otherSeen = false, unasked = false;
-            foreach (int g in covers)
+            for (int k = 0; k < CoveredSamples; k++)
             {
+                int g = coverOf[CoveredSamples * f + k];
                 if (g < 0) continue;
-                if (!indexOf.TryGetValue(g, out int gi)) { unasked = true; continue; }
+                int gi = candidateOf[g];
+                if (gi < 0) { unasked = true; continue; }
                 if (frontSeen[gi]) { otherSeen = true; break; }
             }
             if (!otherSeen && unasked) otherSeen = SeenFrom(f, -1);
@@ -366,22 +400,7 @@ public static partial class GlbDisconnectedParts
         return found;
     }
 
-    // a node all of whose triangle primitives use a BLEND material: glass, which hides nothing behind it
+    // a BLEND material is glass: it hides nothing behind it
     static bool MaterialIsBlend(JArray materials, int material) =>
         materials != null && material >= 0 && material < materials.Count && (string)(materials[material] as JObject)?["alphaMode"] == "BLEND";
-
-    static bool NodeIsGlass(JArray nodes, JArray meshes, JArray materials, int nodeIndex)
-    {
-        var node = nodeIndex >= 0 && nodeIndex < nodes.Count ? nodes[nodeIndex] as JObject : null;
-        int mi = node?["mesh"] == null ? -1 : node.Value<int>("mesh");
-        var primitives = mi < 0 || mi >= meshes.Count ? null : (meshes[mi] as JObject)?["primitives"] as JArray;
-        if (primitives == null) return false;
-        int seen = 0;
-        foreach (JObject primitive in TrianglesOnly(primitives))
-        {
-            if (!MaterialIsBlend(materials, primitive["material"] == null ? -1 : primitive.Value<int>("material"))) return false;
-            seen++;
-        }
-        return seen > 0;
-    }
 }

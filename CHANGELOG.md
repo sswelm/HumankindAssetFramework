@@ -4610,46 +4610,84 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 ## Authoring tools
 
 - **The Model Fuser leaves out a face that lies exactly on another, wound the other way, where no camera sees it
-  (2026-11-24).** Reported from the game: "weird Z fighting on the upper deck" of the Pre-Dreadnought (RSS Centurion).
-  - **The cause, measured:** the wood deck (`Material2_3910`, 64 triangles facing up, 1,154,682 square units) lies in
+  (2026-11-25).** Reported from the game: "weird Z fighting on the upper deck" of the Pre-Dreadnought (RSS Centurion).
+  Seen fixed in game on 2026-11-25 by the reporter, on the first cut of the rule, after fusing again, baking and
+  rebuilding the mod: the upper deck is clean, the aft mast grey, the two boats no longer brown.
+  - **What was measured.** The wood deck (`Material2_3910`, 64 triangles facing up, 1,154,682 square units) lies in
     the plane of the superstructure's own top face (`Material2_3907`, 58 triangles wound DOWN, 1,092,539): the same
-    height to the last digit the baked OBJ holds. The pair is in the original download, before split, fuse or Lab,
-    and every stage carried both to the game. The game drew the hidden face through the visible one: in
-    polygon-shaped patches on the deck, where the two are triangulated differently, and wholly on the aft mast and two
-    boats, whose skins carry a `Brown_Rope` copy wound inward on the same triangles. The main deck has no such twin
-    and was clean.
+    height to the last digit of the OBJ the bake hands to Unity. The pair is in the original download, before split,
+    fuse or Lab, and every stage carried both faces to the game. The aft mast is built the same way (4,908 grey
+    triangles, each with an exact reversed `Brown_Rope` copy), and so are two boats. Those three places are where the
+    screenshot was wrong: grey polygon-shaped patches on the deck, a brown mast, brown boats.
+  - **The explanation, and what does not fit it.** The game drew the hidden face through the visible one; where the
+    two are triangulated differently each won in places. That the fix removes exactly those faces and the picture is
+    then right is the evidence for it. One place does not fit: the superstructure walls are built like the mast
+    (3,816 white triangles with an exact reversed charcoal copy) and, as far as the screenshot can be read, it
+    shows them light. WHY the engine lets a back face through, and why not there, is not established; our docs
+    say it culls back faces.
   - **Ruled out by measurement:** a back-face-culled render of the game's own data (the eight `_ModelMesh` assets,
     the skeleton's stored quads, the baked atlas) shows a clean deck, so it is neither a hole nor the atlas. The
     engine's triangle-to-quad pairing (`BuildStripificationQuad` pairs any two triangles that share two vertex
-    indices and never checks that they are wound the same way) turns over 61 of 221,446 triangles here. WHY the
-    engine lets a back face through where it lies on a front face is not established; our docs say it culls them.
-  - **The rule** (`editor/GlbDisconnectedParts.Covered.cs`, after every winding pass, before the counts): a face is
-    a candidate when its centroid and at least four of six more points lie on a face of the group wound the other
-    way (in its plane within the fuse's rounding, inside its outline). It is left out when no ray from its points
-    reaches open air towards a camera in front of it, the cameras being straight above and eight ways round at 65,
-    40 and 15 degrees above the horizon, AND the other side of its plane is seen. A pair seen on both sides stays,
-    and so does a pair seen on neither. Rays are stopped by the group's welded faces and by every other node of
-    the file (one tree of boxes for the whole fuse, `OccluderCache.RayTree`); BLEND materials stop nothing.
-  - **Two cuts the ship refused first.** A vote per connected patch left out faces that had plainly been visible
-    (284 of 2.4 million pixels over 26 culled views; the inside of a tube open at the top is the shape of it:
-    hidden low down, seen at the rim). Rays over the face's whole hemisphere left part of the ceiling in place
-    (36 of that part's faces went where 59 go now): a ray gets out sideways from under the deck, and no camera is
-    down there.
-  - **Measured, old fuse against new, the Model Fuser's own groups** (docs/Testing.md, "Hidden twins"): on the
-    Centurion 59,931 of 468,161 triangles are left out and nine culled views from above the horizon are the same to the
-    pixel; over eight models, 18 of 6,255,379 pixels of those views now show something farther or nothing, and 156 of 5,087,804 of the
-    eight level views. Hidden faces lying under a visible one of another material, from the screenshot's angle:
-    43,265 pixels before, 2 after.
+    indices and never checks that they are wound the same way) turns over 61 of 221,446 triangles here.
+  - **The rule** (`editor/GlbDisconnectedParts.Covered.cs`, after every winding pass, at weld 0 only):
+    - A face is a *candidate* when its centroid and at least four of six more points lie on a face of the same
+      fuse group wound the other way: in its plane within the fuse's rounding (a millionth of the group's longest
+      side), inside its outline.
+    - It is *seen* when a ray from its middle or its corners reaches open air towards a camera in front of it. The
+      cameras are straight above and eight ways round at 65, 40 and 15 degrees above the horizon; a face longer
+      than a 256th of its group is asked from 16 ways round, one eight times that from 32 ways round on five rings.
+    - A ray is stopped by a triangle that shows its front to that camera: the group's own faces as the fuse has
+      wound them, and every other node of the file as it renders (one tree of boxes for the whole fuse,
+      `OccluderCache.RayTree`). Glass (a BLEND material) stops nothing.
+    - A candidate that is not seen is left out when the other side of its plane is seen. A pair seen on both
+      sides stays, and so does a pair seen on neither.
+  - **Versions the measurements refused, in order.** Each was built, measured on real models and replaced.
+    1. *A vote per connected patch of candidates* left out faces in plain view (about 300 of 2.4 million pixels over
+       26 culled views of the Centurion): the inside of a tube open at the top is hidden low down and seen at the rim.
+    2. *Rays over the face's whole hemisphere* left part of the ceiling in place (36 of that part's faces went where
+       59 went with cameras above the horizon): a ray gets out sideways from under the deck, where no camera is.
+    3. *A uniform grid* for the rays took HMS Roberts 159 s where the fuse had taken 43 s: one of its groups is
+       961,668 faces of dense detail, nearly all doubled, and a grid cell there holds thousands of triangles.
+    4. *Rays from the middle of a face only* (review): a doubled panel with a plate three quarters its size in front
+       lost a side with 45 % of its area in view. The corners are asked now.
+    5. *Rays stopped by either side of a triangle, at any weld* (review, on real models): at a weld of 1 to 2 permille
+       about a tenth of the faces left out could still be seen from above. Rays now stop on fronts only, and the pass
+       does not run at a non-zero weld at all: with fronts only it was still 323 of 4,906 and 114 of 1,311 there.
+    6. *The same 25 directions for every face* (review): HMS Svea's mast has a face 388 units long and 5 wide inside
+       its tube, seen through a slit between those directions (225 of 10.3 million pixels over 112 views, a dashed
+       line down the mast). Larger faces are asked from more directions.
+    7. *Glass left out per node* (review): a canopy stored as the BLEND primitive of a node that also holds its frame
+       counted as solid. Glass is left out per primitive.
+    The figures in 1 to 3 were printed by those runs; their files were overwritten by the next version's.
+  - **Measured on the last version, old fuse against new, the Model Fuser's own groups** (docs/Testing.md, "Hidden
+    twins"): on the Centurion 64,955 of 468,161 triangles are left out. Over eight models, back-face-culled views from 112
+    directions between 15 and 75 degrees change in 58 of 72,946,277 pixels (20 of 1,019,541 faces left out are behind them). Hidden
+    faces lying under a visible one of another material, from the screenshot's angle: 43,265 pixels before, 2 after.
   - **What it changes:** a fused shell can have fewer triangles than its sources (`Result.HiddenFacesRemoved`; the
-    preservation check is now source = output + left out; the status line says `N hidden twin face(s) left out`).
-    A model already fused is unchanged until it is fused again. The Bake Tests' Workshop row accounts for them
-    exactly instead of asking for "at least half"; 19 of its goldens move and need a re-bless in Unity: `1861_us_convederate_navy_ship_split_fused` 149,912→149,836, `bell_h-13_animation-ready` 126,098→126,066, `french_submarine_cruiser_surcouf_split_fused` 72,716→58,848, `gymnote_1888_split_fused` 9,487→9,295, `hms_roberts_1940_split_fused` 149,858→106,481, `hms_svea_cut_split_fused` 149,952→95,459, `jagdpanzer_iv_late_prod2` 24,039→23,932, `m114_gun_only` 11,244→11,237, `project_50_u-boat_split_fused` 149,921→110,715, `rah66` 11,906→11,888, `rms_teutonic_cut2_split` 150,000→149,937, `salegs_revenge_split_fused` 149,838→136,499, `sikorsky_ilya_muromets_split` 47,260→47,258, `sms_wespe_split_fused` 149,976→114,947, `sns_dragon_split_fused` 149,999→133,552, `spanish_battleship_espana_split_fused` 149,616→104,559, `ss._great_eastern_transport_fever_2_mod` 148,908→148,902, `ss_romanic_split_fused` 149,907→149,697, `triconter_split` 149,996→149,614.
-  - **Not covered:** faces lying on each other wound the SAME way (they fight under any renderer; of another
-    material, 84 of 340,344 cells in a top-down census of this ship's fused file); a pair whose two faces are in
-    different fuse groups or in no group; a part
-    marked X still stops rays, because marks are applied after the fuse; a face seen only from below 15 degrees.
-    The fix has not been seen in game yet.
-  - **Tests:** 27 (`Tests/GlbFuseHiddenTwinTests.cs`), and 19 defects planted one at a time, each caught.
+    preservation check is now source = output + left out; the status line says `N hidden twin face(s) left out`;
+    the report's counts are of the faces written). A model already fused is unchanged until it is fused again.
+    The vertex normals of the faces that stay no longer average in a face that is gone. The Bake Tests' Workshop
+    row accounts for the faces exactly instead of asking for "at least half"; 18 of its goldens move in their
+    FUSE line and need a re-bless in Unity: `1861_us_convederate_navy_ship_split_fused` 149,912→149,790, `bell_h-13_animation-ready` 126,098→125,761, `french_submarine_cruiser_surcouf_split_fused` 72,716→55,794, `gymnote_1888_split_fused` 9,487→9,295, `hms_roberts_1940_split_fused` 149,858→105,063, `hms_svea_cut_split_fused` 149,952→94,026, `jagdpanzer_iv_late_prod2` 24,039→23,905, `m114_gun_only` 11,244→11,237, `project_50_u-boat_split_fused` 149,921→108,519, `rah66` 11,906→11,885, `rms_teutonic_cut2_split` 150,000→149,862, `salegs_revenge_split_fused` 149,838→134,414, `sms_wespe_split_fused` 149,976→112,218, `sns_dragon_split_fused` 149,999→131,590, `spanish_battleship_espana_split_fused` 149,616→98,513, `ss._great_eastern_transport_fever_2_mod` 148,908→148,860, `ss_romanic_split_fused` 149,907→149,853, `triconter_split` 149,996→149,609.
+  - **Not covered.**
+    - Faces lying on each other wound the SAME way: a different defect, which fights under any renderer (of
+      another material and within 0.05 units, 84 of 340,344 cells of a top-down census of this ship's fused file;
+      7 within the fuse's rounding).
+    - A pair whose two faces are in different fuse groups, or in none. The Centurion has them: the turret group's
+      down-wound faces lie under the main deck's wood (410,297 square units, none open to the sky), and the upper
+      deck still lies on down-wound faces of five other groups over about a twelfth of its area (a reviewer's
+      count on the first cut).
+    - A part marked X (for deletion) in the Fuser still stops rays: marks are applied after the fuse.
+    - A face seen only from below 15 degrees goes: on the Centurion the deckhouse's glass panes, seen from 10
+      degrees and below.
+    - What is in the way is judged in the rest pose; a part an animation moves is counted where the file puts it.
+    - A fuse with a non-zero weld.
+  - **Review.** Three reviewers took the first cut apart (the code; ten more real models and the first eight again,
+    from 176 directions each; every claim against its evidence, with 27 planted defects of which 19 survived the
+    tests as they stood).
+    Versions 4 to 7 above, the report's counts, the fixtures for the surviving plants and the corrections to this
+    entry are theirs.
+  - **Tests:** 46 (`Tests/GlbFuseHiddenTwinTests.cs`). 40 defects planted one at a time; 38 are caught, 2 are not: a group is in its own way in the shared tree; rewound counts faces left out.
 
 - **A definition made in the editor is in the Pick lists at once, and a new Model Factory entry starts on Keep
   Model (2026-11-24).** Reported from the Model Factory: a pawn definition made that session

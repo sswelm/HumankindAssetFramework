@@ -5200,66 +5200,96 @@ respectively, versus 9.5–9.6 s and 19.0 s managed in this control run. The sav
 
 ### Hidden twins
 
-The Model Fuser leaves out a face that lies exactly on a face wound the other way when no camera above the horizon
-can see its front and the other side of its plane is seen (`editor/GlbDisconnectedParts.Covered.cs`, 2026-11-24).
-The report was the RSS Centurion's upper deck, drawn in game with grey patches; the cause and what was ruled out are
-in the root CHANGELOG under the same date.
+The Model Fuser, at weld 0, leaves out a face that lies exactly on a face of the same fuse group wound the other way
+when no camera above the horizon can see its front and the other side of its plane is seen
+(`editor/GlbDisconnectedParts.Covered.cs`, 2026-11-25). The report was the RSS Centurion's upper deck, drawn in game
+with grey patches; the cause, what was ruled out and the versions of the rule that were refused are in the root
+CHANGELOG under the same date. The reporter fused the ship again with the first cut of the rule, baked it and rebuilt
+the mod on 2026-11-25: the deck is clean in game. The measurements below are of the last version.
 
-**What the measurement is.** Each model's split source is fused twice, by the commit before the rule and by the
-rule, with the groups of its own `.fuse.txt` sidecar, weld 0, *Check mirrored parts* on, the X marks removed
-afterwards, outside Unity (the test DLL, managed and native kernels as the DLL finds them). Both outputs are then
-drawn back-face-culled, orthographic, 800 pixels across, nearest front-facing triangle per pixel, from 17
-directions: nine above the horizon (straight down, four at 45 degrees, four at 35) and eight level with it. A pixel
-counts as changed when the new output shows nothing or something farther away than the old one, or another
-material at the same depth. Views from below the horizon are not part of this comparison.
+**What the measurement is.** Each model's split source (the file the Model Fuser opens) is fused twice, by the
+commit before the rule and by the rule, with the groups of its own `.fuse.txt` sidecar, weld 0, *Check mirrored
+parts* on, the parts marked X removed afterwards, outside Unity. The new build is a frozen copy of the test DLL
+(sha256 `572436c18a9c8168`) whose own 46 tests were run from the copy before the first fuse; no build ran while it was in use.
+Both outputs are then drawn back-face-culled, orthographic, 800 pixels across, nearest front-facing triangle per
+pixel. A pixel counts as changed when the new output shows nothing, or something farther away than the old one, or
+another material at the same depth.
 
-| Model | groups | triangles in | triangles out | left out | fuse before | fuse after | from above: pixels changed / drawn | level: pixels changed / drawn |
-|---|---|---|---|---|---|---|---|---|
-| RSS Centurion | 22 | 468,161 | 408,230 | 59,931 (12.8 %) | 5.3 s | 6.2 s | 0 / 826,178 | 70 / 736,340 |
-| SMS Wespe | 21 | 298,248 | 225,697 | 72,551 (24.3 %) | 10.1 s | 10.4 s | 14 / 922,891 | 53 / 682,182 |
-| F-100D Super Sabre | 11 | 114,339 | 114,280 | 59 (0.1 %) | 0.7 s | 0.8 s | 0 / 772,220 | 0 / 331,848 |
-| SS Romanic | 21 | 425,632 | 425,404 | 228 (0.1 %) | 4.2 s | 5.2 s | 0 / 729,398 | 0 / 720,531 |
-| HMS Svea | 19 | 407,530 | 343,313 | 64,217 (15.8 %) | 2.5 s | 2.7 s | 0 / 883,727 | 0 / 755,174 |
-| Project 50 U-boat | 15 | 185,190 | 139,379 | 45,811 (24.7 %) | 1.4 s | 1.6 s | 0 / 418,411 | 16 / 499,825 |
-| HMS Roberts | 20 | 1,597,921 | 1,087,855 | 510,066 (31.9 %) | 45.8 s | 48.2 s | 3 / 910,923 | 15 / 638,588 |
-| España | 24 | 907,432 | 685,497 | 221,935 (24.5 %) | 11.2 s | 11.7 s | 1 / 791,631 | 2 / 723,316 |
+| Model | groups | triangles in | triangles out | left out | fuse before | fuse after |
+|---|---|---|---|---|---|---|
+| RSS Centurion | 22 | 468,161 | 403,206 | 64,955 (13.9 %) | 5.8 s | 11.2 s |
+| SMS Wespe | 21 | 298,248 | 221,724 | 76,524 (25.7 %) | 9.4 s | 11.2 s |
+| F-100D Super Sabre | 11 | 114,339 | 114,273 | 66 (0.1 %) | 0.8 s | 0.9 s |
+| SS Romanic | 21 | 425,632 | 425,370 | 262 (0.1 %) | 4.3 s | 4.6 s |
+| HMS Svea | 19 | 407,530 | 341,810 | 65,720 (16.1 %) | 2.3 s | 3.0 s |
+| Project 50 U-boat | 15 | 185,190 | 136,845 | 48,345 (26.1 %) | 1.4 s | 2.4 s |
+| HMS Roberts | 20 | 1,597,921 | 1,065,471 | 532,450 (33.3 %) | 45.5 s | 51.0 s |
+| España | 24 | 907,432 | 676,213 | 231,219 (25.5 %) | 9.7 s | 12.7 s |
 
-Over the eight models, 18 of 6,255,379 pixels of the views from above changed and 156 of 5,087,804 of the level ones; no pixel anywhere
-gained a surface or changed material in place. The level views are below the lowest camera the rule asks (15
-degrees), so a face seen only from there is expected to go.
+Two sets of views. The first is the author's: nine directions above the horizon (straight down, four at 45 degrees,
+four at 35) and eight level with it. The second is a reviewer's, made to find what the first missed: 112 directions
+at 15 to 75 degrees and 64 at 0 to 12 degrees, sixteen ways round, turned 11.25 degrees so that none coincides with
+a direction the rule itself asks. "Faces behind those pixels" is how many of the faces left out are seen in any of
+the 112.
+
+| Model | 9 views from above | 8 level views | 112 views, 15 to 75 degrees | faces behind those pixels | 64 views, 0 to 12 degrees |
+|---|---|---|---|---|---|
+| RSS Centurion | 0 / 826,178 | 70 / 736,340 | 6 / 9,682,180 | 5 of 64,955 | 178 / 6,006,742 |
+| SMS Wespe | 0 / 922,891 | 53 / 682,182 | 10 / 10,743,433 | 6 of 76,524 | 10 / 5,849,146 |
+| F-100D Super Sabre | 0 / 772,220 | 0 / 331,848 | 1 / 8,116,852 | 1 of 66 | 0 / 2,688,920 |
+| SS Romanic | 0 / 729,398 | 0 / 720,531 | 3 / 8,808,415 | 3 of 262 | 2 / 6,392,629 |
+| HMS Svea | 0 / 883,727 | 0 / 755,174 | 35 / 10,317,268 | 2 of 65,720 | 132 / 6,242,932 |
+| Project 50 U-boat | 0 / 418,411 | 16 / 499,825 | 0 / 5,353,229 | 0 of 48,345 | 0 / 3,738,890 |
+| HMS Roberts | 0 / 910,923 | 2 / 638,588 | 0 / 10,544,496 | 0 of 532,450 | 8 / 5,466,893 |
+| España | 1 / 791,631 | 6 / 723,316 | 3 / 9,380,404 | 3 of 231,219 | 18 / 5,798,483 |
+
+Over the eight models the 112 views change in 58 of 72,946,277 pixels. No pixel anywhere gained a surface or changed
+material in place. The level views and the 0 to 12 degree ones are below the lowest camera the rule asks (15
+degrees): a face seen only from there is expected to go, and on the Centurion it is the deckhouse's glass panes.
+
+**What the review changed in these numbers.** On the first cut the same 112 views lost 136 pixels on the Wespe, 225
+on the Svea, 94 on Roberts and 5 on the Centurion. The Svea's were one face 388 units long and 5 wide inside the
+mast tube, seen through a slit; the Wespe's were the end faces of a base plate seen through gaps. Asking the corners
+of a face as well as its middle, stopping rays on fronts only and asking larger faces from more directions brought
+them to the figures above. With a weld of 1 permille on HNoMS Troll and 2 permille on the Surcouf, about a tenth of
+the faces the first cut left out were seen from above (596 of 5,525 and 84 of 1,185); with fronts only it was still
+323 of 4,906 and 114 of 1,311, and the pass is not run at a non-zero weld.
 
 **The Centurion from the screenshot's angle** (the view the report came from, 1,200 pixels across): pixels whose
-visible surface has a face of the same group lying on it, wound the other way.
+visible surface has a face lying on it, wound the other way.
 
 | | all such pixels | of them, the hidden face is of another material |
 |---|---|---|
 | fused before the rule | 54,474 | 43,265 |
-| fused by the rule | 142 | 2 |
+| fused by the rule | 480 | 2 |
 
-**Time.** The columns above are one run each, wall clock, the groups planned in parallel (the default, eight at
-once on this machine); the rule's own share is in every group's `hidden twins:` line (finding the coincident
-faces, the rays). Two things were measured on the way and changed. Seven points of every face cost 36 s of rays
-summed over the Centurion's groups; a face shorter than a 256th of its group now asks from its centroid alone.
-And the first structure, a uniform grid, took HMS Roberts from 46 s to 159 s: one of its groups is 961,668 faces of
-dense detail, nearly all doubled, and a cell there holds thousands of triangles (31 s finding the coincident faces
-and 82 s of rays in that group). The rule now walks a tree of boxes, one per group and one for the whole file
-shared by all groups, and the same ship takes 48 s.
+**Time.** The fuse columns are one run each, wall clock, the groups planned in parallel (the default, eight at once
+on this machine); the rule's own share is in every group's `hidden twins:` line. Two things were measured on the
+way and changed: seven points of every face cost 36 s of rays summed over the Centurion's groups, and a uniform grid
+took HMS Roberts 159 s where the fuse before the rule had taken 43 s in the same run (one group of 961,668 faces,
+nearly all doubled: 31 s finding the coincident faces and 82 s of rays). Those figures were printed by their runs and
+the files overwritten since. The rule now walks a tree of boxes, one per group and one for the whole file shared
+by all groups; Roberts is in the table. What the review added (corners as well as the middle, and up to 161
+directions for a large face) is the larger part of what the rule costs now: on the Centurion the first cut took the
+fuse from 5.3 s to 6.2 s, the last takes it from 5.8 s to 11.2 s. On Unity's Mono a reviewer timed a synthetic group of a million doubled
+faces beside three million other triangles at about twice the .NET Framework's time for the pass (27 s against
+13 s, on a 32-bit mono.exe, the first cut); it has not been timed inside the editor.
 
-**The Workshop row's goldens.** `tools/workshop_golden_drill.sh` with the rule: 8 of 27 goldens pass unchanged,
-19 move in their FUSE line only (fewer triangles and vertices out; where `rewound` moves, the faces no longer
-counted are ones left out), 8 sources have no golden. Moved: `1861_us_convederate_navy_ship_split_fused` 149,912→149,836, `bell_h-13_animation-ready` 126,098→126,066, `french_submarine_cruiser_surcouf_split_fused` 72,716→58,848, `gymnote_1888_split_fused` 9,487→9,295, `hms_roberts_1940_split_fused` 149,858→106,481, `hms_svea_cut_split_fused` 149,952→95,459, `jagdpanzer_iv_late_prod2` 24,039→23,932, `m114_gun_only` 11,244→11,237, `project_50_u-boat_split_fused` 149,921→110,715, `rah66` 11,906→11,888, `rms_teutonic_cut2_split` 150,000→149,937, `salegs_revenge_split_fused` 149,838→136,499, `sikorsky_ilya_muromets_split` 47,260→47,258, `sms_wespe_split_fused` 149,976→114,947, `sns_dragon_split_fused` 149,999→133,552, `spanish_battleship_espana_split_fused` 149,616→104,559, `ss._great_eastern_transport_fever_2_mod` 148,908→148,902, `ss_romanic_split_fused` 149,907→149,697, `triconter_split` 149,996→149,614. They are re-blessed by the Unity row, not by hand.
+**The Workshop row's goldens.** `tools/workshop_golden_drill.sh` with the rule: 9 of 27 goldens pass unchanged,
+18 move in their FUSE line only (fewer triangles and vertices out, and a lower `rewound` where a face that had been
+turned is among those left out), 8 sources have no golden. The same drill on the commit before the rule passes all
+27. Moved: `1861_us_convederate_navy_ship_split_fused` 149,912→149,790, `bell_h-13_animation-ready` 126,098→125,761, `french_submarine_cruiser_surcouf_split_fused` 72,716→55,794, `gymnote_1888_split_fused` 9,487→9,295, `hms_roberts_1940_split_fused` 149,858→105,063, `hms_svea_cut_split_fused` 149,952→94,026, `jagdpanzer_iv_late_prod2` 24,039→23,905, `m114_gun_only` 11,244→11,237, `project_50_u-boat_split_fused` 149,921→108,519, `rah66` 11,906→11,885, `rms_teutonic_cut2_split` 150,000→149,862, `salegs_revenge_split_fused` 149,838→134,414, `sms_wespe_split_fused` 149,976→112,218, `sns_dragon_split_fused` 149,999→131,590, `spanish_battleship_espana_split_fused` 149,616→98,513, `ss._great_eastern_transport_fever_2_mod` 148,908→148,860, `ss_romanic_split_fused` 149,907→149,853, `triconter_split` 149,996→149,609. They are re-blessed by the Unity row, not by hand.
 
-**Unit tests and plants.** `Tests/GlbFuseHiddenTwinTests.cs`, 27 cases: the ship's case (a ceiling under a deck
-triangulated the other way), the same with two walls open, a sheet doubled in the open, a buried pair, glass, another
-node and another fuse GROUP hiding a pair, a group not being in its own way, an awning's underside, a funnel (the
-bottom ring goes, the rim stays), faces apart by ten times the rounding and by half of it, a copy wound the same way,
-a face beside another in its plane and one inside its box but outside its outline, a small face on a large one,
-degenerate input, the ray tree against a plain loop over every triangle (400 rays), what it is told to leave out
-and its boxes, and the rest through `FuseNodes`/`FuseGroups`, reading the
-written bytes. 19 defects were planted one at a time, each in the source, built, run and restored: never leaves a face out; cameras all round, not in front; glass stops rays; other side need not be seen; same-way copies are twins; no plane tolerance; the rest of the file is not asked; outline not checked; emits the face it left out; nodes of glass stop rays; a group is in its own way in the shared tree; segments are never left out of a ray; triangles of the group are never left out of a ray; glass nodes are in the tree; a ray never visits the right child; a point never visits the right child; boxes are not widened by the rounding; the lone face of a large cover is not asked; rim cameras removed (zenith only). Each is caught by at least one test. Five times a plant got through the tests as they then stood, and each time the missing fixture was written (the outline test twice: its first fixture stopped exercising it when the grid became a tree, because a face beside another is no longer even asked). A twentieth plant, a ray along an axis skipping one slab of the box test, was dropped: it can cost time and cannot change an answer.
+**Unit tests and plants.** `Tests/GlbFuseHiddenTwinTests.cs`, 46 cases, each fixture with one thing to prove and,
+where it could pass for the wrong reason, a second half that shows the opposite outcome on a changed fixture.
+40 defects were planted one at a time in the source, built, run and restored (`plants2.py` in scratch). 38 are
+caught: never leaves a face out; cameras all round, not in front; glass faces of the group stop rays; the other side need not be seen; copies wound the same way are twins; opposition loosened to -0.5; no plane tolerance in the kernel; the fuse hands the kernel 1000 times its rounding; the rest of the file is not asked; outline not checked; a left-out face is still emitted; a left-out face still shapes normals; glass primitives are in the file tree; mirrored nodes are read as stored; segments are never left out of a ray; triangles of the group are never left out of a ray; a ray never visits the right child; a point never visits the right child; boxes are not widened by the rounding; a triangle seen from behind stops rays; the lone face of a large cover is not asked; only the zenith camera; a large face is asked from the eight directions only; the pass runs at a non-zero weld; rays start in the face plane (lift 0); a camera must be 30 degrees off edge-on (facing 0.5); the lowest ring replaced by a second 65; lowest camera 39 degrees; lowest camera 1 degree; the middle ring not turned; every sample at the centroid; no rim points for a large face; a twin needs all seven points; a twin needs one point; the report counts faces left out as written; the per-part line counts faces left out; judged on the authored winding; the centroid need not be covered. 2 are not, and are left so: a group is in its own way in the shared tree; rewound counts faces left out. The first is a count in the report line; a face both turned by the
+winding passes and left out did not occur in any fixture tried. The second matters when a group's own faces differ
+from the file's copy of them, which at weld 0 is only where a pass turned a face away from a camera.
 
-**What this does not show.** The game has not drawn a re-fused, re-baked Centurion yet. The culled comparison is
-against 17 directions, not every camera. The harness is in scratch (`C:/tmp/haf-build/zfight`: `fuse_drill.ps1`,
-`cullview.py`, `cullcompare.py`, `othership2.sh`, `twinmats_nodes.py`), not in `tools/`. One run of it was thrown
-away: it loaded the live test DLL while the plants were rebuilding it, and reported a preservation failure that was a
-plant's; the runs above load a frozen copy whose own 24 tests were run first.
+**What this does not show.** The game has drawn one model fused by the first cut, not the last version. The culled
+comparison is against the directions listed, not every camera, and against a renderer that culls back faces, which
+is not what the game was seen to do. Moving parts and tilted units were not measured. The harness is in scratch
+(`C:/tmp/haf-build/zfight`: `fuse_drill.ps1`, `cullview.py`, `cullcompare.py`, `othership3.sh`, `reviewB/rmview.py`,
+`twinmats_nodes.py`), not in `tools/`. One earlier run of it was thrown away: it loaded the live test DLL while the
+plants were rebuilding it and reported a preservation failure that was a plant's.

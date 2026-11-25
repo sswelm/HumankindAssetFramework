@@ -579,7 +579,7 @@ windows. **Deep dive:**
   are read, never which way the thing above or below faces: a group's own faces carry whatever the passes have
   already done to them, and the source's own winding is what is in question. A part *double-sided by duplication* (every
   face twice, wound both ways) is kept as two copies through the weld, so each is judged and emitted whole — welded
-  together they made four-face edges everywhere and an importer then dropped one copy at random. **Hidden twins are left out** (0.5.7): where a face lies
+  together they made four-face edges everywhere and an importer then dropped one copy at random. **Hidden twins are left out** (0.5.7, at weld 0 only; with a non-zero weld the report says the pass was not run): where a face lies
   exactly on a face wound the other way — a ceiling under the deck laid on it, the inner copy of a doubled mast — and no
   camera above the horizon can see its front while the other side is seen, the fused shell carries the visible face only.
   The game drew the hidden one through the visible one (the RSS Centurion's upper deck, in grey patches). A pair that
@@ -864,7 +864,7 @@ everything that finished. The rows:
   (scale==1, parent<child index, rotation-only curves) and the deploy-convert golden bone snapshots.
 - **Model Workshop** (every recipe's source) — on every GLB a Vehicle Lab recipe names as its source, in memory:
   splits every multi-island part, tears the smallest multi-island part, fuses the largest parts (up to 150k
-  triangles) into one shell; no triangle lost, every split child one island, unique names, the fused shell present
+  triangles) into one shell; no triangle lost by a split or a tear, the fuse's adding up (shell + hidden twins left out), every split child one island, unique names, the fused shell present
   with its reported count; then a golden diff of the counts (`Tools/workshop_golden/<file>.txt`, captured on the
   first run, deleted to re-bless). About six minutes on the current recipes.
 - **Vehicle Lab** (representative recipes / every recipe) — runs the Lab's Generate headlessly (the same code as the

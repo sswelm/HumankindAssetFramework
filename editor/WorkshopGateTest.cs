@@ -12,8 +12,8 @@
 //                      smallest 3 s): output triangles == source triangles
 //   FUSE  (weld 0)     the largest nodes up to a 150,000-triangle budget, into ONE shell (a whole million-triangle
 //                      liner would not finish inside a test row): the shell is in the output with the triangle count
-//                      the fuse reported, and at least half the source triangles survived (a collapse beyond that is
-//                      a broken weld, not a tidy-up)
+//                      the fuse reported, and every source triangle is in it or counted as a hidden twin left out
+//                      (2026-11-24; until then "at least half survived", which a doubled model no longer does)
 // then diffs the counts — parts, islands, children, triangles, welded vertices, islands after, faces rewound — against a
 // blessed golden, Tools/workshop_golden/<file>.txt (the deploy row's golden-master idea): the direction pass's verdicts
 // are exactly what PR #83 changed, and a rewound-faces count that moves on a ship nobody touched IS the regression. A

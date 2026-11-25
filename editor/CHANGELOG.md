@@ -5,20 +5,21 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
-- **Model Fuser: one surface where two lie on each other** (2026-11-24, user report, the Pre-Dreadnought's upper deck
-  flickering in grey patches in game). The ship's wood deck lies exactly on the superstructure's own top face, which is
-  wound the other way; the game drew that hidden face through the deck in patches, and on the aft mast and two boats
-  it drew the brown inner copy of a doubled skin instead of the grey outer one. A fuse now leaves out a face that
-  lies exactly on a face wound the other way when no camera above the horizon can see its front and the other side
-  is seen, so one surface remains. Kept as they are: a pair that shows on both sides (a flag, a boat's shell with a
-  painted inside), a pair nothing sees, and faces lying on each other wound the SAME way. Glass hides nothing.
+- **Model Fuser: one surface where two lie on each other** (2026-11-25, user report, the Pre-Dreadnought's upper deck
+  drawn with grey patches in game; seen fixed in game the same day, after fusing again, baking and rebuilding). The
+  ship's wood deck lies exactly on the superstructure's own top face, which is wound the other way, and the aft mast and
+  two boats carry a brown inner copy of their skin on the same triangles; those were the places the game drew wrong.
+  A fuse **at weld 0** now leaves out a face that lies exactly on a face of the same group wound the other way, when no
+  camera above the horizon can see its front and the other side is seen, so one surface remains. Kept as they are: a
+  pair that shows on both sides (a flag, a boat's shell with a painted inside), a pair nothing sees, and faces lying on
+  each other wound the SAME way. Glass hides nothing. With a non-zero weld the pass is not run and the report says so.
   A fused part can therefore have fewer triangles than its sources: the status line ends with `N hidden twin face(s)
-  left out` and the report's `hidden twins:` line names the parts. On that ship the fuse leaves out 59,931 of 468,161
-  triangles, and nine culled views from above the horizon are the same to the pixel (0 of 826,178); from the report's screenshot
+  left out` and the report's `hidden twins:` line names the parts. On that ship the fuse leaves out 64,955 of 468,161
+  triangles; nine culled views from above the horizon change in 0 of 826,178 pixels, and from the report's screenshot
   angle the hidden faces lying under a visible one of another material go from 43,265 pixels to 2. Fuse time on it:
-  5.3 s before, 6.2 s after. **To get the fix, fuse the model again and bake it again** - nothing changes for a
-  model until then. Not yet seen in game. The Bake Tests' Workshop row moves on 19 sources (their fused shells lose
-  hidden twins): re-run the row and re-bless those goldens.
+  5.8 s before, 11.2 s after. **To get the fix, fuse the model again and bake it again** - nothing changes for a
+  model until then. The Bake Tests' Workshop row moves on 18 sources (their fused shells lose hidden twins): re-run
+  the row and re-bless those goldens.
 - **Model Factory: wings no longer bake pale when their edge strips carry broken UVs** (2026-11-22, user report, the
   F100). A converted model painted each wing inside one texture tile, but its thin leading/trailing-edge strips had a
   broken projection running to ±150 tiles; the bake took that as a 308-tile *tiled* material and spread the whole range

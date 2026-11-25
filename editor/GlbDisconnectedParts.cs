@@ -3004,6 +3004,13 @@ public static partial class GlbDisconnectedParts
         // one only. Judged on the FINAL winding, after every pass above, and before any count is taken: FacesRewound and
         // the per-part line count what is in the output.
         bool[] drop;
+        if (weld > rounding)
+        {
+            // not at a non-zero weld (GlbDisconnectedParts.Covered.cs, "AT WELD 0 ONLY")
+            drop = new bool[faceCount];
+            plan.HiddenTwinsLine = "hidden twins: not looked for - the weld is not 0, and welded parts no longer stand where the model shows them; fuse at weld 0 to have hidden twins left out";
+        }
+        else
         {
             var finalCorners = new double[9 * faceCount]; var glassFace = new bool[faceCount];
             JArray materialsJson = root["materials"] as JArray;
@@ -3036,6 +3043,7 @@ public static partial class GlbDisconnectedParts
                 plan.HiddenTwinsLine = hiddenTwins.Removed > 0
                     ? string.Format(culture, "hidden twins: {0} face(s) lay exactly on a face wound the other way and no camera above the horizon can see them - left out, so one surface remains{1}; {2}",
                         hiddenTwins.Removed, byPart.Length > 0 ? " (by part: " + byPart + ")" : "", kept)
+                      + " - this pass runs last: where a 'twins:' line above says a copy is emitted whole or kept as authored, the faces counted here are the exception"
                     : "hidden twins: none left out; " + kept;
             }
         }
@@ -3046,7 +3054,7 @@ public static partial class GlbDisconnectedParts
         string rewoundByPart;
         {
             var facesOf = new int[picked.Count]; var turnedOf = new int[picked.Count];
-            for (int f = 0; f < faceCount; f++) { int pp = partOf[tris[f * 3]]; facesOf[pp]++; if (flip[f] && !drop[f]) turnedOf[pp]++; }
+            for (int f = 0; f < faceCount; f++) { if (drop[f]) continue; int pp = partOf[tris[f * 3]]; facesOf[pp]++; if (flip[f]) turnedOf[pp]++; }   // of the faces WRITTEN: a hidden twin left out is in neither number
             rewoundByPart = "rewound by part: " + string.Join("; ", Enumerable.Range(0, picked.Count).Select(pp => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} {1}/{2}", partNames[pp], turnedOf[pp], facesOf[pp])));
         }
         // the largest islands, so a reader can see WHAT was judged (faces, boundary share, how many faces the majority
@@ -3160,7 +3168,7 @@ public static partial class GlbDisconnectedParts
         plan.BaseName = string.IsNullOrEmpty(fusedName) ? partNames[0] + "_Fused" : fusedName;
         plan.Weld = weld; plan.WeldFraction = weldFraction; plan.Longest = longest;
         plan.MadeConsistent = islandsMadeConsistent; plan.OpenJudged = openJudged; plan.OpenReversed = openReversed; plan.ClosedReversed = closedReversed;
-        plan.FaceCount = faceCount; plan.CollapsedFaces = collapsedFaces; plan.NotOrientable = islandsNotOrientable;
+        plan.FaceCount = faceCount - result.HiddenFacesRemoved; plan.CollapsedFaces = collapsedFaces; plan.NotOrientable = islandsNotOrientable;
         plan.LargestIslands = largestIslands; plan.StitchedLine = stitchedLine; plan.RewoundByPart = rewoundByPart;
         plan.Timing = string.Join("; ", timing);
         plan.FrameLine = string.Format(System.Globalization.CultureInfo.InvariantCulture, "frame: length along {0}, side centre {1:0.##}, belly height {2:0.##} (the model's, fused or not)", lengthAxis == 0 ? "X" : "Z", centreW, bellyY);
