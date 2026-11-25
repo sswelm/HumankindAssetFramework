@@ -41,6 +41,20 @@ namespace HumankindAssetFramework.Tests
 
         // ---- THE PARITY ORACLE: the fallback must recover what the object parse extracts ----
 
+        [Fact]
+        public void ACommentAndNestedMetadataCannotSupplyTheDistrictRegistry()
+        {
+            const string doc = @"{
+                /* ""districts"": [{ ""district"": ""Comment"" }] */
+                ""metadata"": { ""districts"": [{ ""district"": ""Parked"" }] },
+                ""districts"": [{ ""district"": ""Active"", ""groundMaterial"": ""Prairie"" }],
+                ""bad"": }";
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var district = Assert.Single(DistrictInject.ParseDistrictsRaw(doc));
+            Assert.Equal("Active", district.district);
+            Assert.Equal("Prairie", district.groundMaterial);
+        }
+
         // Both extractors should agree on the values from a well-formed document.
         [Fact]
         public void RegexRecovery_MatchesTheObjectParse_FieldForField()
@@ -133,9 +147,150 @@ namespace HumankindAssetFramework.Tests
             yield return new object[] { "a closing brace missing on the first district",
                 @"{ ""districts"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"", ""hexSculpt"": ""Raised"", ""footprintMeshFlatHeight"": 0.3, " + b + ", " + c + " ] }" };
             yield return new object[] { "the wrapper lost its colon", @"{ ""districts"" [ " + a + ", " + b + ", " + c + " ] }" };
-            yield return new object[] { "the wrapper lost its bracket", @"{ ""districts"": " + a + ", " + b + ", " + c + " }" };
-            yield return new object[] { "the wrapper key is misspelled, and a comma is missing", @"{ ""Districts"": [ " + a + " " + b + ", " + c + " ] }" };
-            yield return new object[] { "no wrapper at all", "[ " + a + ",, " + b + ", " + c + " ]" };
+            // the reader shared with the model fallback (2026-11-24): the district is the object AROUND its name
+            yield return new object[] { "the opening brace missing on the second district",
+                @"{ ""districts"": [ " + a + ", " + b.Substring(2) + ", " + c + " ] }" };
+            yield return new object[] { "a closing brace missing, and the next district writes its name last",
+                @"{ ""districts"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"", ""hexSculpt"": ""Raised"", ""footprintMeshFlatHeight"": 0.3, { ""footprintMeshFlatHeight"": 0.5, ""fxMeshGuid"": ""1,2,3,4"", ""district"": ""B"" }, " + c + " ] }" };
+            yield return new object[] { "a stray ] between two districts", @"{ ""districts"": [ " + a + " ], " + b + ", " + c + " ] }" };
+            yield return new object[] { "a closing brace missing, and lookalike objects before and after the array",
+                @"{ ""notes"": [ { ""district"": ""example"", ""hexSculpt"": ""X"" } ], ""districts"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"", ""hexSculpt"": ""Raised"", ""footprintMeshFlatHeight"": 0.3, " + b + ", " + c + @" ], ""parked"": [ { ""district"": ""D"", ""footprintMeshFlatHeight"": 9 } ] }" };
+        }
+
+        // NOT MORE THAN THE DOCUMENT SAYS. Without a "districts" array a registry that parses loads no districts
+        // ("has no districts array"); a damaged one loads none either, and says so. The readers before this one (the
+        // released one, which paired values over the whole text, and the one of earlier on 2026-11-24) recovered
+        // districts from each of these documents, read from wherever a "district" key stood - which is also how a
+        // parked array comes to life on the day a comma goes missing.
+        [Theory]
+        [InlineData("the array's key in another case, and a comma missing", @"{ ""Districts"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"" } { ""district"": ""B"", ""fxMeshGuid"": ""1,2,3,4"" } ] }")]
+        [InlineData("a bare array", @"[ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"" },, { ""district"": ""B"", ""fxMeshGuid"": ""1,2,3,4"" } ]")]
+        [InlineData("the array renamed", @"{ ""districts_off"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"" ] }")]
+        [InlineData("not an array: its bracket is gone", @"{ ""districts"": { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"" }, { ""district"": ""B"", ""fxMeshGuid"": ""1,2,3,4"" } }")]
+        [InlineData("not an array: null, beside a parked one", @"{ ""districts"": null,, ""parked"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"" } ] }")]
+        public void RegexRecovery_WithoutADistrictsArray_LoadsNoDistricts_AndSaysWhy(string what, string doc)
+        {
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var said = new List<string>();
+            System.EventHandler<LogEventArgs> listen = (s, e) => { lock (said) said.Add(e.Data?.ToString() ?? ""); };
+            Plugin.Log.LogEvent += listen;
+            try { Assert.True(DistrictInject.ParseDistrictsRaw(doc).Count == 0, what); }
+            finally { Plugin.Log.LogEvent -= listen; }
+            lock (said) Assert.Contains(said, line => line.Contains("in a readable \"districts\" array"));
+        }
+
+        // A STRAY CLOSING BRACE in the middle of a district. What follows it before the next district can only be this
+        // district's own keys; a reader that ended the district at the first brace sent them to their defaults.
+        [Fact]
+        public void RegexRecovery_AStrayClosingBrace_DoesNotCostTheDistrictItsLaterKeys()
+        {
+            const string doc = @"{ ""districts"": [ { ""district"": ""D1"", ""fxMeshGuid"": ""1,2,3,4"" }, ""groundMaterial"": ""G1"", ""footprintMeshFlatHeight"": 0.4 }, { ""district"": ""D2"", ""groundMaterial"": ""G2"" } ] }";
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var districts = DistrictInject.ParseDistrictsRaw(doc);
+            Assert.Equal(new[] { "D1", "D2" }, districts.Select(d => d.district));
+            Assert.Equal(new[] { "G1", "G2" }, districts.Select(d => d.groundMaterial));
+            Assert.Equal(new[] { 0.4f, 0.17f }, districts.Select(d => d.footprintMeshFlatHeight));
+        }
+
+        // A DISTRICT WITH PARTS. The Factory's districts hold a `parts` array of objects. After a stray `}` the walk
+        // closes the district early and takes the first part for the next entry, and the `]` of `parts` for the
+        // registry's: a version of this reader that trusted that `]` lost every later district (its second review: 250
+        // of 3,497 one-character damages of the live registry).
+        [Theory]
+        [InlineData("a stray closing brace before the parts", @"""isolate"": true, ""groundMaterial""", @"""isolate"": true }, ""groundMaterial""")]
+        [InlineData("a stray closing brace inside the first part", @"[ { ""name"": ""roof""", @"[ { }""name"": ""roof""")]
+        [InlineData("a stray closing brace inside the last part", @"{ ""name"": ""wall"", ""tris"": 20 }", @"{ ""name"": ""wall"", }""tris"": 20 }")]
+        [InlineData("the district's opening brace lost", null, null)]
+        public void RegexRecovery_ADamagedDistrictWithParts_CostsNoLaterDistrict(string what, string from, string to)
+        {
+            string d1 = @"{ ""district"": ""D1"", ""fxMeshGuid"": ""1,2,3,4"", ""isolate"": true, ""groundMaterial"": ""G1"", ""rotation"": { ""x"": 0.0, ""y"": -90.0, ""z"": -90.0 }, ""parts"": [ { ""name"": ""roof"", ""tris"": 10 }, { ""name"": ""wall"", ""tris"": 20 } ], ""hexSculpt"": ""H1"" }";
+            Assert.True(from == null || d1.Contains(from), what);
+            d1 = from != null ? d1.Replace(from, to) : d1.Substring(2);
+            string doc = @"{ ""districts"": [ " + d1 + @", { ""district"": ""D2"", ""groundMaterial"": ""G2"", ""parts"": [] }, { ""district"": ""D3"", ""groundMaterial"": ""G3"", ""parts"": [ { ""name"": ""roof"" } ] } ] }";
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var districts = DistrictInject.ParseDistrictsRaw(doc);
+            Assert.True(new[] { "D1", "D2", "D3" }.SequenceEqual(districts.Select(d => d.district)), what + ": " + string.Join(",", districts.Select(d => d.district)));
+            Assert.Equal(new[] { "G1", "G2", "G3" }, districts.Select(d => d.groundMaterial));
+            Assert.Equal(new[] { "H1", "", "" }, districts.Select(d => d.hexSculpt));
+        }
+
+        // The recovery says that it ran, and what the count found.
+        [Fact]
+        public void RegexRecovery_OfADamagedStructure_SaysSo()
+        {
+            const string doc = @"{ ""districts"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"", { ""district"": ""B"", ""fxMeshGuid"": ""1,2,3,4"" } ] }";
+            var said = new List<string>();
+            System.EventHandler<LogEventArgs> listen = (s, e) => { lock (said) said.Add(e.Data?.ToString() ?? ""); };
+            Plugin.Log.LogEvent += listen;
+            try { Assert.Equal(new[] { "A", "B" }, DistrictInject.ParseDistrictsRaw(doc).Select(d => d.district)); }
+            finally { Plugin.Log.LogEvent -= listen; }
+            lock (said) Assert.Contains(said, line => line.Contains("[District] the structure of the districts array is damaged too (2 object(s) with a \"district\" in the text, 1 readable by their braces)"));
+        }
+
+        // ---- the third review (2026-11-24, on the pushed PR): hand edits of a district with parts ----
+
+        // TWO ADJACENT LINES DELETED. The `]` of a district's parts and its `},`: the next district looked like one
+        // more part, the count came out even and every later district was lost. The `"parts": [` line and the `{`
+        // under it: the first part's brace closed the district, and the `]` of the parts, with nothing before it to
+        // close, was taken for the registry's own. An element of an array has a `[` or a comma before it; a `]`
+        // followed by `}, {` is an entry's own, and the array goes on.
+        [Theory]
+        [InlineData("the ] of the parts and the },", @"{ ""name"": ""wall"", ""tris"": 20 } ] }, { ""district"": ""D2""", @"{ ""name"": ""wall"", ""tris"": 20 } { ""district"": ""D2""")]
+        [InlineData("the opening of the parts and of the first part", @"""parts"": [ { ""name"": ""roof""", @"""name"": ""roof""")]
+        public void RegexRecovery_TwoAdjacentLinesOfADistrictDeleted_CostNoLaterDistrict(string what, string from, string to)
+        {
+            string doc = @"{ ""districts"": [ { ""district"": ""D1"", ""fxMeshGuid"": ""1,2,3,4"", ""groundMaterial"": ""G1"", ""parts"": [ { ""name"": ""roof"", ""tris"": 10 }, { ""name"": ""wall"", ""tris"": 20 } ] }"
+                + @", { ""district"": ""D2"", ""groundMaterial"": ""G2"", ""parts"": [] }, { ""district"": ""D3"", ""groundMaterial"": ""G3"", ""parts"": [ { ""name"": ""roof"" } ] } ] }";
+            Assert.True(doc.Contains(from), what);
+            doc = doc.Replace(from, to);
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var districts = DistrictInject.ParseDistrictsRaw(doc);
+            Assert.True(new[] { "D1", "D2", "D3" }.SequenceEqual(districts.Select(d => d.district)), what + ": " + string.Join(",", districts.Select(d => d.district)));
+            Assert.Equal(new[] { "G1", "G2", "G3" }, districts.Select(d => d.groundMaterial));
+        }
+
+        // The array's key written twice with the empty one first loads nothing (the first is read, as ever), and a
+        // `"district": [` typed for `"districts": [` leaves no array: both must say why, and count the DISTRICTS the
+        // file holds - the misspelled array key is not one of them.
+        [Theory]
+        [InlineData("the key twice, the empty one first", @"{ ""districts"": [],, ""districts"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"" }, { ""district"": ""B"", ""fxMeshGuid"": ""1,2,3,4"" } ] }")]
+        [InlineData("district typed for districts", @"{ ""district"": [ { ""district"": ""A"", ""fxMeshGuid"": ""1,2,3,4"" } { ""district"": ""B"", ""fxMeshGuid"": ""1,2,3,4"" } ] }")]
+        public void RegexRecovery_WithNoDistrictInAReadableArray_CountsTheDistrictsItDidNotRead(string what, string doc)
+        {
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var said = new List<string>();
+            System.EventHandler<LogEventArgs> listen = (s, e) => { lock (said) said.Add(e.Data?.ToString() ?? ""); };
+            Plugin.Log.LogEvent += listen;
+            try { Assert.True(DistrictInject.ParseDistrictsRaw(doc).Count == 0, what); }
+            finally { Plugin.Log.LogEvent -= listen; }
+            lock (said) Assert.Contains(said, line => line.Contains("holds 2 \"district\" key(s), none of them in a readable \"districts\" array"));
+        }
+
+        // TWO QUOTES LOST IN ONE DISTRICT. Between them the walk reads the text inside out: the `[` of the parts and of
+        // the copies stand inside what it takes for strings, the district closes at the first copy's brace, and the
+        // `]` of the copies stands there as the registry's own, with no `[` open before it. The walk's end is not
+        // trusted once a string ran over a line end, which no JSON string does (the third review's own fix lost the
+        // district after it in 64 of 5,819 double damages of the live registry before this was held).
+        [Fact]
+        public void RegexRecovery_TwoQuotesLostInADistrictWithParts_CostNoLaterDistrict()
+        {
+            string doc = @"{ ""districts"": [ { ""district"": ""D1"", ""fxMeshGuid"": ""1,2,3,4"", ""modelFile"": D:/m/temple.glb""," + "\n"
+                + @" ""parts"": [ { ""copies"": [ { ""x"": 1.5, z"": -1.5 }, { ""x"": -1.5, ""z"": 1.5 }, { ""x"": -1.5, ""z"": -1.5 } ], ""targetTris"": 6000 } ] }, "
+                + @"{ ""district"": ""D2"", ""fxMeshGuid"": ""5,6,7,8"", ""groundMaterial"": ""G2"" } ] }";
+            Assert.ThrowsAny<System.Exception>(() => Newtonsoft.Json.Linq.JObject.Parse(doc));
+            var districts = DistrictInject.ParseDistrictsRaw(doc);
+            Assert.Equal(new[] { "D1", "D2" }, districts.Select(d => d.district));
+            Assert.Equal("G2", districts[1].groundMaterial);
+        }
+
+        // A null text is an empty registry, on both ways in.
+        [Fact]
+        public void EntryTexts_OfNoText_AreNone()
+        {
+            Assert.Empty(DistrictInject.DistrictEntryTexts(null));
+            Assert.Empty(UniversalInject.RegistryEntryTexts(null, "models", "resourceName", out string damage, out int namesWithoutArray, out _));
+            Assert.Null(damage);
+            Assert.Equal(0, namesWithoutArray);
         }
 
         [Theory]
