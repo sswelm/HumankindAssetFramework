@@ -619,9 +619,15 @@ windows. **Deep dive:**
   pieces are numbered in island order, so another merge distance — or one more part checked — hands the names
   `_Part_001…` to different geometry (on a cruiser re-split at 0.5 % after 1 %, 255 of the 424 reused names). Before
   the old output is replaced, each new piece is traced to the old piece its triangles came from and takes that piece's
-  letter and marks: a part that broke into smaller pieces keeps all of them in its group; a piece that now joins old
-  pieces marked differently is left unmarked and named in the console. Matching by name, with its Keep/Replace
-  question, remains only where no old output can be read.
+  group letter and Delete mark: a part that broke into smaller pieces keeps all of them in its group; a piece that now
+  joins old pieces marked differently (or holds geometry the old output did not have beside a marked one) does not
+  inherit, gets only what the source hands down, and is named in the console. Split and Tear checks always come from
+  the source, so a part you unchecked stays unchecked. Parts that are not triangles (lines, points) keep theirs by
+  index and name, and a saved value whose geometry is gone is counted in the status line. If NONE of the saved work
+  is found in the new output (a model moved or re-exported), or no old output can be read, it is matched by part name
+  with the Keep/Replace question as before. A **Fuse**, by contrast, rewrites the groups beside its output from its
+  own run. While the merge box holds a typed value you did not apply, Split, Cut and Fuse refuse: press Enter to
+  apply it (or Esc to discard it).
   **How long a fuse takes, and the native plugin** (2026-10): Fuse's weld, exposure views from above and from the side,
   and twin census run as C++ from the package's `Plugins/x86_64/hafkernels.dll`, alongside kernels used by the Vehicle
   Lab's C# probe and the Factory's reduce. The Workshop's **Probe** (island analysis and preview) stays managed C#.

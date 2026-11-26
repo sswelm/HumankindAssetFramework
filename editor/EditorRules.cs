@@ -1324,15 +1324,17 @@ public static class WorkshopRules
     /// 108 checks with the ones inherited from the source, and the dialog had said only "Overwrite existing file?".)
     /// <paramref name="marks"/> and <paramref name="letters"/> are the line counts of the two sidecars, or 0 for none.
     /// </summary>
-    public static string OverwriteWarning(string outputGlb, int marks, int letters)
+    /// <param name="fuse">true for a Fuse: it writes the output's groupings from this run's groups and does not read what was there.</param>
+    public static string OverwriteWarning(string outputGlb, int marks, int letters, bool fuse = false)
     {
         string s = outputGlb;
         if (marks <= 0 && letters <= 0) return s;
         var lost = new List<string>();
         if (marks > 0) lost.Add(marks + " mark(s) (Split, Tear and Delete)");
         if (letters > 0) lost.Add(letters + " group letter(s)");
-        return s + "\n\nWork is saved beside this file: " + string.Join(" and ", lost) +
-               ".\nWritten from this same source, it is kept for every piece that still exists. Otherwise you will be asked whether what still fits should be kept or replaced by what this source hands down.";
+        return s + "\n\nWork is saved beside this file: " + string.Join(" and ", lost) + (fuse
+            ? ".\nA Fuse writes the groups beside its output from this run's groups: what is saved there now is replaced."
+            : ".\nIt is carried to the new pieces by geometry: each piece keeps the group letter and Delete mark its own triangles had here, whatever it is called now (Split and Tear checks come from this source). If none of it can be found in the new output, you will be asked whether to keep it by part name or replace it.");
     }
 
     /// <summary>The source a sidecar was written from, stated in its own head: "#from|&lt;file name&gt;".</summary>
@@ -1449,6 +1451,12 @@ public static class WorkshopRules
              + "Of what is saved there, " + string.Join(" and ", fits) + " still name a part of the new output.\n\n"
              + "Keep what fits (the same model re-cut or re-exported makes the same pieces under the same names), or replace it all with what this source hands down?";
     }
+
+    /// The marks of a replaced output that travel to the new one by geometry: only Delete (X). Split and Tear are the
+    /// source's checks handed down to the pieces; carried by geometry, an S on the old pieces of a part the user has
+    /// just UNchecked re-marked that whole part Split (review of PR #324).
+    public static Dictionary<int, string> OnlyDeleteMarks(IDictionary<int, string> marks) =>
+        (marks ?? new Dictionary<int, string>()).Where(kv => kv.Value == "X").ToDictionary(kv => kv.Key, kv => kv.Value);
 
     public static string SidecarLine(string letter, string name, int nodeIndex) =>
         letter + "|" + nodeIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + name;

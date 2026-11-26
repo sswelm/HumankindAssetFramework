@@ -1087,6 +1087,11 @@ public static partial class GlbDisconnectedParts
     // geometry into a group nobody chose. A triangle found in two old pieces (a doubled face) does not vote; a piece
     // none of whose triangles were in the old output gets nothing. TraceOrigins reads both files once; Carry then
     // applies any number of value tables (the groupings and the marks) to the same trace.
+    // WHAT THE TRACE CANNOT SEE (review of PR #324): ExtractAll leaves out a node it cannot read as triangles - lines
+    // or points (rigging), Draco, GPU instancing - so such a node is in neither map. Carry hands it on by INDEX and
+    // NAME instead, the way the sidecars were always read: a split only appends nodes, so a node the operation did not
+    // create keeps both. And a saved value whose geometry reached no new piece is counted (Orphans), never lost in
+    // silence: a model moved or re-exported matches no triangle, and the caller asks rather than drops everything.
     public sealed class PieceOrigin
     {
         public int NodeIndex;
@@ -1095,45 +1100,86 @@ public static partial class GlbDisconnectedParts
         public bool HasNewTriangles;                                  // a triangle no old piece had
     }
 
-    public static List<PieceOrigin> TraceOrigins(byte[] oldOutput, byte[] newOutput)
+    public sealed class Trace
     {
+        public readonly List<PieceOrigin> Pieces = new List<PieceOrigin>();
+        public readonly HashSet<int> OldRead = new HashSet<int>();    // old nodes whose triangles were read
+        public readonly HashSet<int> NewRead = new HashSet<int>();    // new nodes whose triangles were read
+        public readonly HashSet<int> Heirs = new HashSet<int>();      // old nodes some triangle of which is in the new output
+    }
+
+    public static Trace TraceOrigins(byte[] oldOutput, byte[] newOutput)
+    {
+        var trace = new Trace();
         var owner = new Dictionary<TriangleKey, int>();   // triangle -> old node index; -1 = in more than one old node
         foreach (PartGeometry g in ExtractAll(oldOutput))
+        {
+            trace.OldRead.Add(g.NodeIndex);
             for (int t = 0; t + 2 < g.Triangles.Length; t += 3)
             {
                 var key = TriangleKey.Of(g.Positions, g.Triangles[t], g.Triangles[t + 1], g.Triangles[t + 2]);
                 owner[key] = owner.TryGetValue(key, out int had) && had != g.NodeIndex ? -1 : g.NodeIndex;
             }
-        var origins = new List<PieceOrigin>();
+        }
         foreach (PartGeometry g in ExtractAll(newOutput))
         {
+            trace.NewRead.Add(g.NodeIndex);
             var o = new PieceOrigin { NodeIndex = g.NodeIndex, NodeName = g.NodeName };
             for (int t = 0; t + 2 < g.Triangles.Length; t += 3)
             {
                 if (!owner.TryGetValue(TriangleKey.Of(g.Positions, g.Triangles[t], g.Triangles[t + 1], g.Triangles[t + 2]), out int oldNode)) o.HasNewTriangles = true;
                 else if (oldNode >= 0) o.OldNodes.Add(oldNode);   // a doubled face (two old pieces hold it) settles nothing
             }
-            origins.Add(o);
+            trace.Heirs.UnionWith(o.OldNodes);
+            trace.Pieces.Add(o);
         }
-        return origins;
+        return trace;
+    }
+
+    public sealed class CarryResult
+    {
+        public readonly Dictionary<int, string> Values = new Dictionary<int, string>();   // value by node index of the NEW output
+        public readonly List<string> Conflicts = new List<string>();                      // one line per piece not carried, naming it
+        public readonly HashSet<int> ConflictNodes = new HashSet<int>();
+        public int ByName;     // values handed on by index and name: nodes the trace cannot read
+        public int Orphans;    // saved values whose geometry reached no new piece
+        public int Saved;      // the saved values asked about (non-empty)
+        /// Saved values existed and not one found its geometry (nothing carried, nothing in conflict): a moved or
+        /// re-exported model, where the trace has nothing to say and the caller must ask instead of dropping it all.
+        public bool FoundNothing => Saved > 0 && Values.Count == 0 && ConflictNodes.Count == 0;
     }
 
     /// <param name="oldValues">value by node index of the OLD output.</param>
-    /// <returns>value by node index of the NEW output.</returns>
-    public static Dictionary<int, string> Carry(IEnumerable<PieceOrigin> origins, IDictionary<int, string> oldValues, List<string> conflicts = null)
+    /// <param name="oldNames">name by node index in the OLD output; <paramref name="newNames"/> the same in the NEW one (for the nodes the trace cannot read).</param>
+    public static CarryResult Carry(Trace trace, IDictionary<int, string> oldValues, IDictionary<int, string> oldNames = null, IDictionary<int, string> newNames = null)
     {
-        var result = new Dictionary<int, string>();
-        if (origins == null || oldValues == null || oldValues.Count == 0) return result;
-        foreach (PieceOrigin o in origins)
+        var r = new CarryResult();
+        if (trace == null || oldValues == null || oldValues.Count == 0) return r;
+        foreach (PieceOrigin o in trace.Pieces)
         {
             var values = new SortedSet<string>(StringComparer.Ordinal);
             foreach (int n in o.OldNodes) values.Add(oldValues.TryGetValue(n, out string v) && !string.IsNullOrEmpty(v) ? v : "");
-            if (o.HasNewTriangles) values.Add("");   // a triangle in no old piece was marked nothing
-            if (values.Count == 1) { string only = values.Min; if (only.Length > 0) result[o.NodeIndex] = only; }
-            else if (values.Count > 1 && values.Any(v => v.Length > 0))
-                conflicts?.Add("'" + o.NodeName + "' joins pieces that were " + string.Join(" and ", values.Select(v => v.Length > 0 ? "'" + v + "'" : "unmarked")) + " in the previous output: left unmarked, choose it again");
+            var marked = values.Where(v => v.Length > 0).ToList();
+            if (marked.Count == 1 && !values.Contains("") && !o.HasNewTriangles) { r.Values[o.NodeIndex] = marked[0]; continue; }
+            if (marked.Count == 0) continue;
+            r.ConflictNodes.Add(o.NodeIndex);
+            r.Conflicts.Add("'" + o.NodeName + "' " + (values.Count > 1
+                ? "joins pieces that were " + string.Join(" and ", values.Select(v => v.Length > 0 ? "'" + v + "'" : "unmarked")) + " in the previous output"
+                : "was '" + marked[0] + "' in the previous output and now also holds geometry that output did not have")
+                + ": that value is not carried over (it gets only what the source hands down)");
         }
-        return result;
+        foreach (var kv in oldValues)
+        {
+            if (string.IsNullOrEmpty(kv.Value)) continue;
+            r.Saved++;
+            if (trace.OldRead.Contains(kv.Key)) { if (!trace.Heirs.Contains(kv.Key)) r.Orphans++; continue; }
+            // not readable as triangles: the same node, by index and name, when the new output has it and it is not read either
+            if (oldNames != null && newNames != null && !trace.NewRead.Contains(kv.Key) && oldNames.TryGetValue(kv.Key, out string was)
+                && newNames.TryGetValue(kv.Key, out string now) && string.Equals(was, now, StringComparison.Ordinal) && !r.Values.ContainsKey(kv.Key))
+            { r.Values[kv.Key] = kv.Value; r.ByName++; }
+            else r.Orphans++;
+        }
+        return r;
     }
 
     // a triangle's three world positions, exact, rotated so the smallest vertex leads (the winding is kept: a face and

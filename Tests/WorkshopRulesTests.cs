@@ -495,6 +495,11 @@ public class WorkshopRulesTests
         Assert.Contains("22 group letter(s)", both);
         Assert.DoesNotContain("0 group letter(s)", WorkshopRules.OverwriteWarning("out.glb", 508, 0));
         Assert.Contains("508 mark(s)", WorkshopRules.OverwriteWarning("out.glb", 508, 0));
+        // what happens to it is said per operation (review of PR #324): a split or cut carries it by geometry and asks
+        // only when none of it is found; a Fuse rewrites the groupings from its own run
+        Assert.Contains("carried to the new pieces by geometry", both);
+        Assert.DoesNotContain("carried", WorkshopRules.OverwriteWarning("out.glb", 0, 22, fuse: true));
+        Assert.Contains("is replaced", WorkshopRules.OverwriteWarning("out.glb", 0, 22, fuse: true));
     }
 
     const string ShaA = "da39a3ee5e6b4b0d3255bfef95601890afd80709";   // SHA-1 of nothing at all: a known 40-hex identity
