@@ -615,6 +615,13 @@ windows. **Deep dive:**
   letters travel with a cut or split output, and a fused output's sidecar names each shell under its group's letter, so
   either order works (the Cutter re-reads the sidecar on every Probe, so after changing groups in the Fuser,
   re-Probe in the Cutter before cutting; the Fuser keeps your edits across a re-Probe and reloads through Load groups).
+  **Splitting again over an output you already grouped** keeps that work by GEOMETRY, not by name (2026-11-26): the
+  pieces are numbered in island order, so another merge distance — or one more part checked — hands the names
+  `_Part_001…` to different geometry (on a cruiser re-split at 0.5 % after 1 %, 255 of the 424 reused names). Before
+  the old output is replaced, each new piece is traced to the old piece its triangles came from and takes that piece's
+  letter and marks: a part that broke into smaller pieces keeps all of them in its group; a piece that now joins old
+  pieces marked differently is left unmarked and named in the console. Matching by name, with its Keep/Replace
+  question, remains only where no old output can be read.
   **How long a fuse takes, and the native plugin** (2026-10): Fuse's weld, exposure views from above and from the side,
   and twin census run as C++ from the package's `Plugins/x86_64/hafkernels.dll`, alongside kernels used by the Vehicle
   Lab's C# probe and the Factory's reduce. The Workshop's **Probe** (island analysis and preview) stays managed C#.

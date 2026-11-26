@@ -179,6 +179,93 @@ public class GlbDisconnectedPartsTests
         Assert.Equal(4, result.OutputTriangles);
     }
 
+    // the rope (two triangles 0.5 apart) and the far junk of the distance-merge test: at 5 % two pieces, at 0 % three
+    static readonly float[] RopeAndJunk = {
+        0f, 0f, 0f,    1f, 0f, 0f,    0f, 1f, 0f,
+        1.5f, 0f, 0f,  2.5f, 0f, 0f,  1.5f, 1f, 0f,
+        50f, 0f, 0f,   51f, 0f, 0f,   50f, 1f, 0f
+    };
+    const double RopeX = 2, HalfX = 3.5, JunkX = 52;   // where each piece starts along X in WORLD space: the fixture node sits at (2, 3, 4)
+    // (node index, name, where it starts along X) of every mesh-carrying node
+    static List<(int node, string name, double minX)> Pieces(byte[] glb) =>
+        GlbDisconnectedParts.ExtractAll(glb).Select(g => (g.NodeIndex, g.NodeName, g.Min[0])).ToList();
+
+    [Fact]
+    public void Carry_by_geometry_follows_the_triangles_when_a_lower_merge_renumbers_the_pieces()
+    {
+        // user 2026-11-26: split at 1 %, grouped the pieces in the Fuser, split again lower - and the kept groups
+        // landed on "parts that just had the same name"
+        byte[] source = BuildGlb(RopeAndJunk);
+        byte[] coarse = GlbDisconnectedParts.Split(source, new HashSet<string> { "Hull" }, 0.05).Bytes;
+        byte[] fine = GlbDisconnectedParts.Split(source, new HashSet<string> { "Hull" }, 0).Bytes;
+        var old = Pieces(coarse); var now = Pieces(fine);
+        Assert.Equal(2, old.Count); Assert.Equal(3, now.Count);
+        var oldRope = old.Single(p => p.minX == RopeX); var oldJunk = old.Single(p => p.minX == JunkX);
+        var values = new Dictionary<int, string> { [oldRope.node] = "A", [oldJunk.node] = "B" };
+
+        // THE PREMISE: the junk's old name now belongs to half of the rope, so a carry by name puts B on the rope
+        var sameName = now.Single(p => p.name == oldJunk.name);
+        Assert.Equal(HalfX, sameName.minX);
+
+        var conflicts = new List<string>();
+        var carried = GlbDisconnectedParts.Carry(GlbDisconnectedParts.TraceOrigins(coarse, fine), values, conflicts);
+        Assert.Empty(conflicts);
+        Assert.Equal(3, carried.Count);
+        Assert.Equal("A", carried[now.Single(p => p.minX == RopeX).node]);     // both halves of the rope stay in the rope's group
+        Assert.Equal("A", carried[sameName.node]);
+        Assert.Equal("B", carried[now.Single(p => p.minX == JunkX).node]);    // and the junk's letter follows the junk
+    }
+
+    [Fact]
+    public void Carry_by_geometry_leaves_a_piece_unmarked_when_it_joins_pieces_marked_differently()
+    {
+        byte[] source = BuildGlb(RopeAndJunk);
+        byte[] fine = GlbDisconnectedParts.Split(source, new HashSet<string> { "Hull" }, 0).Bytes;
+        byte[] coarse = GlbDisconnectedParts.Split(source, new HashSet<string> { "Hull" }, 0.05).Bytes;
+        var old = Pieces(fine); var now = Pieces(coarse);
+        int half1 = old.Single(p => p.minX == RopeX).node, half2 = old.Single(p => p.minX == HalfX).node, junk = old.Single(p => p.minX == JunkX).node;
+        var rope = now.Single(p => p.minX == RopeX); int newJunk = now.Single(p => p.minX == JunkX).node;
+        var origins = GlbDisconnectedParts.TraceOrigins(fine, coarse);
+
+        // one half grouped, the other not: the joined rope is nobody's choice
+        var conflicts = new List<string>();
+        var carried = GlbDisconnectedParts.Carry(origins, new Dictionary<int, string> { [half1] = "A", [junk] = "B" }, conflicts);
+        Assert.False(carried.ContainsKey(rope.node));
+        Assert.Equal("B", carried[newJunk]);
+        Assert.Single(conflicts);
+        Assert.Contains("'" + rope.name + "'", conflicts[0]);
+        Assert.Contains("unmarked and 'A'", conflicts[0]);
+
+        // two different groups: the same
+        conflicts.Clear();
+        carried = GlbDisconnectedParts.Carry(origins, new Dictionary<int, string> { [half1] = "A", [half2] = "C" }, conflicts);
+        Assert.Empty(carried);
+        Assert.Single(conflicts);
+
+        // both halves in one group: the joined rope keeps it, and nothing is reported
+        conflicts.Clear();
+        carried = GlbDisconnectedParts.Carry(origins, new Dictionary<int, string> { [half1] = "A", [half2] = "A" }, conflicts);
+        Assert.Equal("A", carried[rope.node]);
+        Assert.False(carried.ContainsKey(newJunk));
+        Assert.Empty(conflicts);
+    }
+
+    [Fact]
+    public void Carry_by_geometry_gives_nothing_to_geometry_the_old_output_did_not_have()
+    {
+        byte[] other = BuildGlb(new[] { 7f, 0f, 0f, 8f, 0f, 0f, 7f, 1f, 0f });
+        byte[] now = BuildGlb(RopeAndJunk);
+        int oldNode = Pieces(other).Single().node;
+        var conflicts = new List<string>();
+        Assert.Empty(GlbDisconnectedParts.Carry(GlbDisconnectedParts.TraceOrigins(other, now), new Dictionary<int, string> { [oldNode] = "A" }, conflicts));
+        Assert.Empty(conflicts);
+
+        // the same file against itself: every part keeps exactly its own value, reversed winding is another triangle
+        byte[] flipped = BuildGlb(new[] { 7f, 0f, 0f, 7f, 1f, 0f, 8f, 0f, 0f });
+        Assert.Equal("A", GlbDisconnectedParts.Carry(GlbDisconnectedParts.TraceOrigins(other, other), new Dictionary<int, string> { [oldNode] = "A" })[oldNode]);
+        Assert.Empty(GlbDisconnectedParts.Carry(GlbDisconnectedParts.TraceOrigins(other, flipped), new Dictionary<int, string> { [oldNode] = "A" }));
+    }
+
     [Fact]
     public void Direction_gate_keeps_parallel_DIAGONAL_dashed_lines_as_separate_parts()
     {

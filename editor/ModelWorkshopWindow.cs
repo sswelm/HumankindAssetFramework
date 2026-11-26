@@ -1420,7 +1420,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // "keep what fits, or replace?" used to arrive after the new GLB had already overwritten the old one, with no way
     // to say "neither, stop" - so a user facing uncertain matches could neither stop the overwrite nor get the old
     // output back. Both cuts now hold their result in memory, ask first, and write nothing at all on Cancel.
-    sealed class SidecarPlan { public string LettersPath, MarksPath; public string[] Letters, Marks; public int Kept; public string Error; }   // Error set = the plan could not be made, and the caller must write NOTHING
+    sealed class SidecarPlan { public string LettersPath, MarksPath; public string[] Letters, Marks; public int Kept, Unsettled; public bool ByGeometry; public string Error; }   // Error set = the plan could not be made, and the caller must write NOTHING
 
     // null = the user cancelled: the caller writes NOTHING. `settings` is what decided the pieces (WorkshopRules.SplitSettings /
     // CutSettings) - part of the identity, because the same source cut differently makes different pieces under the same names.
@@ -1460,17 +1460,52 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // both files with the real counts in front of the user, never a threshold guessed for them (review of PR
             // #99, third round: a 50 % rule threw out four valid decisions of ten one way and let generic names
             // through the other).
+            // BY GEOMETRY, WHILE THE OLD OUTPUT IS STILL ON DISK (2026-11-26, user: after lowering "Merge closer than"
+            // and splitting again, the kept groups "often classified parts that just had the same name wrong"). The
+            // pieces are numbered in island order, so another merge distance - or one more part checked - hands every
+            // _Part_NNN name to different geometry, and "keep what fits" by name put the old letters on it. The old
+            // output is still there when this runs (nothing is written before the plan), and its sidecars describe
+            // ITS nodes: they are resolved against it, and each new piece takes what its own triangles had there
+            // (GlbDisconnectedParts.TraceOrigins / Carry). That is exact whatever produced the two files, so nothing
+            // is asked. Only without a readable old output does the by-name reading below, and its question, remain.
+            List<GlbDisconnectedParts.PieceOrigin> origins = null;
+            List<(int, string, string)> oldTriples = null; List<KeyValuePair<int, string>> oldPairs = null;
+            if (new[] { lettersPath, marksPath }.Any(p => p != null && File.Exists(p)) && File.Exists(outputGlb))
+                try
+                {
+                    byte[] oldBytes = File.ReadAllBytes(outputGlb);
+                    var oldParts = GlbDisconnectedParts.Analyze(oldBytes);
+                    var traced = GlbDisconnectedParts.TraceOrigins(oldBytes, outBytes);
+                    oldTriples = oldParts.Select(q => (q.NodeIndex, q.NodeName, q.NodeName)).ToList();
+                    oldPairs = oldParts.Select(q => new KeyValuePair<int, string>(q.NodeIndex, q.NodeName)).ToList();
+                    origins = traced;
+                }
+                catch (Exception e) { Debug.LogWarning("[Workshop] the output being replaced could not be read (" + e.Message + "): what is saved beside it is matched by part name instead."); origins = null; }
             var found = new Dictionary<string, (string[] had, Dictionary<int, string> was, int entries, WorkshopRules.SidecarFit fit)>();
             foreach (string path in new[] { lettersPath, marksPath })
             {
                 if (path == null || !File.Exists(path)) continue;
                 var problems = new List<string>();
                 string[] had = File.ReadAllLines(path);
-                var was = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, outTriples, problems), outPairs, problems);
                 int entries = had.Count(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#", StringComparison.Ordinal));
-                found[path] = (had, was, entries, WorkshopRules.JudgeSidecar(WorkshopRules.ParseSidecarFrom(had), sourceIdentity, entries, was.Count));
-                foreach (string q in problems) Debug.LogWarning("[Workshop] the output's own " + (path == lettersPath ? "groupings" : "marks") + " sidecar: " + q);
+                string which = path == lettersPath ? "groupings" : "marks";
+                if (origins != null)
+                {
+                    var wasOld = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, oldTriples, problems), oldPairs, problems);
+                    var conflicts = new List<string>();
+                    var carried = GlbDisconnectedParts.Carry(origins, wasOld, conflicts);
+                    found[path] = (had, carried, entries, WorkshopRules.SidecarFit.Same);
+                    plan.Unsettled += conflicts.Count;
+                    foreach (string q in conflicts) Debug.LogWarning("[Workshop] the output's own " + which + ": " + q);
+                }
+                else
+                {
+                    var was = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, outTriples, problems), outPairs, problems);
+                    found[path] = (had, was, entries, WorkshopRules.JudgeSidecar(WorkshopRules.ParseSidecarFrom(had), sourceIdentity, entries, was.Count));
+                }
+                foreach (string q in problems) Debug.LogWarning("[Workshop] the output's own " + which + " sidecar: " + q);
             }
+            plan.ByGeometry = origins != null;
             bool keepUnknown = false;
             if (found.Values.Any(f => f.fit == WorkshopRules.SidecarFit.Unknown))
             {
@@ -1584,6 +1619,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
             }
         }
         if (stale.Count > 0) { failure = "its sidecars could not be written: " + string.Join("; ", stale) + ". Mark the output again before fusing it."; return ""; }
+        if (plan.ByGeometry)
+            return (plan.Kept > 0 ? $" Kept {plan.Kept} letter(s)/mark(s) from the output this replaced, matched by geometry: each piece took what its own triangles had there, whatever it is called now." : "")
+                 + (plan.Unsettled > 0 ? $" {plan.Unsettled} piece(s) join old pieces that were marked differently and were left unmarked — the console names them." : "");
         return plan.Kept > 0 ? $" Kept {plan.Kept} letter(s)/mark(s) already saved beside the output — the same source cut the same way makes the same pieces, so what was decided about them still fits." : "";
     }
     // Marks `target` from the sidecar; returns how many rows got a letter, `refused` = lines that fit no single row
