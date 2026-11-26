@@ -11,10 +11,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   the session now takes the role the last Generate of the Output GLB gave it, from the role lists Generate writes
   to `Assets/FactorySource/VehicleLab` under the output's file name; a part not in them takes the role its fuse-group
   members share, from the fuse report beside the source. A group whose members disagree stays undecided and the
-  status names it. On the galley, the first record
-  restores all 15 parts to their 2026-10-20 roles, and the fuse groups alone restore 9 and name the other 6. A part
-  the session already listed keeps its role, Default included, and ＜new model＞ still starts from nothing.
-  Probe checks list timestamps against the output GLB and checks the reported member count when reading fuse groups.
+  status names it. On the galley, the role lists restore all 15 parts to their 2026-10-20 roles. The fuse groups
+  alone give 9 parts a role and name the other 6, but only 2 of the 9 match: they carry the unfused recipe's roles,
+  and 5 groups whose members were all Ignored, the rigging among them, come back Ignored. The lists are the record;
+  the groups are a fallback to check in the log. A part the session already listed keeps its role, Default
+  included, also over a name guess on re-Probe, and ＜new model＞ still starts from nothing. Role lists newer than the
+  Output GLB (a Generate that did not finish) are not read; at a Default dial of 0 Generate now writes an empty
+  Default list instead of leaving the last one; a fuse group is read only when its member list matches the
+  reported part count.
 - **Model Factory: the Multi-fragment split fills its pieces evenly** (2026-11-25, user report: the Heavy Monitor
   never got past "7.3x" in eight fragments). The pieces used to hold the same number of triangles, so one piece
   reached the quad limit while the others still had room. Each cut is now placed so the pieces hold about the same
