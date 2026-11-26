@@ -1823,6 +1823,28 @@ public static class WorkshopRules
         }
         return baseName + suffix;
     }
+
+    // MERGE-DISTANCE FIELD (2026-11-26): the Cutter's "Merge closer than (%)" takes decimals. The slider runs on a
+    // square-root scale so the useful low end (0-1 %) gets about a third of the track, and a dragged value snaps to
+    // 0.01 %; a typed value accepts a dot OR a comma as the decimal mark and keeps three decimals. Both clamp to
+    // [0, MergePctMax].
+    public const float MergePctMax = 10f;
+    public static float MergePctToSlider(float pct) => (float)Math.Sqrt(Math.Max(0f, Math.Min(MergePctMax, pct)));
+    public static float MergePctFromSlider(float s)
+    {
+        double pct = (double)s * s;
+        return (float)Math.Max(0.0, Math.Min(MergePctMax, Math.Round(pct * 100.0, MidpointRounding.AwayFromZero) / 100.0));
+    }
+    public static string MergePctText(float pct) => pct.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+    /// null = not a number (the field keeps its old value).
+    public static float? ParseMergePct(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        string t = text.Trim().TrimEnd('%').Trim().Replace(',', '.');
+        if (!double.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v)
+            || double.IsNaN(v) || double.IsInfinity(v)) return null;
+        return (float)Math.Max(0.0, Math.Min(MergePctMax, Math.Round(v * 1000.0, MidpointRounding.AwayFromZero) / 1000.0));
+    }
 }
 
 // BAKE TESTS' GOLDEN RULES (2026-09-25, user: "could you add fuse and split and extra generate test to the bake test"):

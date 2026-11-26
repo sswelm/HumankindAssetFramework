@@ -252,13 +252,18 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 }
         }
 
-        float newMergePct = EditorGUILayout.Slider(new GUIContent("Merge closer than (%)",
+        // DECIMALS (user 2026-11-26: 1 % merged too much, 0 % shredded too much, and the step between was out of
+        // reach): the slider runs on a SQUARE-ROOT scale, so 0–1 % fills about a third of the track instead of a
+        // tenth, and snaps to 0.01 %; the box beside it takes any value typed, with a dot or a comma (a Dutch
+        // keyboard's numpad gives a comma), applied on Enter or when the box loses focus. Both apply only when
+        // the user actually changed them, so a typed 0.125 is never re-rounded by the slider on the next pass.
+        if (MergePctField(new GUIContent("Merge closer than (%)",
             "Islands whose VERTICES come nearer than this (percent of each part's own size) count as ONE part — so a " +
             "segmented rope stays one rope instead of shredding into hundreds of 3-vert fragments, while genuinely " +
             "distant junk still separates. Measured between vertices (a long edge passing near a vertex is not seen), " +
-            "accurate to about one grid cell. 0 = pure topology. Release the slider and the counts recount (no Blender re-run)."),
-            mergePct, 0f, 10f);
-        if (!Mathf.Approximately(newMergePct, mergePct)) { mergePct = newMergePct; analyzePending = rows.Count > 0; }
+            "accurate to about one grid cell. 0 = pure topology. Decimals work (0.3, or 0,3): type in the box and press " +
+            "Enter, or drag the slider (finer at the low end). The counts recount when you let go (no Blender re-run).")))
+            analyzePending = rows.Count > 0;
         // DEFERRED recount (review find 2026-09-06): running Analyze mid-OnGUI replaced `rows` between IMGUI's
         // Layout and event passes (control-count mismatch exceptions), and doing it per drag-tick re-parsed the
         // whole GLB on every mouse move (seconds per tick on a real ship). Recount once, on the first Layout
@@ -786,6 +791,32 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // Path identity for the source-switch hygiene: separator- and case-insensitive (Windows paths), so retyping
     // the same file with the other slash style is not read as a switch.
     static bool SamePath(string a, string b) => WorkshopRules.SamePath(a, b);
+
+    // The merge-distance row: a square-root slider plus a box that takes decimals (rules in WorkshopRules). True when
+    // the user changed the value this pass, by dragging or by committing a typed number (Enter or focus loss).
+    bool MergePctField(GUIContent label)
+    {
+        bool changed = false;
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.PrefixLabel(label);
+            EditorGUI.BeginChangeCheck();
+            float s = GUILayout.HorizontalSlider(WorkshopRules.MergePctToSlider(mergePct), 0f, WorkshopRules.MergePctToSlider(WorkshopRules.MergePctMax));
+            if (EditorGUI.EndChangeCheck())
+            {
+                float v = WorkshopRules.MergePctFromSlider(s);
+                if (v != mergePct) { mergePct = v; changed = true; }
+            }
+            EditorGUI.BeginChangeCheck();
+            string typed = EditorGUILayout.DelayedTextField(WorkshopRules.MergePctText(mergePct), GUILayout.Width(50));
+            if (EditorGUI.EndChangeCheck())
+            {
+                float? v = WorkshopRules.ParseMergePct(typed);
+                if (v.HasValue && v.Value != mergePct) { mergePct = v.Value; changed = true; }
+            }
+        }
+        return changed;
+    }
     // the file's length and write time: enough to tell a file rewritten in place from the one the rows were built
     // from, and it costs a directory entry rather than a read of the whole GLB
     static string StampOf(string path)
@@ -856,7 +887,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             status = (rewritten ? "This file was rewritten since it was last probed, so the checks and letters in the window were dropped — they named nodes of the old file — and the marks saved beside the new one were read instead. " : "")
                    + (onDisk > 0 ? $"{onDisk} group letter(s) are saved beside this file and no row in the window carries one — press 'Load groups' to read them back (a re-Probe keeps what the window holds, so a deliberate clear stays cleared). " : "")
                    + (multi == 0 ? "Every part is a single attached island (at this merge distance) — nothing to split."
-                   : $"{rows.Count} part(s); {multi} hold more than one island at merge distance {mergePct:0.#}%. Check the ones hiding junk; raise the slider if a part still shreds into fragments.")
+                   : $"{rows.Count} part(s); {multi} hold more than one island at merge distance {mergePct.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}%. Check the ones hiding junk; raise the slider if a part still shreds into fragments.")
                    + (tinyMarked > 0 ? $" Automatically marked {tinyMarked} unassigned part(s) with 0–2 triangles for deletion; clear a Delete mark to keep a part." : "");
             Repaint();
             return true;

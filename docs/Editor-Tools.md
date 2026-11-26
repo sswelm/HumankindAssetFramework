@@ -518,7 +518,9 @@ windows. **Deep dive:**
   only those gain `_Part_NNN` children — same lossless method, so the rest of the model is byte-identical. Feed
   the output to the Vehicle Lab and mark the junk islands Ignore. Splitting a many-island part (ropes, rigging)
   explodes the part list; usually leave those whole — or raise the **Merge closer than (%)** slider, which counts
-  near islands as one part (rotation-invariant since 0.5.6: diagonal dashed lines gate correctly too). The
+  near islands as one part (rotation-invariant since 0.5.6: diagonal dashed lines gate correctly too). It takes
+  decimals: type 0.3 (or 0,3) in the box and press Enter, or drag — the slider is square-root scaled, so 0–1 % fills
+  about a third of its track, and it snaps to 0.01 %. The
   **Output GLB** auto-follows the source file until you edit it, and changing the source — typed or browsed —
   resets the probe so a stale part list can never split the wrong file. The preview is built straight from the GLB
   (0.5.7: no Blender export, no FBX import — a 214 MB ship probes in about ten seconds), one object per node, so a

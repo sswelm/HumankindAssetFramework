@@ -314,6 +314,34 @@ public class WorkshopRulesTests
     }
 
     [Fact]
+    public void Merge_percent_takes_decimals_with_a_dot_or_a_comma()
+    {
+        Assert.Equal(0.3f, WorkshopRules.ParseMergePct("0.3"));
+        Assert.Equal(0.3f, WorkshopRules.ParseMergePct("0,3"));        // a Dutch numpad types a comma
+        Assert.Equal(0.25f, WorkshopRules.ParseMergePct(" 0,25 % "));
+        Assert.Equal(0.125f, WorkshopRules.ParseMergePct("0.125"));    // three decimals kept
+        Assert.Equal(0.001f, WorkshopRules.ParseMergePct("0.0005"));   // rounded to three, never silently to 0
+        Assert.Equal(10f, WorkshopRules.ParseMergePct("25"));          // clamped to the slider's range
+        Assert.Equal(0f, WorkshopRules.ParseMergePct("-1"));
+        Assert.Null(WorkshopRules.ParseMergePct("abc"));
+        Assert.Null(WorkshopRules.ParseMergePct(""));
+        Assert.Equal("0.125", WorkshopRules.MergePctText(0.125f));
+        Assert.Equal("1", WorkshopRules.MergePctText(1f));
+    }
+
+    [Fact]
+    public void Merge_percent_slider_is_square_root_scaled_and_snaps_to_hundredths()
+    {
+        float top = WorkshopRules.MergePctToSlider(WorkshopRules.MergePctMax);
+        Assert.InRange(WorkshopRules.MergePctToSlider(1f) / top, 0.31f, 0.32f);   // 0-1 % is a third of the track, not a tenth
+        Assert.Equal(0f, WorkshopRules.MergePctFromSlider(0f));
+        Assert.Equal(WorkshopRules.MergePctMax, WorkshopRules.MergePctFromSlider(top));
+        foreach (float pct in new[] { 0f, 0.01f, 0.3f, 0.45f, 1f, 2.5f, 10f })   // a hundredths value survives the round trip
+            Assert.Equal(pct, WorkshopRules.MergePctFromSlider(WorkshopRules.MergePctToSlider(pct)));
+        Assert.Equal(0.49f, WorkshopRules.MergePctFromSlider(0.7f));
+    }
+
+    [Fact]
     public void Letters_pass_down_to_the_children_a_split_or_cut_created()
     {
         // source: node 3 "Hull" marked A, node 5 "Deck" marked B. Output: 3 lost its mesh to children 10 and 11 (_Part_001/_002),
