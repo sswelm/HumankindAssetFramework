@@ -905,6 +905,132 @@ public static class VehicleLabRules
         }
     }
 
+    // A PROBE THAT FINDS NONE OF THE NAMES (2026-11-25, the Khelandion: "when I probe I lose everything again, now fix
+    // it"). The roles are kept by part name, and a fuse renames every part it groups: the galley's recipe held 149
+    // Object_* names, the re-fused source had 15 Fused_* parts, and every row came back Default - oars, sail and all.
+    // Two records still knew the roles. The role lists the last Generate wrote (Assets/FactorySource/VehicleLab/
+    // <output name>_oars.txt, _sails.txt, ...) name the parts exactly as they were baked; the fuse report beside the source
+    // names each fused part's members, whose roles the session still holds. A part NEW to the session takes its role
+    // from the first, else from its members when they all agree. A group whose members disagree is left undecided and
+    // named: picking the majority put a group of five Ignored parts and three kept ones in the bin.
+
+    /// <summary>The fused parts a Model Fuser report names, each with its members: "== group A" opens a group, "parts: a, b"
+    /// lists its members, "Fused N part(s) -> 'name': ..." names the fused part. Prefer the plain split when
+    /// it agrees with the reported count. Otherwise use names from <paramref name="knownNames"/> to join
+    /// comma-containing members and accept the result only when it matches the count.</summary>
+    public static Dictionary<string, string[]> FuseReportGroups(string reportText, ICollection<string> knownNames = null)
+    {
+        var groups = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        string members = null; bool open = false;
+        foreach (string raw in (reportText ?? "").Split('\n'))
+        {
+            string line = raw.TrimEnd('\r');
+            if (line.StartsWith("== group ", StringComparison.Ordinal)) { open = true; members = null; continue; }
+            if (!open) continue;
+            if (line.StartsWith("parts: ", StringComparison.Ordinal)) { members = line.Substring(7); continue; }
+            // Match the vertex-count suffix so names containing a quote, colon or number survive.
+            var m = System.Text.RegularExpressions.Regex.Match(line, @"^Fused ([0-9]+) part\(s\) -> '(.+)'(?:: [0-9]+ -> [0-9]+ verts\b|$)");
+            if (!m.Success || members == null || !int.TryParse(m.Groups[1].Value, out int count)) continue;
+            var names = SplitMembers(members, knownNames, count);
+            if (names != null) groups[m.Groups[2].Value] = names;
+            open = false; members = null;
+        }
+        return groups;
+    }
+
+    static string[] SplitMembers(string list, ICollection<string> known, int count)
+    {
+        var plain = list.Split(new[] { ", " }, StringSplitOptions.None);
+        if (plain.Length == count && plain.All(n => !string.IsNullOrWhiteSpace(n))) return plain.Select(n => n.Trim()).ToArray();
+        if (plain.Length <= count || known == null) return null;
+
+        var got = new List<string>();
+        int pos = 0;
+        while (pos < list.Length)
+        {
+            string best = null;
+            foreach (string k in known)
+                if (!string.IsNullOrEmpty(k) && (best == null || k.Length > best.Length) && pos + k.Length <= list.Length &&
+                    string.CompareOrdinal(list, pos, k, 0, k.Length) == 0 &&
+                    (pos + k.Length == list.Length || string.CompareOrdinal(list, pos + k.Length, ", ", 0, 2) == 0)) best = k;
+            if (best == null) { int c = list.IndexOf(", ", pos, StringComparison.Ordinal); best = c < 0 ? list.Substring(pos) : list.Substring(pos, c - pos); }
+            if (best.Trim().Length > 0) got.Add(best.Trim());
+            pos += best.Length + 2;   // past the name and its ", "
+        }
+        return got.Count == count ? got.ToArray() : null;
+    }
+
+    public sealed class RoleList { public int Role; public DateTime Written; public IEnumerable<string> Names; }
+
+    /// <summary>An exact session role wins, including Default. Split children inherit only a marked role.</summary>
+    public static int? ProbeSessionRole(string name, IReadOnlyDictionary<string, int> roles, int defaultRole)
+    {
+        if (roles.TryGetValue(name, out int exact)) return exact;
+        foreach (string parent in ParentNames(name))
+            if (roles.TryGetValue(parent, out int inherited) && inherited != defaultRole) return inherited;
+        return null;
+    }
+
+    /// <summary>Recover role lists written before the generated GLB. A newer list indicates another attempt
+    /// or a different output with the same basename. A name claimed by different roles is left undecided.
+    /// Older versions wrote Default only when its dial was active. A Default list predating the other lists
+    /// belongs to an earlier Generate.</summary>
+    public static Dictionary<string, int> LastGenerateRoles(IEnumerable<RoleList> lists, int defaultRole, DateTime outputWritten)
+    {
+        var all = (lists ?? Enumerable.Empty<RoleList>()).Where(l => l != null).ToList();
+        var roles = new Dictionary<string, int>(StringComparer.Ordinal);
+        if (all.Any(l => l.Written > outputWritten)) return roles;
+        DateTime earliestOther = all.Where(l => l.Role != defaultRole)
+            .Select(l => l.Written).DefaultIfEmpty(DateTime.MinValue).Min();
+        var torn = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var l in all)
+        {
+            if (l.Role == defaultRole && l.Written < earliestOther) continue;
+            foreach (string n0 in l.Names ?? Enumerable.Empty<string>())
+            {
+                string n = (n0 ?? "").Trim();
+                if (n.Length == 0 || torn.Contains(n)) continue;
+                if (roles.TryGetValue(n, out int had)) { if (had != l.Role) { roles.Remove(n); torn.Add(n); } continue; }
+                roles[n] = l.Role;
+            }
+        }
+        return roles;
+    }
+
+    public sealed class RecoveredRole { public string Name; public int Role; public string From; }
+    public sealed class UndecidedGroup { public string Name; public Dictionary<int, int> MemberRoles; }
+
+    /// <summary>The roles for the parts NEW to the session (<paramref name="freshNames"/>: not in the session's last part list,
+    /// no role kept or inherited). <paramref name="sessionRoles"/> is every part the session listed with its role, Default
+    /// (<paramref name="defaultRole"/>) included. From the last Generate first; else, for a fused part, the one role its
+    /// members carry. A member votes with its own session role or, when the session never listed it, with the role of the
+    /// nearest part it was cut from (ParentNames: a split child of an Ignored part votes Ignore); a member with neither does
+    /// not vote. Members that disagree: the part is in <paramref name="undecided"/> and keeps what the probe gave it. Members
+    /// that all vote Default decide nothing either.</summary>
+    public static List<RecoveredRole> RecoverFreshRoles(IEnumerable<string> freshNames, IReadOnlyDictionary<string, int> lastGenerate,
+        IReadOnlyDictionary<string, string[]> fuseGroups, IReadOnlyDictionary<string, int> sessionRoles, int defaultRole,
+        out List<UndecidedGroup> undecided)
+    {
+        var got = new List<RecoveredRole>();
+        undecided = new List<UndecidedGroup>();
+        foreach (string n in freshNames)
+        {
+            if (lastGenerate != null && lastGenerate.TryGetValue(n, out int lr)) { got.Add(new RecoveredRole { Name = n, Role = lr, From = "last Generate" }); continue; }
+            if (fuseGroups == null || !fuseGroups.TryGetValue(n, out var members)) continue;
+            var tally = new Dictionary<int, int>();
+            foreach (string mem in members)
+            {
+                if (sessionRoles == null) break;
+                int? vote = sessionRoles.TryGetValue(mem, out int r) ? r : (int?)null;
+                if (vote == null) foreach (string anc in ParentNames(mem)) if (sessionRoles.TryGetValue(anc, out int ar)) { vote = ar; break; }
+                if (vote != null) tally[vote.Value] = tally.TryGetValue(vote.Value, out int c) ? c + 1 : 1;
+            }
+            if (tally.Count == 1 && tally.Keys.First() != defaultRole) got.Add(new RecoveredRole { Name = n, Role = tally.Keys.First(), From = "fuse group" });
+            else if (tally.Count > 1) undecided.Add(new UndecidedGroup { Name = n, MemberRoles = tally });
+        }
+        return got;
+    }
+
     public sealed class PartRow
     {
         public string Kind;                       // "PART" or "RIGBONE"

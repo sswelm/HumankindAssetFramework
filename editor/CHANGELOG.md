@@ -5,6 +5,16 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: a probe of a fused file keeps the roles** (2026-11-25, user report, the Khelandion galley: "when I
+  probe I lose everything again"). Roles are kept by part name, and a fuse renames every part it groups: the galley's
+  recipe named 149 parts, the fused file has 15, and all 15 came back Default, oars and sail included. A part new to
+  the session now takes the role the last Generate of the Output GLB gave it, from the role lists Generate writes
+  to `Assets/FactorySource/VehicleLab` under the output's file name; a part not in them takes the role its fuse-group
+  members share, from the fuse report beside the source. A group whose members disagree stays undecided and the
+  status names it. On the galley, the first record
+  restores all 15 parts to their 2026-10-20 roles, and the fuse groups alone restore 9 and name the other 6. A part
+  the session already listed keeps its role, Default included, and ＜new model＞ still starts from nothing.
+  Probe checks list timestamps against the output GLB and checks the reported member count when reading fuse groups.
 - **Model Factory: the Multi-fragment split fills its pieces evenly** (2026-11-25, user report: the Heavy Monitor
   never got past "7.3x" in eight fragments). The pieces used to hold the same number of triangles, so one piece
   reached the quad limit while the others still had room. Each cut is now placed so the pieces hold about the same

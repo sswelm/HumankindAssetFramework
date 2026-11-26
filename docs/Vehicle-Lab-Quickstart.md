@@ -142,6 +142,19 @@ first member, so changing the membership renames it — a re-Probe carries the r
 fresh row with the same `Fused_<group>_` prefix and says so in the status. The source-skeleton fast path leaves meshes as authored, so it ignores placement
 and says so in the log.
 
+**Re-pointed at a fused file.** A fuse renames every part it groups, so the roles kept by name have nothing to land on.
+A re-Probe first checks the role lists in `Assets/FactorySource/VehicleLab/<Output GLB file name>_oars.txt`,
+`_sails.txt`, and so on for each part that is new to the session. It uses the lists when the output GLB exists
+and is at least as recent as every list. When the Default dial is zero, Generate clears its list. Probe
+ignores a legacy Default list that predates the rest of the batch. A part without a role from those lists
+takes the role its fuse-group members share, read from
+`<source>.fuse-report.txt`; a member split since the fuse votes with the part it was cut from. A group whose members
+disagree stays undecided, and the status names it with its members' roles. A group whose members are all Default
+decides nothing and is not named. The last Generate wins over the members, even when they were re-marked since.
+A part the session already listed keeps the role it has, Default included, and **＜new model＞** starts from nothing.
+So after a probe that came back undecided, **Reload** the recipe before probing again. Not covered: a second model's
+fuse report (only the Raw model's is read), and source bones on the source-skeleton fast path.
+
 ## 4. Tune and generate
 
 For ordinary wheels, leave **Axle axis = Auto**, **Spin frames = 15**, and start with one full turn. If the wheels roll
@@ -491,11 +504,16 @@ water plane (0.16), so the blades cross the surface on the pull and clear it on 
 itself (keel → 0) since 2026-09-20; the +2.1 this entry carried from its 09-06 bake was the old hand-dialled lift and
 floated the ship by exactly that much.
 
-**Re-fusing it.** The source predates the Fuser. If it is ever fused, leave the oar, sail and rudder meshes OUT of every
-⊕ group — unfused parts keep their names and so keep their recipe entries — and run
-`python tools/recipe_migrate.py <recipe.json> <fused.glb.fuse-report.txt> <new recipe.json>` for the rest: each group
-becomes one entry carrying its members' role (a mixed group is flagged), the dials and clips are untouched, the Lab's
-Probe refreshes the part boxes on the next load.
+**The fused galley (since 2026-10-20; the recipe since 2026-11-25).** The game's galley is the fused bake
+(`khelandion_2_split_fused_Spin.glb`): 15 groups, the three oar meshes in group O. The recipe `khelandion_2` holds it
+since 2026-11-25; the unfused recipe above is kept only in `D:\Backups\HAF\2026-11-25_before-hidden-twin-rebake`.
+Roles: Oar `Fused_O_Object_24`, Sail `Z`, Rudder `I` and `F`, Body `H`, Structure `S`, Rigging `L`, Shroud `D`, Window
+`A`, the rest Default. The fused hull `Fused_B_Object_13` (138,357 vertices) is Default, so the Default dial carries the
+hull. Reduction (%): Default 50 · Rigging 85 · Shroud 80 · Structure 80 · Body 70 · Oar 60 · Sail 50 · Rudder 40 ·
+Detail 10; oar stroke, furl and registry as above. It exports 233,172 triangles in 6 meshes, the October bake's 233,398;
+at Default 0 it was 357,974. A Probe after a re-fuse takes the roles back from the last bake's lists (§3).
+`tools/recipe_migrate.py` still writes a recipe for a fused file from its members' roles; it takes the majority of a mixed
+group, and on this galley that is wrong for four groups.
 
 ## Fast symptom map
 
