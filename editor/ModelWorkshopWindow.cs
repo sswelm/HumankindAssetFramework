@@ -168,7 +168,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         foreach (Row r in rows)
         {
             r.blocked = WorkshopRules.RestoredReason(r.blocked);
-            r.fileName = WorkshopRules.RestoredReason(r.fileName);   // null = the file gives the node no name (a sidecar never writes an empty one)
+            r.fileName = WorkshopRules.RestoredFileName(r.fileName, r.node);
             r.min = WorkshopRules.RestoredBox(r.min); r.max = WorkshopRules.RestoredBox(r.max);
             if (r.min == null || r.max == null) r.min = r.max = null;
         }

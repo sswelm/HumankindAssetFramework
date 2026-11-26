@@ -1866,6 +1866,10 @@ public static class WorkshopRules
     public const string UnnamedAnalyzerReason = "the analyzer gave no reason";
     public static string AnalyzerReason(string blocked) => blocked == null ? null : blocked.Length > 0 ? blocked : UnnamedAnalyzerReason;
     public static string RestoredReason(string blocked) => string.IsNullOrEmpty(blocked) ? null : blocked;
+    // Analyze gives missing GLB names a "node N" display name. Explicitly empty names keep their empty display name
+    // and must still count as namesakes when a legacy sidecar is checked for ambiguity.
+    public static string RestoredFileName(string fileName, string displayName) =>
+        fileName == "" && displayName != "" ? null : fileName;
     public static float[] RestoredBox(float[] corner) => corner != null && corner.Length == 3 ? corner : null;
     /// null = not a number (the field keeps its old value).
     public static float? ParseMergePct(string text)

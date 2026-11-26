@@ -357,6 +357,28 @@ public class WorkshopRulesTests
     }
 
     [Fact]
+    public void Reload_keeps_explicitly_empty_node_names_in_legacy_sidecar_ambiguity_checks()
+    {
+        // Node 0 has no name, nodes 1 and 2 have explicit empty names. The old sidecar's index
+        // no longer identifies a blank-named node. A fourth node matches only the literal reading.
+        var restored = new[] {
+            (index: 0, fileName: "", name: "node 0"),
+            (index: 1, fileName: "", name: ""),
+            (index: 2, fileName: "", name: ""),
+            (index: 3, fileName: "|0", name: "|0")
+        }.Select(row => (row.index, WorkshopRules.RestoredFileName(row.fileName, row.name), row.name)).ToArray();
+        Assert.Null(restored[0].Item2);
+        Assert.Equal("", restored[1].Item2);
+        Assert.Equal("|0", restored[3].Item2);
+
+        var problems = new List<string>();
+        var lines = WorkshopRules.MigrateSidecarNames(new[] { "X| |0" }, restored, problems);
+        var marks = WorkshopRules.ResolveFuseSidecar(lines, Rows((0, "node 0"), (1, ""), (2, ""), (3, "|0")), problems);
+        Assert.Empty(marks);
+        Assert.Single(problems);
+    }
+
+    [Fact]
     public void Merge_percent_slider_is_square_root_scaled_and_snaps_to_hundredths()
     {
         float top = WorkshopRules.MergePctToSlider(WorkshopRules.MergePctMax);
