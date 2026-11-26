@@ -518,7 +518,9 @@ windows. **Deep dive:**
   only those gain `_Part_NNN` children — same lossless method, so the rest of the model is byte-identical. Feed
   the output to the Vehicle Lab and mark the junk islands Ignore. Splitting a many-island part (ropes, rigging)
   explodes the part list; usually leave those whole — or raise the **Merge closer than (%)** slider, which counts
-  near islands as one part (rotation-invariant since 0.5.6: diagonal dashed lines gate correctly too). The
+  near islands as one part (rotation-invariant since 0.5.6: diagonal dashed lines gate correctly too). It takes
+  decimals: type 0.3 (or 0,3) in the box and press Enter, or drag — the slider is square-root scaled, so 0–1 % fills
+  about a third of its track, and it snaps to 0.01 %. The
   **Output GLB** auto-follows the source file until you edit it, and changing the source — typed or browsed —
   resets the probe so a stale part list can never split the wrong file. The preview is built straight from the GLB
   (0.5.7: no Blender export, no FBX import — a 214 MB ship probes in about ten seconds), one object per node, so a
@@ -613,6 +615,21 @@ windows. **Deep dive:**
   letters travel with a cut or split output, and a fused output's sidecar names each shell under its group's letter, so
   either order works (the Cutter re-reads the sidecar on every Probe, so after changing groups in the Fuser,
   re-Probe in the Cutter before cutting; the Fuser keeps your edits across a re-Probe and reloads through Load groups).
+  **Splitting again over an output you already grouped** keeps that work by GEOMETRY, not by name (2026-11-26): the
+  pieces are numbered in island order, so another merge distance — or one more part checked — hands the names
+  `_Part_001…` to different geometry (on a cruiser re-split at 0.5 % after 1 %, 255 of the 424 reused names). Before
+  the old output is replaced, each new piece is traced to the old piece its triangles came from and takes that piece's
+  group letter and Delete mark: a part that broke into smaller pieces keeps all of them in its group; a piece that now
+  joins old pieces marked differently (or holds geometry the old output did not have beside a marked one) does not
+  inherit, gets only what the source hands down, and is named in the console. When several old parts share the same
+  triangle, all of them must agree before the new part inherits that value. Split and Tear checks always come from
+  the source, so a part you unchecked stays unchecked. Parts that are not triangles (lines, points) keep theirs by
+  index and name, and a saved value whose geometry is gone is counted in the status line. If NONE of the saved work
+  can be traced to the new output (a model moved or re-exported, or a sidecar whose rows refer to different nodes),
+  the Keep/Replace question shows the name matches and lets you cancel before overwriting. If the old output is
+  missing or unreadable, the source fingerprint and part names are used. A **Fuse** rewrites the groups beside its output from its
+  own run. While the merge box holds a typed value you did not apply, Split, Cut and Fuse refuse: press Enter to
+  apply it (or Esc to discard it).
   **How long a fuse takes, and the native plugin** (2026-10): Fuse's weld, exposure views from above and from the side,
   and twin census run as C++ from the package's `Plugins/x86_64/hafkernels.dll`, alongside kernels used by the Vehicle
   Lab's C# probe and the Factory's reduce. The Workshop's **Probe** (island analysis and preview) stays managed C#.

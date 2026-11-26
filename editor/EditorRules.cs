@@ -1324,15 +1324,17 @@ public static class WorkshopRules
     /// 108 checks with the ones inherited from the source, and the dialog had said only "Overwrite existing file?".)
     /// <paramref name="marks"/> and <paramref name="letters"/> are the line counts of the two sidecars, or 0 for none.
     /// </summary>
-    public static string OverwriteWarning(string outputGlb, int marks, int letters)
+    /// <param name="fuse">true for a Fuse: it writes the output's groupings from this run's groups and does not read what was there.</param>
+    public static string OverwriteWarning(string outputGlb, int marks, int letters, bool fuse = false)
     {
         string s = outputGlb;
         if (marks <= 0 && letters <= 0) return s;
         var lost = new List<string>();
         if (marks > 0) lost.Add(marks + " mark(s) (Split, Tear and Delete)");
         if (letters > 0) lost.Add(letters + " group letter(s)");
-        return s + "\n\nWork is saved beside this file: " + string.Join(" and ", lost) +
-               ".\nWritten from this same source, it is kept for every piece that still exists. Otherwise you will be asked whether what still fits should be kept or replaced by what this source hands down.";
+        return s + "\n\nWork is saved beside this file: " + string.Join(" and ", lost) + (fuse
+            ? ".\nA Fuse writes the groups beside its output from this run's groups: what is saved there now is replaced."
+            : ".\nIt is carried to the new pieces by geometry: each piece keeps the group letter and Delete mark its own triangles had here, whatever it is called now (Split and Tear checks come from this source). If none of it can be found in the new output, you will be asked whether to keep it by part name or replace it.");
     }
 
     /// <summary>The source a sidecar was written from, stated in its own head: "#from|&lt;file name&gt;".</summary>
@@ -1419,19 +1421,23 @@ public static class WorkshopRules
     /// it resolves it against the new file BY NAME, and a name proves nothing on its own: cut one model to out.glb,
     /// cut an unrelated one to the same path, and a part called `Object_1` inherits the first model's delete mark
     /// (outside review of PR #99). So the sidecar states the identity of the source it was written from, and:
-    ///   * Same    - that identity is this source's bytes: keep everything that still names a part. Proven.
-    ///   * Nothing - it holds no entries, or none of them names a part of the new file: nothing to keep.
+    ///   * Same    - the source identity matches and the previous output was unavailable for geometry matching.
+    ///   * Nothing - it holds no entries, or the previous output was unavailable and no names match.
     ///   * Unknown - anything else: no identity stated (written before there was one), an older marker that stated a
     ///               name or a size, or another identity - which is EITHER this model re-exported, whose pieces still
     ///               carry their names and whose work must not be lost, OR an unrelated model that happens to share
-    ///               some names. No number tells those two apart: a threshold on how much of it fits was tried and
+    ///               some names. Also used when the previous output was read but geometry could not place the saved
+    ///               entries, even with the same source identity. A threshold on how much of it fits was tried and
     ///               threw out four valid decisions of ten in one direction while letting generic names through in
     ///               the other (the review's third round). So Unknown is a question for the user, asked once with the
     ///               real counts in front of them (KeepOrReplaceQuestion), not a guess made for them.
     /// </summary>
-    public static SidecarFit JudgeSidecar(string statedSource, string identity, int entries, int resolved)
+    public static SidecarFit JudgeSidecar(string statedSource, string identity, int entries, int resolved, bool geometryUnmatched = false)
     {
-        if (entries <= 0 || resolved <= 0) return SidecarFit.Nothing;
+        if (entries <= 0) return SidecarFit.Nothing;
+        // The source stamp alone cannot verify a name match when the previous output supplies no matching geometry.
+        if (geometryUnmatched) return SidecarFit.Unknown;
+        if (resolved <= 0) return SidecarFit.Nothing;
         string stated = StatedIdentity(statedSource);
         return stated.Length > 0 && !string.IsNullOrEmpty(identity) && string.Equals(stated, identity.Trim(), StringComparison.OrdinalIgnoreCase) ? SidecarFit.Same : SidecarFit.Unknown;
     }
@@ -1444,11 +1450,25 @@ public static class WorkshopRules
         string origin = statedName.Length > 0 ? "were written from '" + statedName + "'" : "were written before the source was recorded";
         var fits = new List<string>();
         if (letterEntries > 0) fits.Add(lettersResolved + " of " + letterEntries + " group letter(s)");
-        if (markEntries > 0) fits.Add(marksResolved + " of " + markEntries + " mark(s) (Split, Tear and Delete)");
-        return "The sidecars beside this output " + origin + ", and this cut is from '" + (sourceName ?? "").Trim() + "' - not confirmed to be the same model.\n\n"
+        if (markEntries > 0) fits.Add(marksResolved + " of " + markEntries + " mark(s) (Delete)");
+        return "The sidecars beside this output " + origin + ", and this cut is from '" + (sourceName ?? "").Trim() + "'.\n\n"
              + "Of what is saved there, " + string.Join(" and ", fits) + " still name a part of the new output.\n\n"
-             + "Keep what fits (the same model re-cut or re-exported makes the same pieces under the same names), or replace it all with what this source hands down?";
+             + "A new cut can reuse old names for different pieces. Keep the name matches, or replace them with what this source hands down?";
     }
+
+    // Count candidate rows before trying to place them, including Delete marks that resolve to neither output.
+    public static int CountSavedOutputEntries(IEnumerable<string> lines, bool marks) => lines.Count(raw =>
+    {
+        string line = raw.Trim();
+        if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal)) return false;
+        if (!marks) return true;
+        int bar = line.IndexOf('|');
+        return bar > 0 && line.Substring(0, bar).Trim() == "X" && line.Substring(bar + 1).Trim().Length > 0;
+    });
+
+    /// Only Delete marks travel from the previous output. Split and Tear are handed down from the current source.
+    public static Dictionary<int, string> OnlyDeleteMarks(IDictionary<int, string> marks) =>
+        (marks ?? new Dictionary<int, string>()).Where(kv => kv.Value == "X").ToDictionary(kv => kv.Key, kv => kv.Value);
 
     public static string SidecarLine(string letter, string name, int nodeIndex) =>
         letter + "|" + nodeIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" + name;
@@ -1822,6 +1842,28 @@ public static class WorkshopRules
                 return baseName.Substring(0, at) + suffix + (n + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
         return baseName + suffix;
+    }
+
+    // MERGE-DISTANCE FIELD (2026-11-26): the Cutter's "Merge closer than (%)" takes decimals. The slider runs on a
+    // square-root scale so the useful low end (0-1 %) gets about a third of the track, and a dragged value snaps to
+    // 0.01 %; a typed value accepts a dot OR a comma as the decimal mark and keeps three decimals. Both clamp to
+    // [0, MergePctMax].
+    public const float MergePctMax = 10f;
+    public static float MergePctToSlider(float pct) => (float)Math.Sqrt(Math.Max(0f, Math.Min(MergePctMax, pct)));
+    public static float MergePctFromSlider(float s)
+    {
+        double pct = (double)s * s;
+        return (float)Math.Max(0.0, Math.Min(MergePctMax, Math.Round(pct * 100.0, MidpointRounding.AwayFromZero) / 100.0));
+    }
+    public static string MergePctText(float pct) => pct.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+    /// null = not a number (the field keeps its old value).
+    public static float? ParseMergePct(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        string t = text.Trim().TrimEnd('%').Trim().Replace(',', '.');
+        if (!double.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v)
+            || double.IsNaN(v) || double.IsInfinity(v)) return null;
+        return (float)Math.Max(0.0, Math.Min(MergePctMax, Math.Round(v * 1000.0, MidpointRounding.AwayFromZero) / 1000.0));
     }
 }
 

@@ -189,6 +189,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // checks: a refusal naming what to do, rather than a wrong output.
     bool RowsDescribeTheFile(string verb)
     {
+        if (MergeTypingPending)
+        {
+            status = verb + " refused: the Merge closer than box holds a value you typed but did not apply (" + mergeTyped + "). Press Enter in the box to apply it (the counts recount), or Esc to discard it, then " + verb + " again.";
+            return false;
+        }
         // keyed on what was PROBED, not on the rows: they are not the only state built from that file - the plane
         // cut holds a part's geometry and node index of its own, and a probe that threw leaves the rows empty with
         // that geometry alive. Nothing probed at all is the only case with nothing to misapply.
@@ -252,13 +257,18 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 }
         }
 
-        float newMergePct = EditorGUILayout.Slider(new GUIContent("Merge closer than (%)",
+        // DECIMALS (user 2026-11-26: 1 % merged too much, 0 % shredded too much, and the step between was out of
+        // reach): the slider runs on a SQUARE-ROOT scale, so 0–1 % fills about a third of the track instead of a
+        // tenth, and snaps to 0.01 %; the box beside it takes any value typed, with a dot or a comma (a Dutch
+        // keyboard's numpad gives a comma), applied on Enter or when the box loses focus. Both apply only when
+        // the user actually changed them, so a typed 0.125 is never re-rounded by the slider on the next pass.
+        if (MergePctField(new GUIContent("Merge closer than (%)",
             "Islands whose VERTICES come nearer than this (percent of each part's own size) count as ONE part — so a " +
             "segmented rope stays one rope instead of shredding into hundreds of 3-vert fragments, while genuinely " +
             "distant junk still separates. Measured between vertices (a long edge passing near a vertex is not seen), " +
-            "accurate to about one grid cell. 0 = pure topology. Release the slider and the counts recount (no Blender re-run)."),
-            mergePct, 0f, 10f);
-        if (!Mathf.Approximately(newMergePct, mergePct)) { mergePct = newMergePct; analyzePending = rows.Count > 0; }
+            "accurate to about one grid cell. 0 = pure topology. Decimals work (0.3, or 0,3): type in the box and press " +
+            "Enter, or drag the slider (finer at the low end). The counts recount when you let go (no Blender re-run).")))
+            analyzePending = rows.Count > 0;
         // DEFERRED recount (review find 2026-09-06): running Analyze mid-OnGUI replaced `rows` between IMGUI's
         // Layout and event passes (control-count mismatch exceptions), and doing it per drag-tick re-parsed the
         // whole GLB on every mouse move (seconds per tick on a real ship). Recount once, on the first Layout
@@ -786,6 +796,55 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // Path identity for the source-switch hygiene: separator- and case-insensitive (Windows paths), so retyping
     // the same file with the other slash style is not read as a switch.
     static bool SamePath(string a, string b) => WorkshopRules.SamePath(a, b);
+
+    // The merge-distance row: a square-root slider plus a box that takes decimals (rules in WorkshopRules). True when
+    // the user changed the value this pass, by dragging or by committing a typed number (Enter or focus loss).
+    // THE BOX'S TEXT IS THE WINDOW'S, NOT UNITY'S (review of PR #324): a DelayedTextField keeps its own edit buffer
+    // while it has keyboard focus, and neither the slider nor a button takes that focus - so 0.3 typed without Enter,
+    // then a drag to 0.6, recounted at 0.6 while the box still showed 0.3, and the next click-away committed 0.3 over
+    // the drag; a Split pressed in between ran at the old value under the new text. Here the typed text is held in
+    // `mergeTyped` until Enter (or the box losing focus) commits it; Esc or a drag discards it and drops the focus; and
+    // Split, Cut and Fuse refuse while a typed value is pending (MergeTypingPending), naming what to do.
+    const string MergeBoxName = "HafMergePctBox";
+    [NonSerialized] string mergeTyped;   // null = the box shows mergePct
+    bool MergeTypingPending => mergeTyped != null;
+    bool MergePctField(GUIContent label)
+    {
+        bool changed = false;
+        bool focused = GUI.GetNameOfFocusedControl() == MergeBoxName;
+        var ev = Event.current;
+        bool commit = false;
+        if (focused && ev.type == EventType.KeyDown && mergeTyped != null)
+        {
+            if (ev.keyCode == KeyCode.Return || ev.keyCode == KeyCode.KeypadEnter) { commit = true; ev.Use(); }
+            else if (ev.keyCode == KeyCode.Escape) { mergeTyped = null; GUIUtility.keyboardControl = 0; ev.Use(); }
+        }
+        if (!focused && mergeTyped != null && ev.type == EventType.Layout) commit = true;   // the box lost focus with text in it: applied, as a click-away always did
+        if (commit)
+        {
+            float? v = WorkshopRules.ParseMergePct(mergeTyped);
+            mergeTyped = null;
+            if (v.HasValue && v.Value != mergePct) { mergePct = v.Value; changed = true; }
+            Repaint();   // the deferred recount runs on the next Layout pass
+        }
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            EditorGUILayout.PrefixLabel(label);
+            EditorGUI.BeginChangeCheck();
+            float s = GUILayout.HorizontalSlider(WorkshopRules.MergePctToSlider(mergePct), 0f, WorkshopRules.MergePctToSlider(WorkshopRules.MergePctMax));
+            if (EditorGUI.EndChangeCheck())
+            {
+                mergeTyped = null; GUIUtility.keyboardControl = 0;   // a drag wins over unfinished typing
+                float v = WorkshopRules.MergePctFromSlider(s);
+                if (v != mergePct) { mergePct = v; changed = true; }
+            }
+            string shown = mergeTyped ?? WorkshopRules.MergePctText(mergePct);
+            GUI.SetNextControlName(MergeBoxName);
+            string typed = EditorGUILayout.TextField(shown, GUILayout.Width(50));
+            if (typed != shown) mergeTyped = typed;
+        }
+        return changed;
+    }
     // the file's length and write time: enough to tell a file rewritten in place from the one the rows were built
     // from, and it costs a directory entry rather than a read of the whole GLB
     static string StampOf(string path)
@@ -856,7 +915,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             status = (rewritten ? "This file was rewritten since it was last probed, so the checks and letters in the window were dropped — they named nodes of the old file — and the marks saved beside the new one were read instead. " : "")
                    + (onDisk > 0 ? $"{onDisk} group letter(s) are saved beside this file and no row in the window carries one — press 'Load groups' to read them back (a re-Probe keeps what the window holds, so a deliberate clear stays cleared). " : "")
                    + (multi == 0 ? "Every part is a single attached island (at this merge distance) — nothing to split."
-                   : $"{rows.Count} part(s); {multi} hold more than one island at merge distance {mergePct:0.#}%. Check the ones hiding junk; raise the slider if a part still shreds into fragments.")
+                   : $"{rows.Count} part(s); {multi} hold more than one island at merge distance {mergePct.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}%. Check the ones hiding junk; raise the slider if a part still shreds into fragments.")
                    + (tinyMarked > 0 ? $" Automatically marked {tinyMarked} unassigned part(s) with 0–2 triangles for deletion; clear a Delete mark to keep a part." : "");
             Repaint();
             return true;
@@ -1327,10 +1386,10 @@ public abstract class ModelWorkshopWindow : EditorWindow
         try { return path != null && File.Exists(path) ? File.ReadAllLines(path).Count(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#", StringComparison.Ordinal)) : 0; }
         catch { return 0; }
     }
-    static string OverwriteWarning(string glb)
+    static string OverwriteWarning(string glb, bool fuse = false)
     {
         int Lines(string p) { try { return p != null && File.Exists(p) ? File.ReadAllLines(p).Count(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#", StringComparison.Ordinal)) : 0; } catch { return 0; } }
-        return WorkshopRules.OverwriteWarning(glb, Lines(MarksSidecarPath(glb)), Lines(FuseSidecarPath(glb)));
+        return WorkshopRules.OverwriteWarning(glb, fuse ? 0 : Lines(MarksSidecarPath(glb)), Lines(FuseSidecarPath(glb)), fuse);
     }
     void WriteMarksSidecar(string glb)
     {
@@ -1389,7 +1448,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // "keep what fits, or replace?" used to arrive after the new GLB had already overwritten the old one, with no way
     // to say "neither, stop" - so a user facing uncertain matches could neither stop the overwrite nor get the old
     // output back. Both cuts now hold their result in memory, ask first, and write nothing at all on Cancel.
-    sealed class SidecarPlan { public string LettersPath, MarksPath; public string[] Letters, Marks; public int Kept; public string Error; }   // Error set = the plan could not be made, and the caller must write NOTHING
+    sealed class SidecarPlan { public string LettersPath, MarksPath; public string[] Letters, Marks; public int Kept, Orphans; public readonly HashSet<int> UnsettledNodes = new HashSet<int>(); public bool ByGeometry; public string Error; }   // Error set = the plan could not be made, and the caller must write NOTHING
 
     // null = the user cancelled: the caller writes NOTHING. `settings` is what decided the pieces (WorkshopRules.SplitSettings /
     // CutSettings) - part of the identity, because the same source cut differently makes different pieces under the same names.
@@ -1429,21 +1488,85 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // both files with the real counts in front of the user, never a threshold guessed for them (review of PR
             // #99, third round: a 50 % rule threw out four valid decisions of ten one way and let generic names
             // through the other).
+            // BY GEOMETRY, WHILE THE OLD OUTPUT IS STILL ON DISK (2026-11-26, user: after lowering "Merge closer than"
+            // and splitting again, the kept groups "often classified parts that just had the same name wrong"). The
+            // pieces are numbered in island order, so another merge distance - or one more part checked - hands every
+            // _Part_NNN name to different geometry, and "keep what fits" by name put the old letters on it. The old
+            // output is still there when this runs (nothing is written before the plan), and its sidecars describe
+            // ITS nodes: they are resolved against it, and each new piece takes what its own triangles had there
+            // (GlbDisconnectedParts.TraceOrigins / Carry), and nothing is asked. What the trace cannot settle is said,
+            // never dropped in silence (review of PR #324): a node it cannot read as triangles (lines, Draco) is handed
+            // on by index and name; a saved value whose geometry reached no new piece is counted in the status; and
+            // when NO saved value of a file found its geometry (a model moved or re-exported), that file goes back to
+            // the by-name reading below and its Keep/Replace question. Only the X (Delete) marks travel:
+            // Split and Tear are the source's checks handed down, and carrying them would re-check a part the user
+            // had just unchecked in the source.
+            GlbDisconnectedParts.Trace trace = null;
+            List<(int, string, string)> oldTriples = null; List<KeyValuePair<int, string>> oldPairs = null;
+            if (new[] { lettersPath, marksPath }.Any(p => p != null && File.Exists(p)) && File.Exists(outputGlb))
+                try
+                {
+                    byte[] oldBytes = File.ReadAllBytes(outputGlb);
+                    var oldParts = GlbDisconnectedParts.Analyze(oldBytes);
+                    var traced = GlbDisconnectedParts.TraceOrigins(oldBytes, outBytes);
+                    oldTriples = oldParts.Select(q => (q.NodeIndex, q.NodeName, q.NodeName)).ToList();
+                    oldPairs = oldParts.Select(q => new KeyValuePair<int, string>(q.NodeIndex, q.NodeName)).ToList();
+                    trace = traced;
+                }
+                catch (Exception e) { Debug.LogWarning("[Workshop] the output being replaced could not be read (" + e.Message + "): what is saved beside it is matched by part name instead."); trace = null; }
             var found = new Dictionary<string, (string[] had, Dictionary<int, string> was, int entries, WorkshopRules.SidecarFit fit)>();
             foreach (string path in new[] { lettersPath, marksPath })
             {
                 if (path == null || !File.Exists(path)) continue;
                 var problems = new List<string>();
                 string[] had = File.ReadAllLines(path);
-                var was = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, outTriples, problems), outPairs, problems);
-                int entries = had.Count(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#", StringComparison.Ordinal));
-                found[path] = (had, was, entries, WorkshopRules.JudgeSidecar(WorkshopRules.ParseSidecarFrom(had), sourceIdentity, entries, was.Count));
-                foreach (string q in problems) Debug.LogWarning("[Workshop] the output's own " + (path == lettersPath ? "groupings" : "marks") + " sidecar: " + q);
+                bool marks = path == marksPath;
+                int entries = WorkshopRules.CountSavedOutputEntries(had, marks);
+                string which = marks ? "Delete marks" : "groupings";
+                bool byGeometry = false;
+                bool geometryUnmatched = false;
+                if (trace != null)
+                {
+                    var geoProblems = new List<string>();
+                    var wasOld = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, oldTriples, geoProblems), oldPairs, geoProblems);
+                    if (marks)
+                    {
+                        int all = wasOld.Count;
+                        wasOld = WorkshopRules.OnlyDeleteMarks(wasOld);
+                        int checksLeft = all - wasOld.Count;
+                        if (checksLeft > 0) Debug.Log($"[Workshop] {checksLeft} Split/Tear mark(s) beside the old output were not carried: the source's checks decide those.");
+                    }
+                    var carry = GlbDisconnectedParts.Carry(trace, wasOld, oldPairs.ToDictionary(kv => kv.Key, kv => kv.Value), outPairs.ToDictionary(kv => kv.Key, kv => kv.Value));
+                    geometryUnmatched = carry.FoundNothing || (entries > 0 && wasOld.Count == 0);
+                    if (geometryUnmatched)
+                        Debug.LogWarning($"[Workshop] could not trace the saved {which} beside '{Path.GetFileName(path)}' to the new output. Review the part name matches before replacing it.");
+                    else
+                    {
+                        byGeometry = true;
+                        found[path] = (had, carry.Values, entries, WorkshopRules.SidecarFit.Same);
+                        plan.UnsettledNodes.UnionWith(carry.ConflictNodes);
+                        plan.Orphans += carry.Orphans;
+                        foreach (string q in carry.Conflicts) Debug.LogWarning("[Workshop] the output's own " + which + ": " + q);
+                        if (carry.Orphans > 0) Debug.LogWarning($"[Workshop] {carry.Orphans} saved {which} beside '{Path.GetFileName(path)}' named geometry the new output no longer has: not carried.");
+                        if (carry.ByName > 0) Debug.Log($"[Workshop] {carry.ByName} saved {which} on parts that are not triangles (lines, points) carried by index and name.");
+                    }
+                    problems.AddRange(geoProblems);
+                }
+                if (!byGeometry)
+                {
+                    var was = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, outTriples, problems), outPairs, problems);
+                    if (marks) was = WorkshopRules.OnlyDeleteMarks(was);
+                    found[path] = (had, was, entries, WorkshopRules.JudgeSidecar(WorkshopRules.ParseSidecarFrom(had), sourceIdentity, entries, was.Count, geometryUnmatched));
+                }
+                else plan.ByGeometry = true;
+                foreach (string q in problems) Debug.LogWarning("[Workshop] the output's own " + which + " sidecar: " + q);
             }
             bool keepUnknown = false;
             if (found.Values.Any(f => f.fit == WorkshopRules.SidecarFit.Unknown))
             {
                 found.TryGetValue(lettersPath ?? "", out var L); found.TryGetValue(marksPath ?? "", out var K);
+                if (L.fit != WorkshopRules.SidecarFit.Unknown) L = default;
+                if (K.fit != WorkshopRules.SidecarFit.Unknown) K = default;
                 string stated = L.had != null ? WorkshopRules.ParseSidecarFrom(L.had) : K.had != null ? WorkshopRules.ParseSidecarFrom(K.had) : "";
                 EditorUtility.ClearProgressBar();   // a question under a progress bar reads as a hang
                 int choice = EditorUtility.DisplayDialogComplex("Saved work beside the output",
@@ -1553,6 +1676,10 @@ public abstract class ModelWorkshopWindow : EditorWindow
             }
         }
         if (stale.Count > 0) { failure = "its sidecars could not be written: " + string.Join("; ", stale) + ". Mark the output again before fusing it."; return ""; }
+        if (plan.ByGeometry)
+            return (plan.Kept > 0 ? $" Carried saved letters/marks to {plan.Kept} piece(s), matched by geometry: each piece took what its own triangles had in the output this replaced, whatever it is called now." : "")
+                 + (plan.UnsettledNodes.Count > 0 ? $" {plan.UnsettledNodes.Count} piece(s) mix old pieces marked differently (or old and new geometry): their old value was not carried, they have only what the source hands down — the console names them." : "")
+                 + (plan.Orphans > 0 ? $" {plan.Orphans} saved letter(s)/mark(s) named geometry the new output no longer has and were dropped." : "");
         return plan.Kept > 0 ? $" Kept {plan.Kept} letter(s)/mark(s) already saved beside the output — the same source cut the same way makes the same pieces, so what was decided about them still fits." : "";
     }
     // Marks `target` from the sidecar; returns how many rows got a letter, `refused` = lines that fit no single row
@@ -1589,7 +1716,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         if (!RowsDescribeTheFile(verb)) return;
         try { GlbDisconnectedParts.GuardPaths(srcFile, outGlb); }   // the file entry points refuse output == source; this path writes the bytes itself, so it asks the same guard
         catch (Exception e) { status = verb + " refused (source untouched): " + e.Message; return; }
-        if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?", OverwriteWarning(outGlb), "Overwrite", "Cancel")) return;
+        if (File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?", OverwriteWarning(outGlb, fuse: true), "Overwrite", "Cancel")) return;
         try
         {
             var groups = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).GroupBy(r => r.fuse).OrderBy(g => g.Key).ToList();
