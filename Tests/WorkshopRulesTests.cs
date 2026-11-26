@@ -330,6 +330,33 @@ public class WorkshopRulesTests
     }
 
     [Fact]
+    public void A_restored_row_maps_the_serializers_empty_values_back_to_null()
+    {
+        // Unity gives a null string back as "" and a null array as an empty one: "" read as a skip reason
+        // marked every Cutter row "skipped" after a script reload.
+        Assert.Null(WorkshopRules.RestoredReason(""));
+        Assert.Null(WorkshopRules.RestoredReason(null));
+        Assert.Equal("GPU-instanced node", WorkshopRules.RestoredReason("GPU-instanced node"));
+
+        // so the window never holds "" as a reason: the round trip through the serializer is lossless
+        Assert.Null(WorkshopRules.AnalyzerReason(null));
+        Assert.Equal("Draco-compressed", WorkshopRules.AnalyzerReason("Draco-compressed"));
+        Assert.Equal(WorkshopRules.UnnamedAnalyzerReason, WorkshopRules.AnalyzerReason(""));
+        foreach (string held in new[] { null, "", "Draco-compressed" })
+        {
+            string live = WorkshopRules.AnalyzerReason(held);
+            string saved = live ?? "";   // what the serializer writes
+            Assert.Equal(live, WorkshopRules.RestoredReason(saved));
+        }
+
+        Assert.Null(WorkshopRules.RestoredBox(new float[0]));
+        Assert.Null(WorkshopRules.RestoredBox(null));
+        Assert.Null(WorkshopRules.RestoredBox(new[] { 1f, 2f }));
+        var box = new[] { 1f, 2f, 3f };
+        Assert.Same(box, WorkshopRules.RestoredBox(box));
+    }
+
+    [Fact]
     public void Merge_percent_slider_is_square_root_scaled_and_snaps_to_hundredths()
     {
         float top = WorkshopRules.MergePctToSlider(WorkshopRules.MergePctMax);

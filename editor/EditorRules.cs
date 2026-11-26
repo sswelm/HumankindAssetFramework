@@ -1856,6 +1856,17 @@ public static class WorkshopRules
         return (float)Math.Max(0.0, Math.Min(MergePctMax, Math.Round(pct * 100.0, MidpointRounding.AwayFromZero) / 100.0));
     }
     public static string MergePctText(float pct) => pct.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+    // THE CUTTER'S ROWS ACROSS A SCRIPT RELOAD (user 2026-11-26: "fix the skipped rows after reload"). Unity's serializer
+    // has no null: a null string comes back as "" and a null array as an empty one. A row's `blocked` (null = the part can
+    // be split) then read as a reason, so EVERY row said "skipped" and lost its Split box until the next Probe; a row
+    // with no bounding box (min/max null = unmeasured) came back with empty arrays that the size code indexes. So a
+    // reason is never empty while the window holds it (AnalyzerReason), and a restored row maps "" back to null
+    // (RestoredReason) and anything but three floats back to "unmeasured" (RestoredBox).
+    public const string UnnamedAnalyzerReason = "the analyzer gave no reason";
+    public static string AnalyzerReason(string blocked) => blocked == null ? null : blocked.Length > 0 ? blocked : UnnamedAnalyzerReason;
+    public static string RestoredReason(string blocked) => string.IsNullOrEmpty(blocked) ? null : blocked;
+    public static float[] RestoredBox(float[] corner) => corner != null && corner.Length == 3 ? corner : null;
     /// null = not a number (the field keeps its old value).
     public static float? ParseMergePct(string text)
     {
