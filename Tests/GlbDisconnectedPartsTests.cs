@@ -234,7 +234,7 @@ public class GlbDisconnectedPartsTests
         Assert.Equal("B", carry.Values[newJunk]);
         Assert.Single(carry.Conflicts);
         Assert.Equal(new[] { rope.node }, carry.ConflictNodes.ToArray());
-        Assert.Contains("'" + rope.name + "' joins pieces that were unmarked and 'A'", carry.Conflicts[0]);
+        Assert.Contains("'" + rope.name + "' matches geometry from pieces that were unmarked and 'A'", carry.Conflicts[0]);
         Assert.Contains("not carried over", carry.Conflicts[0]);   // never "left unmarked": the source's hand-down may still mark it
 
         // two different groups: the same
@@ -283,6 +283,51 @@ public class GlbDisconnectedPartsTests
     }
 
     [Fact]
+    public void Carry_requires_agreement_from_every_old_piece_that_holds_a_shared_triangle()
+    {
+        float[] two = {
+            0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f,
+            1f, 0f, 0f, 1f, 1f, 0f, 0f, 1f, 0f
+        };
+        byte[] old = BuildGlb(two, edit: root =>
+        {
+            // The child shares the Hull's second triangle and inherits its transform.
+            var accessors = (JArray)root["accessors"];
+            var sharedIndices = (JObject)accessors[1].DeepClone();
+            sharedIndices["byteOffset"] = 6;
+            sharedIndices["count"] = 3;
+            accessors.Add(sharedIndices);
+            var meshes = (JArray)root["meshes"];
+            var sharedMesh = meshes[0].DeepClone();
+            sharedMesh["primitives"][0]["indices"] = 2;
+            meshes.Add(sharedMesh);
+            root["nodes"][1]["mesh"] = 1;
+        });
+        byte[] regenerated = BuildGlb(two, nodeName: "Regenerated");
+        var trace = GlbDisconnectedParts.TraceOrigins(old, regenerated);
+        var marks = new Dictionary<int, string> { [0] = "X" };
+
+        var carry = GlbDisconnectedParts.Carry(trace, marks);
+        Assert.Empty(carry.Values);
+        Assert.Contains(0, carry.ConflictNodes);
+        Assert.Contains("unmarked", Assert.Single(carry.Conflicts));
+        Assert.False(carry.FoundNothing);
+
+        marks[1] = "X";
+        carry = GlbDisconnectedParts.Carry(trace, marks);
+        Assert.Equal("X", carry.Values[0]);
+        Assert.Empty(carry.Conflicts);
+        Assert.Equal(0, carry.Orphans);
+
+        // Byte-identical outputs establish identity directly, including for overlapping pieces.
+        marks.Remove(1);
+        carry = GlbDisconnectedParts.Carry(GlbDisconnectedParts.TraceOrigins(old, old.ToArray()), marks);
+        Assert.Equal("X", carry.Values[0]);
+        Assert.False(carry.Values.ContainsKey(1));
+        Assert.Empty(carry.Conflicts);
+    }
+
+    [Fact]
     public void Carry_hands_on_by_index_and_name_what_the_trace_cannot_read()
     {
         // review of PR #324, R1: a node holding lines (rigging) is left out of ExtractAll, so it was in neither map and
@@ -324,7 +369,7 @@ public class GlbDisconnectedPartsTests
         Assert.Empty(carry.Values);
         Assert.Single(carry.Conflicts);
         Assert.Contains("was 'A' in the previous output and now also holds geometry that output did not have", carry.Conflicts[0]);
-        Assert.DoesNotContain("joins", carry.Conflicts[0]);
+        Assert.DoesNotContain("matches geometry from pieces", carry.Conflicts[0]);
     }
 
     [Fact]

@@ -565,6 +565,24 @@ public class WorkshopRulesTests
         Assert.DoesNotContain("group letter", WorkshopRules.KeepOrReplaceQuestion("", "x.glb", 0, 0, 10, 4));
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void Unmatched_geometry_requires_confirmation_even_with_the_same_source_identity(int namesResolved)
+    {
+        Assert.Equal(WorkshopRules.SidecarFit.Unknown,
+            WorkshopRules.JudgeSidecar("ship.glb|" + ShaA, ShaA, 1, namesResolved, geometryUnmatched: true));
+    }
+
+    [Fact]
+    public void Output_sidecar_counts_unresolved_delete_marks_and_excludes_split_and_tear_checks()
+    {
+        var lines = new[] { WorkshopRules.SidecarHeader, "S|1|Hull", "T|2|Mast", " X |3|Deck ", "", " #X|1|Comment" };
+        Assert.Equal(1, WorkshopRules.CountSavedOutputEntries(lines, marks: true));
+        Assert.Equal(3, WorkshopRules.CountSavedOutputEntries(lines, marks: false));
+        Assert.Equal(0, WorkshopRules.CountSavedOutputEntries(new[] { "S|Hull", "T|Mast" }, marks: true));
+    }
+
     [Fact]
     public void The_source_marker_survives_an_ordinary_save_of_the_sidecar()
     {

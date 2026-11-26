@@ -1084,9 +1084,9 @@ public static partial class GlbDisconnectedParts
     // its triangles had in the OLD output: a piece cut out of one old piece inherits that piece's value (lower merge:
     // every fragment of a grouped part stays in the group); a piece that joins old pieces holding different values
     // (one grouped and one not, or two groups) gets NOTHING and is listed in `conflicts` — a guess there would put
-    // geometry into a group nobody chose. A triangle found in two old pieces (a doubled face) does not vote; a piece
-    // none of whose triangles were in the old output gets nothing. TraceOrigins reads both files once; Carry then
-    // applies any number of value tables (the groupings and the marks) to the same trace.
+    // geometry into a group nobody chose. A triangle shared by old pieces requires agreement from every possible
+    // owner. A piece with no triangles in the old output gets nothing. Carry applies the groupings and marks to
+    // the same trace.
     // WHAT THE TRACE CANNOT SEE (review of PR #324): ExtractAll leaves out a node it cannot read as triangles - lines
     // or points (rigging), Draco, GPU instancing - so such a node is in neither map. Carry hands it on by INDEX and
     // NAME instead, the way the sidecars were always read: a split only appends nodes, so a node the operation did not
@@ -1111,14 +1111,36 @@ public static partial class GlbDisconnectedParts
     public static Trace TraceOrigins(byte[] oldOutput, byte[] newOutput)
     {
         var trace = new Trace();
+        if (oldOutput.SequenceEqual(newOutput))
+        {
+            // Identical files establish node identity even when several nodes share the same triangles.
+            foreach (PartGeometry g in ExtractAll(oldOutput))
+            {
+                var piece = new PieceOrigin { NodeIndex = g.NodeIndex, NodeName = g.NodeName };
+                piece.OldNodes.Add(g.NodeIndex);
+                trace.Pieces.Add(piece);
+                trace.OldRead.Add(g.NodeIndex);
+                trace.NewRead.Add(g.NodeIndex);
+                trace.Heirs.Add(g.NodeIndex);
+            }
+            return trace;
+        }
+
         var owner = new Dictionary<TriangleKey, int>();   // triangle -> old node index; -1 = in more than one old node
+        var sharedOwners = new Dictionary<TriangleKey, HashSet<int>>();
         foreach (PartGeometry g in ExtractAll(oldOutput))
         {
             trace.OldRead.Add(g.NodeIndex);
             for (int t = 0; t + 2 < g.Triangles.Length; t += 3)
             {
                 var key = TriangleKey.Of(g.Positions, g.Triangles[t], g.Triangles[t + 1], g.Triangles[t + 2]);
-                owner[key] = owner.TryGetValue(key, out int had) && had != g.NodeIndex ? -1 : g.NodeIndex;
+                if (!owner.TryGetValue(key, out int had)) owner.Add(key, g.NodeIndex);
+                else if (had < 0) sharedOwners[key].Add(g.NodeIndex);
+                else if (had != g.NodeIndex)
+                {
+                    owner[key] = -1;
+                    sharedOwners.Add(key, new HashSet<int> { had, g.NodeIndex });
+                }
             }
         }
         foreach (PartGeometry g in ExtractAll(newOutput))
@@ -1127,8 +1149,10 @@ public static partial class GlbDisconnectedParts
             var o = new PieceOrigin { NodeIndex = g.NodeIndex, NodeName = g.NodeName };
             for (int t = 0; t + 2 < g.Triangles.Length; t += 3)
             {
-                if (!owner.TryGetValue(TriangleKey.Of(g.Positions, g.Triangles[t], g.Triangles[t + 1], g.Triangles[t + 2]), out int oldNode)) o.HasNewTriangles = true;
-                else if (oldNode >= 0) o.OldNodes.Add(oldNode);   // a doubled face (two old pieces hold it) settles nothing
+                var key = TriangleKey.Of(g.Positions, g.Triangles[t], g.Triangles[t + 1], g.Triangles[t + 2]);
+                if (!owner.TryGetValue(key, out int oldNode)) o.HasNewTriangles = true;
+                else if (oldNode >= 0) o.OldNodes.Add(oldNode);
+                else o.OldNodes.UnionWith(sharedOwners[key]);
             }
             trace.Heirs.UnionWith(o.OldNodes);
             trace.Pieces.Add(o);
@@ -1164,7 +1188,7 @@ public static partial class GlbDisconnectedParts
             if (marked.Count == 0) continue;
             r.ConflictNodes.Add(o.NodeIndex);
             r.Conflicts.Add("'" + o.NodeName + "' " + (values.Count > 1
-                ? "joins pieces that were " + string.Join(" and ", values.Select(v => v.Length > 0 ? "'" + v + "'" : "unmarked")) + " in the previous output"
+                ? "matches geometry from pieces that were " + string.Join(" and ", values.Select(v => v.Length > 0 ? "'" + v + "'" : "unmarked")) + " in the previous output"
                 : "was '" + marked[0] + "' in the previous output and now also holds geometry that output did not have")
                 + ": that value is not carried over (it gets only what the source hands down)");
         }

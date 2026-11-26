@@ -621,11 +621,13 @@ windows. **Deep dive:**
   the old output is replaced, each new piece is traced to the old piece its triangles came from and takes that piece's
   group letter and Delete mark: a part that broke into smaller pieces keeps all of them in its group; a piece that now
   joins old pieces marked differently (or holds geometry the old output did not have beside a marked one) does not
-  inherit, gets only what the source hands down, and is named in the console. Split and Tear checks always come from
+  inherit, gets only what the source hands down, and is named in the console. When several old parts share the same
+  triangle, all of them must agree before the new part inherits that value. Split and Tear checks always come from
   the source, so a part you unchecked stays unchecked. Parts that are not triangles (lines, points) keep theirs by
   index and name, and a saved value whose geometry is gone is counted in the status line. If NONE of the saved work
-  is found in the new output (a model moved or re-exported), or no old output can be read, it is matched by part name
-  with the Keep/Replace question as before. A **Fuse**, by contrast, rewrites the groups beside its output from its
+  can be traced to the new output (a model moved or re-exported, or a sidecar whose rows refer to different nodes),
+  the Keep/Replace question shows the name matches and lets you cancel before overwriting. If the old output is
+  missing or unreadable, the source fingerprint and part names are used. A **Fuse** rewrites the groups beside its output from its
   own run. While the merge box holds a typed value you did not apply, Split, Cut and Fuse refuse: press Enter to
   apply it (or Esc to discard it).
   **How long a fuse takes, and the native plugin** (2026-10): Fuse's weld, exposure views from above and from the side,

@@ -1498,7 +1498,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // never dropped in silence (review of PR #324): a node it cannot read as triangles (lines, Draco) is handed
             // on by index and name; a saved value whose geometry reached no new piece is counted in the status; and
             // when NO saved value of a file found its geometry (a model moved or re-exported), that file goes back to
-            // the by-name reading below and its Keep/Replace question. Only the X (Delete) marks travel by geometry:
+            // the by-name reading below and its Keep/Replace question. Only the X (Delete) marks travel:
             // Split and Tear are the source's checks handed down, and carrying them would re-check a part the user
             // had just unchecked in the source.
             GlbDisconnectedParts.Trace trace = null;
@@ -1520,18 +1520,26 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 if (path == null || !File.Exists(path)) continue;
                 var problems = new List<string>();
                 string[] had = File.ReadAllLines(path);
-                int entries = had.Count(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#", StringComparison.Ordinal));
-                string which = path == lettersPath ? "groupings" : "marks";
+                bool marks = path == marksPath;
+                int entries = WorkshopRules.CountSavedOutputEntries(had, marks);
+                string which = marks ? "Delete marks" : "groupings";
                 bool byGeometry = false;
+                bool geometryUnmatched = false;
                 if (trace != null)
                 {
                     var geoProblems = new List<string>();
                     var wasOld = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, oldTriples, geoProblems), oldPairs, geoProblems);
-                    int checksLeft = 0;
-                    if (path == marksPath) { int all = wasOld.Count; wasOld = WorkshopRules.OnlyDeleteMarks(wasOld); checksLeft = all - wasOld.Count; }
+                    if (marks)
+                    {
+                        int all = wasOld.Count;
+                        wasOld = WorkshopRules.OnlyDeleteMarks(wasOld);
+                        int checksLeft = all - wasOld.Count;
+                        if (checksLeft > 0) Debug.Log($"[Workshop] {checksLeft} Split/Tear mark(s) beside the old output were not carried: the source's checks decide those.");
+                    }
                     var carry = GlbDisconnectedParts.Carry(trace, wasOld, oldPairs.ToDictionary(kv => kv.Key, kv => kv.Value), outPairs.ToDictionary(kv => kv.Key, kv => kv.Value));
-                    if (carry.FoundNothing)
-                        Debug.LogWarning($"[Workshop] none of the {wasOld.Count} saved {which} beside '{Path.GetFileName(path)}' found its geometry in the new output (a moved or re-exported model?): matched by part name instead, and you are asked.");
+                    geometryUnmatched = carry.FoundNothing || (entries > 0 && wasOld.Count == 0);
+                    if (geometryUnmatched)
+                        Debug.LogWarning($"[Workshop] could not trace the saved {which} beside '{Path.GetFileName(path)}' to the new output. Review the part name matches before replacing it.");
                     else
                     {
                         byGeometry = true;
@@ -1541,14 +1549,14 @@ public abstract class ModelWorkshopWindow : EditorWindow
                         foreach (string q in carry.Conflicts) Debug.LogWarning("[Workshop] the output's own " + which + ": " + q);
                         if (carry.Orphans > 0) Debug.LogWarning($"[Workshop] {carry.Orphans} saved {which} beside '{Path.GetFileName(path)}' named geometry the new output no longer has: not carried.");
                         if (carry.ByName > 0) Debug.Log($"[Workshop] {carry.ByName} saved {which} on parts that are not triangles (lines, points) carried by index and name.");
-                        if (checksLeft > 0) Debug.Log($"[Workshop] {checksLeft} Split/Tear mark(s) beside the old output were not carried: the source's checks decide those.");
-                        problems.AddRange(geoProblems);
                     }
+                    problems.AddRange(geoProblems);
                 }
                 if (!byGeometry)
                 {
                     var was = WorkshopRules.ResolveFuseSidecar(WorkshopRules.MigrateSidecarNames(had, outTriples, problems), outPairs, problems);
-                    found[path] = (had, was, entries, WorkshopRules.JudgeSidecar(WorkshopRules.ParseSidecarFrom(had), sourceIdentity, entries, was.Count));
+                    if (marks) was = WorkshopRules.OnlyDeleteMarks(was);
+                    found[path] = (had, was, entries, WorkshopRules.JudgeSidecar(WorkshopRules.ParseSidecarFrom(had), sourceIdentity, entries, was.Count, geometryUnmatched));
                 }
                 else plan.ByGeometry = true;
                 foreach (string q in problems) Debug.LogWarning("[Workshop] the output's own " + which + " sidecar: " + q);
@@ -1557,6 +1565,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
             if (found.Values.Any(f => f.fit == WorkshopRules.SidecarFit.Unknown))
             {
                 found.TryGetValue(lettersPath ?? "", out var L); found.TryGetValue(marksPath ?? "", out var K);
+                if (L.fit != WorkshopRules.SidecarFit.Unknown) L = default;
+                if (K.fit != WorkshopRules.SidecarFit.Unknown) K = default;
                 string stated = L.had != null ? WorkshopRules.ParseSidecarFrom(L.had) : K.had != null ? WorkshopRules.ParseSidecarFrom(K.had) : "";
                 EditorUtility.ClearProgressBar();   // a question under a progress bar reads as a hang
                 int choice = EditorUtility.DisplayDialogComplex("Saved work beside the output",
