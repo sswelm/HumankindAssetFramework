@@ -5062,6 +5062,18 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     pixel of the 112 views differs between the three versions on any of the eight models.
   - **Tests:** 70 (`Tests/GlbFuseHiddenTwinTests.cs`). 68 defects planted one at a time; 68 caught, none let through.
 
+- **A Deck role with its own reduce dial (2026-11-27; Vehicle Lab role *Deck*, key `K`, recipe `deckReducePct`, the
+  script's `deckreduce=@names|percent`).** "Could you add one additional Reduce group called Deck": the decks are a
+  role of their own (enum value 27, appended last so saved recipes keep their roles). A WELD tier like Body - weld
+  within each material, then collapse - that runs right after BODY, in the script and in the C# stage 2 alike. Found
+  on the Saleg's Revenge: once the Model Fuser's unseen-faces pass had left out the deck part's hidden faces, Body
+  65 % of the smaller part cut a wedge out of the visible deck (measured in Blender on the Lab's own weld + collapse:
+  1,009,890 of the main deck's 1,015,220 area units kept before the pass, 587,239 after; 60 % keeps it). The tag is
+  sent only when a part is marked Deck, so a recipe without the role keeps its argument line. Not guessed from names
+  ("deck" also names deckhouses). Drill fixtures `fx_c_deck` (the tier beside a Body part, Blender against C#) and
+  `fx_x_deckreduce` (no `|` is the script's error). The role menus (part, "Mark all shown as", Show only) are sorted
+  alphabetically by name; the enum integers in the recipes are unchanged.
+
 - **A Chain role with its own reduce dial (2026-11-25; Vehicle Lab role *Chain*, key `N`, recipe `chainReducePct`,
   the script's `chainreduce=@names|percent`).** "Could you add an additional Reduce group called Chains": anchor
   chains and chain cables are a role of their own (enum value 26, appended last so saved recipes keep their roles).

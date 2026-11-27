@@ -5,7 +5,7 @@
 // vehicle_rig.py on exactly the arguments a Generate runs it on. The Lab's gate rows hold the two fillings to the same
 // line on every saved recipe (VehicleLabWindow.GenerateHeadless), the unit tests hold the template to the script's
 // argv table (argv[1..75] positional, then the tagged merge2= bright= flagfold= defaultreduce= shroudreduce= gunreduce=
-// windowreduce= railingreduce= chainreduce= twosided= treadmode= wheelcentre= parttx= arguments, each quoted as one token).
+// windowreduce= railingreduce= chainreduce= deckreduce= twosided= treadmode= wheelcentre= parttx= arguments, each quoted as one token).
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -42,14 +42,17 @@ public sealed class VehicleRigArgs
     /// <summary>A part is marked Chain: the chainreduce= tag (its names file and the dial) is sent only then, so a recipe
     /// without the role keeps its argument line.</summary>
     public bool chainMarked;
+    /// <summary>A part is marked Deck: the deckreduce= tag (its names file and the dial) is sent only then, so a recipe
+    /// without the role keeps its argument line.</summary>
+    public bool deckMarked;
     public float oarSweepDeg = 24f, oarDipDeg = 18f; public int oarFrames = 24; public float oarBladeRollDeg, oarLiftDeg, oarRakeDeg, oarPivotPct = 30f, oarLengthPct = 100f;
-    public float riggingReducePct = 75f, structureReducePct = 50f, bodyReducePct, oarReducePct, sailReducePct, rudderReducePct, wheelReducePct, flipReducePct, preserveReducePct, detailReducePct, shroudReducePct, gunReducePct, turretReducePct, windowReducePct, railingReducePct, chainReducePct, defaultReducePct;
+    public float riggingReducePct = 75f, structureReducePct = 50f, bodyReducePct, oarReducePct, sailReducePct, rudderReducePct, wheelReducePct, flipReducePct, preserveReducePct, detailReducePct, shroudReducePct, gunReducePct, turretReducePct, windowReducePct, railingReducePct, chainReducePct, deckReducePct, defaultReducePct;
     public bool sailFoldIdle; public int sailFoldFrames = 12; public float sailFoldAngleDeg = 270f; public bool sailFoldReverse; public float sailFoldSag;
     public bool flagFoldOn; public float flagFoldDeg; public int flagFoldFrames = 12;
     public string srcFile2 = ""; public float model2OffX, model2OffY, model2OffZ, model2RotX, model2RotY, model2RotZ, model2ScaleX = 1f, model2ScaleY = 1f, model2ScaleZ = 1f;
     public float model1Bright = 1f, model2Bright = 1f;
     /// <summary>The names files by role key: wheels, turrets, ignore, tracks, guns, rotors, tailrotors, trails, muzzles, cradles,
-    /// oars, sails, rigging, structure, bodies, flags, rudders, preserve, flip, detail, default, shroud, window, railing, twosided, chain - the "@path"
+    /// oars, sails, rigging, structure, bodies, flags, rudders, preserve, flip, detail, default, shroud, window, railing, twosided, chain, deck - the "@path"
     /// arguments. The window writes them under its preview folder, the jobs writer under the drill's work folder.</summary>
     public Dictionary<string, string> namesFiles = new Dictionary<string, string>(StringComparer.Ordinal);
     public string partTxFile;                           // the placement lines' file, or null when no part is placed
@@ -59,7 +62,7 @@ public static class VehicleRigArgLine
 {
     public static readonly string[] AxisOptions = { "AUTO", "X", "Y", "Z" };
     public static readonly string[] NamesRoles = { "wheels", "turrets", "ignore", "tracks", "guns", "rotors", "tailrotors", "trails", "muzzles", "cradles", "oars", "sails", "rigging",
-                                                   "structure", "bodies", "flags", "rudders", "preserve", "flip", "detail", "default", "shroud", "window", "railing", "twosided", "chain" };
+                                                   "structure", "bodies", "flags", "rudders", "preserve", "flip", "detail", "default", "shroud", "window", "railing", "twosided", "chain", "deck" };
 
     static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
     static string F1(float v) => v.ToString("0.#", Inv);
@@ -104,6 +107,7 @@ public static class VehicleRigArgLine
         Q("windowreduce=" + Names(a, "window") + "|" + F1(a.windowReducePct));
         Q("railingreduce=" + Names(a, "railing") + "|" + F1(a.railingReducePct));   // sent at every dial setting, like the two above: the names must reach the script's marked set
         if (a.chainMarked) Q("chainreduce=" + Names(a, "chain") + "|" + F1(a.chainReducePct));   // only when a part is marked, like twosided= (2026-11-25): every other recipe keeps its line
+        if (a.deckMarked) Q("deckreduce=" + Names(a, "deck") + "|" + F1(a.deckReducePct));   // the same: only when a part is marked Deck (2026-11-27)
         if (a.twoSidedMarked) Q("twosided=" + Names(a, "twosided"));   // only when a part is marked: every other recipe keeps its line (2026-11-14)
         if (a.treadMode == 1 && !a.tracksStatic && a.spinEnabled) Q("treadmode=links");   // absent = the conveyor, as every recipe before 2026-11-10
         if (a.wheelCentre == 1 && !a.fast) Q("wheelcentre=area");   // absent = the box centre, as every recipe before 2026-11-23; never on the fast path, which places no wheel bone
@@ -147,13 +151,13 @@ public static class VehicleRigArgLine
 
     /// <summary>Body 0, Wheel 1, Turret 2, Ignore 3, Default 4, Edgecase 5, Caterpillar 6, Gun 7, Rotor 8, TailRotor 9, Trail 10, Muzzle 11,
     /// Cradle 12, Oar 13, Sail 14, Rigging 15, Structure 16, Flag 17, Rudder 18, Preserve 19, Flip 20, Detail 21, Shroud 22, Window 23, Railing 24,
-    /// TwoSided 25, Chain 26
+    /// TwoSided 25, Chain 26, Deck 27
     /// - the window's Role enum, whose ints the saved recipes hold.</summary>
     public static readonly Dictionary<string, int> RoleOfNamesFile = new Dictionary<string, int>(StringComparer.Ordinal)
     {
         { "wheels", 1 }, { "turrets", 2 }, { "ignore", 3 }, { "tracks", 6 }, { "guns", 7 }, { "rotors", 8 }, { "tailrotors", 9 }, { "trails", 10 }, { "muzzles", 11 },
         { "cradles", 12 }, { "oars", 13 }, { "sails", 14 }, { "rigging", 15 }, { "structure", 16 }, { "bodies", 0 }, { "flags", 17 }, { "rudders", 18 },
-        { "preserve", 19 }, { "flip", 20 }, { "detail", 21 }, { "default", 4 }, { "shroud", 22 }, { "window", 23 }, { "railing", 24 }, { "twosided", 25 }, { "chain", 26 },
+        { "preserve", 19 }, { "flip", 20 }, { "detail", 21 }, { "default", 4 }, { "shroud", 22 }, { "window", 23 }, { "railing", 24 }, { "twosided", 25 }, { "chain", 26 }, { "deck", 27 },
     };
 
     public static bool IsPlaced(RecipePart p) => p.offX * p.offX + p.offY * p.offY + p.offZ * p.offZ > 1e-10f ||
@@ -188,7 +192,7 @@ public static class VehicleRigArgLine
         a.riggingReducePct = Flt(o, "riggingReducePct", 75f); a.structureReducePct = Flt(o, "structureReducePct", 50f); a.bodyReducePct = Flt(o, "bodyReducePct", 0f);
         a.oarReducePct = Flt(o, "oarReducePct", 0f); a.sailReducePct = Flt(o, "sailReducePct", 0f); a.rudderReducePct = Flt(o, "rudderReducePct", 0f); a.wheelReducePct = Flt(o, "wheelReducePct", 0f);
         a.flipReducePct = Flt(o, "flipReducePct", 0f); a.defaultReducePct = Flt(o, "defaultReducePct", 0f); a.shroudReducePct = Flt(o, "shroudReducePct", 0f); a.gunReducePct = Flt(o, "gunReducePct", 0f); a.turretReducePct = Flt(o, "turretReducePct", 0f);
-        a.windowReducePct = Flt(o, "windowReducePct", 0f); a.railingReducePct = Flt(o, "railingReducePct", 0f); a.chainReducePct = Flt(o, "chainReducePct", 0f); a.preserveReducePct = Flt(o, "preserveReducePct", 0f); a.detailReducePct = Flt(o, "detailReducePct", 0f);
+        a.windowReducePct = Flt(o, "windowReducePct", 0f); a.railingReducePct = Flt(o, "railingReducePct", 0f); a.chainReducePct = Flt(o, "chainReducePct", 0f); a.deckReducePct = Flt(o, "deckReducePct", 0f); a.preserveReducePct = Flt(o, "preserveReducePct", 0f); a.detailReducePct = Flt(o, "detailReducePct", 0f);
         a.sailFoldIdle = Bool(o, "sailFoldIdle", false);
         int sff = Int(o, "sailFoldFrames", 12); a.sailFoldFrames = sff <= 0 ? 12 : sff;
         float sfa = Flt(o, "sailFoldAngleDeg", 270f); a.sailFoldAngleDeg = sfa <= 0f ? 270f : sfa;
@@ -214,6 +218,7 @@ public static class VehicleRigArgLine
         a.fast = r.FastPath;
         a.twoSidedMarked = r.ActiveParts.Any(p => p.role == RoleOfNamesFile["twosided"]);
         a.chainMarked = r.ActiveParts.Any(p => p.role == RoleOfNamesFile["chain"]);
+        a.deckMarked = r.ActiveParts.Any(p => p.role == RoleOfNamesFile["deck"]);
         return r;
     }
 
