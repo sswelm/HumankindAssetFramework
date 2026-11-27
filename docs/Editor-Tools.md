@@ -564,7 +564,7 @@ windows. **Deep dive:**
   because it draws the source as stored),
   tick **Leave out faces no camera can see** on a group to drop what lies inside it (0.5.7, per group, off by default:
   set **View mode** to the group and the tick sits under its name; the fuse options list the groups ticked.
-  Opening a different model clears these choices): after the
+  Opening a different model or replacing the file clears these choices): after the
   fuse and the deletions, every face of a ticked group's shell that no camera of the game sees from **either** side is
   left out — gun bodies under the deck, the inner skin of a hull. Every other part still hides what is behind it and
   keeps every face, so a group you do not tick reaches the Lab as before (the Saleg's Revenge with only its guns ticked:

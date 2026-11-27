@@ -909,8 +909,9 @@ public abstract class ModelWorkshopWindow : EditorWindow
         // its nodes are not the nodes these indices named, so nothing carries over and the sidecars beside it are
         // read as they are for any other file newly opened here.
         string stamp = StampOf(srcFile);
-        if (!SamePath(probedFile, srcFile)) unseenGroups.Clear();
-        bool sameFile = rows.Count > 0 && WorkshopRules.RowsStillDescribe(probedFile, probedStamp, srcFile, stamp);
+        bool sameSource = WorkshopRules.RowsStillDescribe(probedFile, probedStamp, srcFile, stamp);
+        if (!sameSource) unseenGroups.Clear();
+        bool sameFile = rows.Count > 0 && sameSource;
         bool rewritten = rows.Count > 0 && SamePath(probedFile, srcFile) && !sameFile;   // …and say so: the marks did not vanish, the file did
         // P2 OF THE REVIEW OF PR #97: the ⊕ letters go on a fresh load, and their NAMES must go with them. They are
         // the file's groups' names, read from its sidecar; ApplyFuseSidecar below adds the ones it finds and removes
