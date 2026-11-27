@@ -909,6 +909,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         // its nodes are not the nodes these indices named, so nothing carries over and the sidecars beside it are
         // read as they are for any other file newly opened here.
         string stamp = StampOf(srcFile);
+        if (!SamePath(probedFile, srcFile)) unseenGroups.Clear();
         bool sameFile = rows.Count > 0 && WorkshopRules.RowsStillDescribe(probedFile, probedStamp, srcFile, stamp);
         bool rewritten = rows.Count > 0 && SamePath(probedFile, srcFile) && !sameFile;   // …and say so: the marks did not vanish, the file did
         // P2 OF THE REVIEW OF PR #97: the ⊕ letters go on a fresh load, and their NAMES must go with them. They are
@@ -1238,9 +1239,12 @@ public abstract class ModelWorkshopWindow : EditorWindow
             EditorUtility.DisplayProgressBar("Model Workshop", "Cutting…", 0.4f);
             GlbDisconnectedParts.GuardPaths(srcFile, outGlb);   // the file entry points used to guard; this path writes the bytes itself
             double plane = CutPlaneValue();
+            byte[] original = File.ReadAllBytes(srcFile);
+            var unseenWarning = GlbDisconnectedParts.ReadUnseenWarning(srcFile, original);
             var result = cutRule == 0
-                ? GlbDisconnectedParts.CutNodeByPlane(File.ReadAllBytes(srcFile), cutGeo.NodeIndex, cutAxis, plane)
-                : GlbDisconnectedParts.CutNodeByFacing(File.ReadAllBytes(srcFile), cutGeo.NodeIndex, cutAxis, cutTiltDeg, plane);
+                ? GlbDisconnectedParts.CutNodeByPlane(original, cutGeo.NodeIndex, cutAxis, plane)
+                : GlbDisconnectedParts.CutNodeByFacing(original, cutGeo.NodeIndex, cutAxis, cutTiltDeg, plane);
+            if (unseenWarning == null) original = null;
             if (!result.Changed) { status = "Nothing changed — the cut leaves every triangle on one side."; return; }
             foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             byte[] bytes = result.Bytes;
@@ -1258,7 +1262,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             if (plan.Error != null) { status = "Plane cut stopped before writing: the letters and marks for the output could not be planned (" + plan.Error + "). Nothing was written — writing the output without them would have left the old sidecars beside a file they no longer describe."; return; }
             string staged = StageOutputSidecars(plan);
             if (staged != null) { status = "Plane cut stopped before writing: the letters and marks could not be written beside the output (" + staged + "). Nothing was written."; return; }
-            File.WriteAllBytes(outGlb, bytes);
+            PublishWorkshopOutput(original, bytes, unseenWarning, plan);
             WriteMarksSidecar(srcFile);
             string keptNote = CommitOutputSidecars(plan, out string sidecarFailure);
             if (sidecarFailure != null) { status = "Plane cut wrote the output, but " + sidecarFailure + "\n" + outGlb; return; }
@@ -1674,6 +1678,32 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // file takes its place. Should that last step still fail, the stale sidecar is removed so nothing describes the
     // replaced file's nodes, and the caller reports a FAILURE, never "Kept …".
     static string Staged(string path) => path + ".new";
+
+    void PublishWorkshopOutput(byte[] original, byte[] bytes, GlbDisconnectedParts.UnseenWarning prior,
+        SidecarPlan plan = null, GlbDisconnectedParts.UnseenResult pruned = null, IReadOnlyDictionary<int, int> fusedInto = null)
+    {
+        try
+        {
+            var warning = GlbDisconnectedParts.CarryUnseenWarning(original, bytes, prior, pruned, fusedInto);
+            if (warning != null)
+            {
+                GlbDisconnectedParts.WriteUnseenOutput(outGlb, bytes, warning);
+                return;
+            }
+            File.WriteAllBytes(outGlb, bytes);
+            try { File.Delete(GlbDisconnectedParts.UnseenSidecarPath(outGlb)); }
+            catch (Exception e) { Debug.LogWarning("[Workshop] could not remove the old unseen-faces list: " + e.Message); }
+        }
+        catch
+        {
+            if (plan != null)
+                foreach (var staged in new[] { (plan.LettersPath, plan.Letters), (plan.MarksPath, plan.Marks) })
+                    if (staged.Item1 != null && staged.Item2 != null)
+                        try { File.Delete(Staged(staged.Item1)); } catch { }
+            throw;
+        }
+    }
+
     string StageOutputSidecars(SidecarPlan plan)   // null = staged; else why not, with nothing written
     {
         if (plan == null || plan.Error != null) return plan?.Error ?? "no plan";
@@ -1765,7 +1795,12 @@ public abstract class ModelWorkshopWindow : EditorWindow
         try
         {
             var groups = rows.Where(r => !string.IsNullOrEmpty(r.fuse)).GroupBy(r => r.fuse).OrderBy(g => g.Key).ToList();
-            byte[] bytes = UniqueBytes(srcFile);   // the names the rows were probed with
+            byte[] original = File.ReadAllBytes(srcFile);
+            var priorWarning = GlbDisconnectedParts.ReadUnseenWarning(srcFile, original);
+            var renamed = GlbDisconnectedParts.UniqueNodeNames(original);
+            byte[] bytes = renamed.Changed ? renamed.Bytes : original;   // the names the rows were probed with
+            if (priorWarning == null) original = null;
+            var fusedInto = new Dictionary<int, int>();
             var lines = new List<string>(); int done = 0;
             var report = new List<WorkshopRules.FuseGroupReport>();   // the evidence goes to a file, not the status box (711 parts in six groups made the status unreadable — user 2026-09-16)
             List<GlbDisconnectedParts.Result> results = null;   // one per group, in letter order; the output sidecar below names each shell from them
@@ -1787,6 +1822,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     var g = groups[gi]; var result = results[gi];
                     report.Add(new WorkshopRules.FuseGroupReport { Letter = g.Key, PartNames = g.Select(r => r.node).ToList(), Details = result.Details, Warnings = result.Warnings, Changed = result.Changed, Islands = result.IslandLines });
                     if (!result.Changed) { lines.Add($"⊕{g.Key}: nothing fused ({string.Join("; ", result.Warnings)})"); continue; }
+                    foreach (var row in g) fusedInto[row.nodeIndex] = result.FusedNodeIndex;
                     done++;
                     lines.Add($"⊕{g.Key}: {result.Details.FirstOrDefault()}" + (result.Warnings.Count > 0 ? $"   ⚠ {result.Warnings.Count} warning(s)" : ""));
                 }
@@ -1857,15 +1893,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             if (done == 0) { status = "Nothing changed — no group produced a fused mesh and nothing was deleted (see warnings in the console)."; return; }
             // the parts that hid faces, beside the output: the Vehicle Lab asks before it generates when one of them is no
             // longer a still, drawn part (it is ignored, moves or is placed now, and what it hid may show as a hole)
-            if (unseen != null && unseen.Changed)
-                GlbDisconnectedParts.WriteUnseenOutput(outGlb, unseen);
-            else
-            {
-                File.WriteAllBytes(outGlb, bytes);
-                string unseenSidecar = GlbDisconnectedParts.UnseenSidecarPath(outGlb);
-                try { if (File.Exists(unseenSidecar)) File.Delete(unseenSidecar); }
-                catch (Exception e) { Debug.LogWarning("[Workshop] could not remove the old unseen-faces list: " + e.Message); }
-            }
+            PublishWorkshopOutput(original, bytes, priorWarning, pruned: unseen, fusedInto: fusedInto);
             // the groupings and the marks, next to the source: a later Probe of this file restores them. An empty write
             // CLEARS the file (Save groups' documented "clear"), so a delete-only run — no letters at all — must not
             // touch it: it would silently drop the groups saved earlier (self-review of PR #63).
@@ -1953,9 +1981,14 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     if (second && GlbDisconnectedParts.LabSecondModelName(labName) is string s) yield return s;
                 }
                 var mine = new List<(string name, int role, bool placed)>(); int mineFromLists = 0;
+                var recipeRoles = new HashSet<int>();
                 foreach (var p in (recipe["parts"] as Newtonsoft.Json.Linq.JArray ?? new Newtonsoft.Json.Linq.JArray()).OfType<Newtonsoft.Json.Linq.JObject>())
+                {
+                    int role = (int?)p["role"] ?? 4;
+                    recipeRoles.Add(role);
                     foreach (string n in Own((string)p["name"] ?? ""))
-                        mine.Add((n, (int?)p["role"] ?? 4, Off(p["offset"], 0f) || Off(p["scale"], 1f)));
+                        mine.Add((n, role, Off(p["offset"], 0f) || Off(p["scale"], 1f)));
+                }
                 string labOut = (string)recipe["outGlb"];
                 if (!string.IsNullOrEmpty(labOut))
                     foreach (var kv in VehicleRigArgLine.RoleOfNamesFile)
@@ -1963,13 +1996,16 @@ public abstract class ModelWorkshopWindow : EditorWindow
                         string list = Path.Combine(labDir, Path.GetFileNameWithoutExtension(labOut) + "_" + kv.Key + ".txt");
                         if (!File.Exists(list)) continue;
                         foreach (string l in File.ReadAllLines(list).Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith("#", StringComparison.Ordinal)))
+                        {
+                            recipeRoles.Add(kv.Value);
                             foreach (string n in Own(l)) { mine.Add((n, kv.Value, false)); mineFromLists++; }
+                        }
                     }
                 // a gun nothing moves stands still (GlbDisconnectedParts.LabGunStands): no turret, no deploy raise or recoil
                 // here, and in the pack no gun elevation or turret bone on the model built from this recipe's output
                 if (packText == null) { packText = ""; try { if (File.Exists(ModelRegistry.SourcePath)) packText = File.ReadAllText(ModelRegistry.SourcePath); } catch (Exception e) { Debug.LogWarning("[Workshop] unseen faces: could not read the pack for the guns' settings (guns count as moving): " + e.Message); } }
                 bool gunStands = mine.Any(x => GlbDisconnectedParts.UnseenLabRole(x.role, true) != x.role)
-                    && GlbDisconnectedParts.LabGunStands(mine.Select(x => x.role), (float?)recipe["gunDeployElev"] ?? 0f, (float?)recipe["recoilDist"] ?? 0f,
+                    && GlbDisconnectedParts.LabGunStands(recipeRoles, (float?)recipe["gunDeployElev"] ?? 0f, (float?)recipe["recoilDist"] ?? 0f,
                         GlbDisconnectedParts.PackGunSettings(packText, labOut, SamePath));
                 if (gunStands) gunsStill.Add(recipeName);
                 found.AddRange(mine.Select(x => (x.name, GlbDisconnectedParts.UnseenLabRole(x.role, gunStands), x.placed)));
@@ -2014,7 +2050,10 @@ public abstract class ModelWorkshopWindow : EditorWindow
             var picked = new HashSet<int>(rows.Where(r => r.split).Select(r => r.nodeIndex));
             var toTear = new HashSet<int>(rows.Where(r => r.tear && !r.split).Select(r => r.nodeIndex));   // Split runs first and takes the mesh: a row checked for Split is never torn as well
             var toDelete = new HashSet<int>(rows.Where(r => r.delete).Select(r => r.nodeIndex));
-            byte[] bytes = File.ReadAllBytes(srcFile);
+            byte[] original = File.ReadAllBytes(srcFile);
+            var unseenWarning = GlbDisconnectedParts.ReadUnseenWarning(srcFile, original);
+            byte[] bytes = original;
+            if (unseenWarning == null) original = null;
             string renamedLine = null;   // unique names FIRST: the rows were probed with them, and the children take theirs from them
             { var un = GlbDisconnectedParts.UniqueNodeNames(bytes); if (un.Changed) { bytes = un.Bytes; renamedLine = un.Details[0]; } }
             GlbDisconnectedParts.Result result = picked.Count > 0 ? GlbDisconnectedParts.Split(bytes, picked, mergePct / 100.0) : null;
@@ -2036,7 +2075,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             if (plan.Error != null) { status = "Split stopped before writing: the letters and marks for the output could not be planned (" + plan.Error + "). Nothing was written — writing the output without them would have left the old sidecars beside a file they no longer describe."; return; }
             string staged = StageOutputSidecars(plan);
             if (staged != null) { status = "Split stopped before writing: the letters and marks could not be written beside the output (" + staged + "). Nothing was written."; return; }
-            File.WriteAllBytes(outGlb, bytes);
+            PublishWorkshopOutput(original, bytes, unseenWarning, plan);
             WriteMarksSidecar(srcFile);   // the checks and deletion marks, next to the source: the first Probe of it restores them
             if (result != null) foreach (var w in result.Warnings) Debug.LogWarning("[Workshop] " + w);
             string keptNote = CommitOutputSidecars(plan, out string sidecarFailure);

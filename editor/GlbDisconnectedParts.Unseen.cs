@@ -486,18 +486,112 @@ public static partial class GlbDisconnectedParts
         return a != null && a == b;
     }
 
-    // THE LIST BESIDE THE OUTPUT: every part that could hide a face when the pass ran (a still, drawn part with an opaque
-    // face - which of them stopped which ray is not kept, so the list errs towards asking), under a header holding the
-    // output's length (a file written over without the pass, or by anything else, no longer matches and the list is not
-    // read). The Lab reads it before it generates: such a part that is now ignored, moving or placed may leave a hole.
-    public const string UnseenSidecarHeader = "#unseen-faces v1";
+    // The warning describes a specific GLB. The old format recorded only its length and listed even
+    // occluders that the pass removed in full. New records identify the bytes and track later removals.
+    public const string UnseenSidecarHeader = "#unseen-faces v2";
+    const string LegacyUnseenSidecarHeader = "#unseen-faces v1";
     public static string UnseenSidecarPath(string glb) => string.IsNullOrEmpty(glb) ? null : glb + ".unseen.txt";
 
-    /// <summary>Publish pruned bytes only after the Vehicle Lab's matching warning list is in place.</summary>
-    public static void WriteUnseenOutput(string path, UnseenResult result)
+    public sealed class UnseenWarning
     {
-        if (result == null || !result.Changed || result.Bytes == null)
-            throw new ArgumentException("The unseen-faces pass did not produce an output.", nameof(result));
+        public readonly HashSet<string> Hiders = new HashSet<string>(StringComparer.Ordinal);
+        public readonly HashSet<string> RemovedHiders = new HashSet<string>(StringComparer.Ordinal);
+        internal bool Legacy;
+    }
+
+    static string UnseenFingerprint(Stream glb)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        return BitConverter.ToString(sha.ComputeHash(glb)).Replace("-", "");
+    }
+
+    public static UnseenWarning ReadUnseenWarning(string path, byte[] source = null)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        string[] lines;
+        try { lines = File.ReadAllLines(UnseenSidecarPath(path)); }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
+        if (lines.Length == 0) return null;
+        string header = lines[0].Trim();
+        using Stream glb = source == null ? (Stream)File.OpenRead(path) : new MemoryStream(source, false);
+        var warning = new UnseenWarning { Legacy = header.StartsWith(LegacyUnseenSidecarHeader + "|", StringComparison.Ordinal) };
+        if (warning.Legacy)
+        {
+            if (header != LegacyUnseenSidecarHeader + "|" + glb.Length.ToString(CultureInfo.InvariantCulture)) return null;
+        }
+        else if (!header.StartsWith(UnseenSidecarHeader + "|", StringComparison.Ordinal) ||
+            header != UnseenSidecarHeader + "|" + UnseenFingerprint(glb)) return null;
+
+        foreach (string line in lines.Skip(1))
+        {
+            if (line.StartsWith("hid|", StringComparison.Ordinal))
+                warning.Hiders.Add(warning.Legacy ? line.Substring(4) : Newtonsoft.Json.JsonConvert.DeserializeObject<string>(line.Substring(4)));
+            else if (!warning.Legacy && line.StartsWith("removed|", StringComparison.Ordinal))
+                warning.RemovedHiders.Add(Newtonsoft.Json.JsonConvert.DeserializeObject<string>(line.Substring(8)));
+        }
+        return warning;
+    }
+
+    static Dictionary<int, string> MeshNamesForUnseenWarning(JArray nodes)
+    {
+        var names = new Dictionary<int, string>();
+        for (int i = 0; i < nodes.Count; i++)
+            if ((nodes[i] as JObject)?["mesh"] != null) names[i] = (string)nodes[i]["name"] ?? ("node " + i);
+        return names;
+    }
+
+    /// <summary>Carry the warning to Workshop output. Existing nodes keep their indices, cuts append
+    /// descendants, and the Fuser supplies the original node to shell assignments.</summary>
+    public static UnseenWarning CarryUnseenWarning(byte[] source, byte[] output, UnseenWarning prior,
+        UnseenResult pruned = null, IReadOnlyDictionary<int, int> fusedInto = null)
+    {
+        if (prior == null && pruned?.Changed != true) return null;
+        var result = new UnseenWarning();
+        JArray outputNodes = Parse(output).Root["nodes"] as JArray ?? new JArray();
+        var outputMeshes = MeshNamesForUnseenWarning(outputNodes);
+        if (pruned?.Changed == true)
+            result.Hiders.UnionWith(pruned.Hiders.Intersect(outputMeshes.Values, StringComparer.Ordinal));
+        if (prior == null) return result;
+
+        JArray sourceNodes = Parse(source).Root["nodes"] as JArray ?? new JArray();
+        var hiders = MeshNamesForUnseenWarning(sourceNodes).Where(p => prior.Hiders.Contains(p.Value)).ToDictionary(p => p.Key, p => p.Value);
+        var parents = new Dictionary<int, int>();
+        for (int i = 0; i < outputNodes.Count; i++)
+            if ((outputNodes[i] as JObject)?["children"] is JArray children)
+                foreach (int child in children.Values<int>()) parents[child] = i;
+        var matched = new HashSet<int>();
+        foreach (var mesh in outputMeshes)
+        {
+            int oldNode = mesh.Key;
+            // Walk only appended cut pieces. Bound the walk if the imported hierarchy is cyclic.
+            for (int depth = 0; depth < outputNodes.Count && oldNode >= sourceNodes.Count; depth++)
+            {
+                if (!parents.TryGetValue(oldNode, out int parent)) { oldNode = -1; break; }
+                oldNode = parent;
+            }
+            if (hiders.ContainsKey(oldNode))
+            {
+                result.Hiders.Add(mesh.Value);
+                matched.Add(oldNode);
+            }
+        }
+        if (fusedInto != null)
+            foreach (int oldNode in hiders.Keys)
+                if (fusedInto.TryGetValue(oldNode, out int shell) && outputMeshes.TryGetValue(shell, out string name))
+                {
+                    result.Hiders.Add(name);
+                    matched.Add(oldNode);
+                }
+        result.RemovedHiders.UnionWith(prior.RemovedHiders);
+        result.RemovedHiders.UnionWith(hiders.Where(p => !matched.Contains(p.Key)).Select(p => p.Value));
+        if (!prior.Legacy) result.RemovedHiders.UnionWith(prior.Hiders.Except(hiders.Values, StringComparer.Ordinal));
+        return result;
+    }
+
+    /// <summary>Publish pruned bytes only after the Vehicle Lab's matching warning list is in place.</summary>
+    public static void WriteUnseenOutput(string path, byte[] bytes, UnseenWarning warning)
+    {
         path = Path.GetFullPath(path);
         string sidecar = UnseenSidecarPath(path);
         string suffix = "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -505,9 +599,11 @@ public static partial class GlbDisconnectedParts
         bool published = false;
         try
         {
-            File.WriteAllBytes(stagedModel, result.Bytes);
-            File.WriteAllLines(stagedList, new[] { UnseenSidecarHeader + "|" + result.Bytes.Length.ToString(CultureInfo.InvariantCulture) }
-                .Concat(result.Hiders.Select(n => "hid|" + n)));
+            File.WriteAllBytes(stagedModel, bytes);
+            using var model = new MemoryStream(bytes, false);
+            File.WriteAllLines(stagedList, new[] { UnseenSidecarHeader + "|" + UnseenFingerprint(model) }
+                .Concat(warning.Hiders.OrderBy(n => n, StringComparer.Ordinal).Select(n => "hid|" + Newtonsoft.Json.JsonConvert.ToString(n)))
+                .Concat(warning.RemovedHiders.OrderBy(n => n, StringComparer.Ordinal).Select(n => "removed|" + Newtonsoft.Json.JsonConvert.ToString(n))));
             if (File.Exists(sidecar)) File.Replace(stagedList, sidecar, previousList);
             else File.Move(stagedList, sidecar);
             try
@@ -545,14 +641,6 @@ public static partial class GlbDisconnectedParts
         string[] axes = VehicleLabRules.Merge2ScaleField(x, y, z).Split(',');
         string Effective(string axis) => axis == "0" ? "1" : axis;   // the merger treats a zero axis as 1
         return Effective(axes[0]) != Effective(axes[1]) || Effective(axes[0]) != Effective(axes[2]);
-    }
-
-    /// <summary>The hiders the list names, or null when the list does not describe a file of <paramref name="glbLength"/> bytes.</summary>
-    public static List<string> ReadUnseenSidecar(IEnumerable<string> lines, long glbLength)
-    {
-        var all = (lines ?? Enumerable.Empty<string>()).ToList();
-        if (all.Count == 0 || all[0].Trim() != UnseenSidecarHeader + "|" + glbLength.ToString(CultureInfo.InvariantCulture)) return null;
-        return all.Skip(1).Where(l => l.StartsWith("hid|", StringComparison.Ordinal)).Select(l => l.Substring(4)).ToList();
     }
 
     /// <summary>The Lab's parts (name, role, placed) that could hide faces at the fuse and are no longer still, drawn parts.

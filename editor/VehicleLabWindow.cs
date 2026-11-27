@@ -2681,16 +2681,27 @@ public class VehicleLabWindow : EditorWindow
         // some parts as standing still and drawn, and left out what they hid. If one of them is now ignored, moving or
         // placed, what it hid can show as a hole: name them, and ask before generating (a headless run only logs it).
         {
-            List<string> HidersOf(string model)
-            {
-                if (string.IsNullOrWhiteSpace(model)) return null;
-                string unseenList = GlbDisconnectedParts.UnseenSidecarPath(model.Trim());
-                try { if (File.Exists(unseenList) && File.Exists(model.Trim())) return GlbDisconnectedParts.ReadUnseenSidecar(File.ReadAllLines(unseenList), new FileInfo(model.Trim()).Length); }
-                catch (Exception e) { Debug.LogWarning("[VehicleLab] could not read " + unseenList + ": " + e.Message); }
-                return null;
-            }
-            List<string> hiders = HidersOf(srcFile), hiders2 = HidersOf(srcFile2);
             var problems = new List<string>();
+            GlbDisconnectedParts.UnseenWarning ReadWarning(string model, string field)
+            {
+                try { return GlbDisconnectedParts.ReadUnseenWarning(model?.Trim()); }
+                catch (Exception e)
+                {
+                    problems.Add("Could not read the unseen-faces warning for the " + field + ": " + e.Message);
+                    return null;
+                }
+            }
+            var warning = ReadWarning(srcFile, "Raw model");
+            var warning2 = ReadWarning(srcFile2, "Second model");
+            var hiders = warning?.Hiders.ToList();
+            var hiders2 = warning2?.Hiders.ToList();
+            foreach (var item in new[] { (warning, "Raw model"), (warning2, "Second model") })
+                if (item.Item1?.RemovedHiders.Count > 0)
+                {
+                    var removed = item.Item1.RemovedHiders.OrderBy(n => n, StringComparer.Ordinal).ToList();
+                    problems.Add("The " + item.Item2 + " has lost geometry that could hide removed faces: " +
+                        string.Join(", ", removed.Take(8)) + (removed.Count > 8 ? $" and {removed.Count - 8} more" : "") + ".");
+                }
             // a gun nothing moves stood still at the fuse, and still does (GlbDisconnectedParts.LabGunStands): no warning for it
             bool gunStands = false;
             if ((hiders?.Count > 0 || hiders2?.Count > 0) && ActiveParts.Any(p => GlbDisconnectedParts.UnseenLabRole((int)p.role, true) != (int)p.role))
@@ -2704,19 +2715,19 @@ public class VehicleLabWindow : EditorWindow
                 problems.Add("These parts could hide faces then and are now ignored, moving or placed: " + string.Join(", ", clash.Take(8)) + (clash.Count > 8 ? $" and {clash.Count - 8} more" : "") + ".");
             // the fuse refuses a model the Lab turns (its cameras would not be the game's): a turn set after the fuse is as wrong
             bool turned1 = modelRot != Vector3.zero, turned2 = turned1 || model2Rot != Vector3.zero;
-            if ((hiders?.Count > 0 && turned1) || (hiders2?.Count > 0 && turned2))
-                problems.Add("The model is turned now (Orientation" + (hiders2?.Count > 0 ? " or the second model's Rotation" : "") + "), so the game looks at it from directions the fuse did not ask from.");
-            if (hiders2?.Count > 0 && GlbDisconnectedParts.UnseenScaleChangesViews(model2Scale.x, model2Scale.y, model2Scale.z))
+            if ((warning != null && turned1) || (warning2 != null && turned2))
+                problems.Add("The model is turned now (Orientation" + (warning2 != null ? " or the second model's Rotation" : "") + "), so the game looks at it from directions the fuse did not ask from.");
+            if (warning2 != null && GlbDisconnectedParts.UnseenScaleChangesViews(model2Scale.x, model2Scale.y, model2Scale.z))
                 problems.Add("The second model is scaled differently by axis, which changes the directions the cameras see in its model space.");
-            if (FastPath && ((hiders?.Count > 0) || (hiders2?.Count > 0)))
+            if (FastPath && (warning != null || warning2 != null))
                 problems.Add("The source-skeleton fast path is enabled and can move parts the fuse treated as stationary.");
             if (problems.Count > 0)
             {
-                Debug.LogWarning("[VehicleLab] this model was fused with \"Leave out faces no camera can see\": " + string.Join(" ", problems) + " What was hidden may show as a hole: save the recipe, then fuse again in the Model Fuser (it reads the Lab's saved roles).");
+                Debug.LogWarning("[VehicleLab] unseen faces: " + string.Join(" ", problems) + " What was hidden may show as a hole. Save the recipe and fuse again from the unpruned model.");
                 if (!headless && !EditorUtility.DisplayDialog("Faces the fuse left out",
-                        "This model was fused with \"Leave out faces no camera can see\".\n\n" + string.Join("\n\n", problems) + "\n\n" +
-                        "What was hidden or unseen then may show as a hole. Save the recipe and fuse again in the Model Fuser (it reads the Lab's saved roles), or generate anyway.", "Generate anyway", "Cancel"))
-                { status = "Cancelled — save the recipe, fuse again in the Model Fuser (Leave out faces no camera can see; it reads the saved roles), then Generate."; return; }
+                        string.Join("\n\n", problems) + "\n\n" +
+                        "What was hidden or unseen then may show as a hole. Save the recipe and fuse again from the unpruned model, or generate anyway.", "Generate anyway", "Cancel"))
+                { status = "Cancelled — save the recipe, fuse again from the unpruned model, then Generate."; return; }
             }
         }
         // OVERWRITE GUARD: the output path is explicit and user-owned — an existing file (e.g. a HAND-MADE rig like

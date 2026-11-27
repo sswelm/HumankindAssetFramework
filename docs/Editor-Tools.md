@@ -563,7 +563,8 @@ windows. **Deep dive:**
   the groups whose mirrored parts are still reversed in the output and how many faces, and the Fuser's own preview will not show it,
   because it draws the source as stored),
   tick **Leave out faces no camera can see** on a group to drop what lies inside it (0.5.7, per group, off by default:
-  set **View mode** to the group and the tick sits under its name; the fuse options list the groups ticked): after the
+  set **View mode** to the group and the tick sits under its name; the fuse options list the groups ticked.
+  Opening a different model clears these choices): after the
   fuse and the deletions, every face of a ticked group's shell that no camera of the game sees from **either** side is
   left out — gun bodies under the deck, the inner skin of a hull. Every other part still hides what is behind it and
   keeps every face, so a group you do not tick reaches the Lab as before (the Saleg's Revenge with only its guns ticked:
@@ -595,7 +596,7 @@ windows. **Deep dive:**
   facing (wheels, turrets, guns, rotors, trails, muzzles, cradles, oars, sails, flags, rudders, chains, caterpillars,
   Flip, TwoSided, Edgecase), a placed part, a skinned or morphing mesh, and a mesh with an animated transform of
   its own or an ancestor's stay whole and hide nothing — except a gun nothing moves: a Gun, Muzzle or Cradle part
-  stands still when the recipe has no Turret part, no deploy raise and no recoil, and the pack's model built from the
+  stands still when neither model in the recipe has a Turret part, there is no deploy raise or recoil, and the pack's model built from the
   Lab's output has no gun elevation and no turret bone (no pack entry yet: it counts as moving; the Saleg's Revenge
   marks every cannon Gun for the Gun reduce dial, and counted still they lose 1,391,036 faces). Where the recipe and
   the lists disagree, the pass takes the careful reading. A node no scene reaches is excluded. The Factory bakes the
@@ -609,9 +610,10 @@ windows. **Deep dive:**
   show sky. The rest show a face a little behind the one left out (median 4.5 % of the model's radius). No sampled
   rule reaches zero. The result line leads the status (its first line) and closes the fuse report. Fusing the
   pruned output again leaves out next to nothing more (184 faces on that ship). Every part that could hide a face (each still, drawn part with an opaque face) is listed beside the
-  output (`<output>.unseen.txt`). The Fuser publishes the pruned model after saving that list. Generate asks before
-  it runs if a listed part is ignored, moving or placed, if the model is turned, if its second model is scaled
-  differently by axis, or if the source-skeleton fast path is enabled. The pose is the file's: the water line is not
+  output (`<output>.unseen.txt`). The list identifies the exact GLB contents and follows later Fuse, Split, Tear, and
+  Plane Cut operations. Generate asks before it runs if a listed part was deleted, is ignored, moving or placed,
+  if the model is turned, if its second model is scaled differently by axis, or if the source-skeleton fast path
+  is enabled. Use the unpruned source if you need to restore the omitted faces. The pose is the file's: the water line is not
   modelled, and a part the Lab moves without a role that says so is not known to move,
   leave **Fuse — groups at once** at **0** (auto: half the logical processors; measured on a 22-group ship, 8 at once is
   the sweet spot on 16 threads and more is no faster, since the largest group's weld slows as the others compete for

@@ -865,28 +865,36 @@ public class GlbUnseenFacesTests
             byte[] original = BuildGlb(null, Hull(), Gun());
             var pruned = Run(original);
             Assert.True(pruned.Changed);
+            var warning = GlbDisconnectedParts.CarryUnseenWarning(null, pruned.Bytes, null, pruned);
+            Assert.Equal("Hull", Assert.Single(warning.Hiders));
+            warning.Hiders.Add("Deck|Name\nX");
             File.WriteAllBytes(output, original);
             Directory.CreateDirectory(list);
-            Assert.NotNull(Record.Exception(() => GlbDisconnectedParts.WriteUnseenOutput(output, pruned)));
+            Assert.NotNull(Record.Exception(() => GlbDisconnectedParts.WriteUnseenOutput(output, pruned.Bytes, warning)));
             Assert.Equal(original, File.ReadAllBytes(output));
             Assert.Single(Directory.EnumerateFiles(dir));
 
             Directory.Delete(list);
-            string[] previousList = { GlbDisconnectedParts.UnseenSidecarHeader + "|" + original.Length, "hid|Old hull" };
+            string[] previousList = { "#unseen-faces v1|" + original.Length, "hid|Old hull" };
             File.WriteAllLines(list, previousList);
             File.Delete(output);
             Directory.CreateDirectory(output);
-            Assert.NotNull(Record.Exception(() => GlbDisconnectedParts.WriteUnseenOutput(output, pruned)));
+            Assert.NotNull(Record.Exception(() => GlbDisconnectedParts.WriteUnseenOutput(output, pruned.Bytes, warning)));
             Assert.True(Directory.Exists(output));
             Assert.Equal(previousList, File.ReadAllLines(list));
             Assert.Single(Directory.EnumerateFiles(dir));
 
             Directory.Delete(output);
             File.WriteAllBytes(output, original);
-            GlbDisconnectedParts.WriteUnseenOutput(output, pruned);
+            GlbDisconnectedParts.WriteUnseenOutput(output, pruned.Bytes, warning);
             Assert.Equal(pruned.Bytes, File.ReadAllBytes(output));
-            Assert.Equal(pruned.Hiders, GlbDisconnectedParts.ReadUnseenSidecar(File.ReadAllLines(list), pruned.Bytes.Length));
+            Assert.True(warning.Hiders.SetEquals(GlbDisconnectedParts.ReadUnseenWarning(output).Hiders));
             Assert.Equal(2, Directory.EnumerateFiles(dir).Count());
+
+            byte[] replacement = (byte[])pruned.Bytes.Clone();
+            replacement[replacement.Length - 1] ^= 1;
+            File.WriteAllBytes(output, replacement);
+            Assert.Null(GlbDisconnectedParts.ReadUnseenWarning(output));
         }
         finally
         {
@@ -908,13 +916,48 @@ public class GlbUnseenFacesTests
     }
 
     [Fact]
-    public void The_list_beside_the_output_is_read_only_for_the_file_it_was_written_with()
+    public void Legacy_warnings_carry_hiders_that_still_exist_in_the_source()
     {
-        var lines = new[] { GlbDisconnectedParts.UnseenSidecarHeader + "|1234", "hid|Fused_G_Hull", "hid|Mast" };
-        Assert.Equal(new[] { "Fused_G_Hull", "Mast" }, GlbDisconnectedParts.ReadUnseenSidecar(lines, 1234));
-        Assert.Null(GlbDisconnectedParts.ReadUnseenSidecar(lines, 1235));   // the output was written over since
-        Assert.Null(GlbDisconnectedParts.ReadUnseenSidecar(new string[0], 1234));
-        Assert.Equal("x.glb.unseen.txt", GlbDisconnectedParts.UnseenSidecarPath("x.glb"));
+        byte[] source = BuildGlb(null, Hull());
+        string output = Path.Combine(Path.GetTempPath(), "haf-unseen-v1-" + Guid.NewGuid().ToString("N") + ".glb");
+        string list = GlbDisconnectedParts.UnseenSidecarPath(output);
+        try
+        {
+            Assert.Null(GlbDisconnectedParts.ReadUnseenWarning(output, source));
+            File.WriteAllLines(list, new[] { "#unseen-faces v1|" + source.Length, "hid|Hull", "hid|Already pruned" });
+            Assert.Null(GlbDisconnectedParts.ReadUnseenWarning(output, new byte[source.Length + 1]));
+            var prior = GlbDisconnectedParts.ReadUnseenWarning(output, source);
+            Assert.True(prior.Hiders.SetEquals(new[] { "Hull", "Already pruned" }));
+            var carried = GlbDisconnectedParts.CarryUnseenWarning(source, source, prior);
+            Assert.Equal("Hull", Assert.Single(carried.Hiders));
+            Assert.Empty(carried.RemovedHiders);
+        }
+        finally { File.Delete(list); }
+    }
+
+    [Fact]
+    public void Splitting_a_hider_tracks_its_pieces_and_records_a_later_deletion()
+    {
+        byte[] source = BuildGlb(null, new Part
+        {
+            Name = "Shield",
+            Faces = new Soup().Tri("left", V(0, 0, 0), V(1, 0, 0), V(0, 1, 0))
+                .Tri("right", V(3, 0, 0), V(4, 0, 0), V(3, 1, 0))
+        });
+        var prior = new GlbDisconnectedParts.UnseenWarning();
+        prior.Hiders.Add("Shield");
+        var split = GlbDisconnectedParts.Split(source, new HashSet<int> { 0 }, 0);
+        Assert.True(split.Changed);
+        var carried = GlbDisconnectedParts.CarryUnseenWarning(source, split.Bytes, prior);
+        Assert.True(carried.Hiders.SetEquals(new[] { "Shield_Part_001", "Shield_Part_002" }));
+        Assert.Empty(carried.RemovedHiders);
+
+        int first = GlbDisconnectedParts.NodeNames(split.Bytes).Single(p => p.Value == "Shield_Part_001").Key;
+        var removed = GlbDisconnectedParts.RemoveMeshes(split.Bytes, new HashSet<int> { first });
+        Assert.True(removed.Changed);
+        var final = GlbDisconnectedParts.CarryUnseenWarning(split.Bytes, removed.Bytes, carried);
+        Assert.Equal("Shield_Part_002", Assert.Single(final.Hiders));
+        Assert.Equal("Shield_Part_001", Assert.Single(final.RemovedHiders));
     }
 
     [Fact]
