@@ -3556,7 +3556,7 @@ the reset and the fixed +/-999 bounds. This checks the window's reset methods, n
 the real window in a temporary Unity project, without Blender, on a copy of a real fused model
 (`HAF_STALE_PROBE_MODEL`, default the Skarv; SKIP when it is missing). The model's glTF names play the "before" and
 "after" files of a re-fuse: `Fused_P_Material2_11` is probed and marked Wheel, then the source becomes the file in which
-it is `Fused_P_Material2_11_Part_001`. In the 46 checks:
+it is `Fused_P_Material2_11_Part_001`. In the 62 checks:
 - an unchanged source generates without a re-probe;
 - the rewritten source re-probes, generates and moves the Wheel;
 - a marking renamed out of every group stops Generate. A stop must leave the session exactly as it was: nothing
@@ -3566,14 +3566,22 @@ it is `Fused_P_Material2_11_Part_001`. In the 46 checks:
 - two marked members of one fused group fused into one row stop, naming both, and a manual Probe gives that row neither
   role;
 - an unmarked part renamed to `…propeller…` stops, naming the role the probe would guess;
-- a recipe-loaded session is not re-probed when its source is touched, and a re-Probe turns the check back on.
+- a recipe-loaded session is not re-probed when its source is touched, and a re-Probe turns the check back on;
+- the file is rewritten between Probe's two reads (a `logMessageReceived` hook on the group-carry log line). Generate
+  stops with "changed again", the guessed row stays out of the session, and the next press judges the new file;
+- a rigged source: the generator's skinned fixture (`fx_b_skinned`), its clip removed and its blended vertices given to
+  one joint, so that the probe runs in-process and lists the bones. A bone the probe guesses as Turret and the user
+  cleared to Default stays cleared when the file is merely touched, and Generate runs. A lost mesh marking on the fast
+  path stops Generate.
 
-All 46 pass. With `HAF_EDITOR_ROOT` pointed at master's `editor/`, the first scenario that changes the source fails
+All 62 pass. With `HAF_EDITOR_ROOT` pointed at master's `editor/`, the first scenario that changes the source fails
 with the user's `VEHICLE ERROR: part 'Fused_P_Material2_11' not found`. Pointed at the PR's first commit (607a21b8),
-29 fail: its stop had already replaced the session, its second press generated without the dropped marking, and it
-generated the shared row and the guessed role. The review's three defects are the last three scenarios. The record's
-rules are unit cases in `Tests/VehicleLabRulesTests.cs`. Not drilled: a domain reload between Probe and Generate (the record is a
-`[SerializeField]` string), and a Blender-route probe (OBJ/.blend sources take the same code after the probe).
+29 of the first 46 fail: its stop had already replaced the session, its second press generated without the dropped
+marking, and it generated the shared row and the guessed role. Pointed at the second (931040a0), five fail: the
+review's second round (the rewrite between the two reads, the touched rigged source, the fast path's mesh marking).
+The record's rules are unit cases in `Tests/VehicleLabRulesTests.cs`. Not drilled: a domain reload between Probe and
+Generate (the record is a `[SerializeField]` string), and a Blender-route probe (OBJ/.blend sources take the same code
+after the probe).
 
 **Definition lists after a database edit (2026-11-24):** `bash tools/definition_caches_unity_drill.sh` runs the real
 list readers of the Model Factory, the Resize Lab, the Sound window and the District Factory in a temporary Unity

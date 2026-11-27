@@ -24,9 +24,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     markings, so a second press generated without them. The first version also let two marked members of one fused
     group both "carry" onto one row, and generated name-guessed roles unseen. The group carry-over now gives a row
     claimed by two markings neither role, in a manual Probe too.
+  - The second review round found three more defects:
+    - A write between Probe's two reads (the second redraws the migrated placements) went in unjudged. The second read
+      may now only redraw the same file.
+    - A bone the user had cleared from its name guess was guessed again on every probe, so a merely touched rigged
+      source stopped every Generate. Bones now keep an explicit Default, as mesh rows do.
+    - On the fast path, lost mesh markings were swapped away unnamed. Both lists are now judged on either path.
+    - Caveat: on a Blender-probed source, a stop has already rewritten the probe's preview FBX on disk.
   - A recipe-loaded session has no record and runs as before.
-  - Proven by `tools/vehiclelab_stale_probe_unity_drill.sh` on a copy of the Skarv: 46 of 46 checks pass. Against
-    master's editor, the rewrite scenario fails with the user's error. Against the PR's first commit, 29 fail.
+  - Proven by `tools/vehiclelab_stale_probe_unity_drill.sh` on a copy of the Skarv plus the rig generator's skinned
+    fixture: 62 of 62 checks pass. Against master's editor, the rewrite scenario fails with the user's error. Against
+    the PR's first commit, 29 fail; against its second, five fail.
 
 - **Vehicle Lab: the limited dissolve leaves faces wound against each other apart, as Blender does (2026-11-25).**
   Found by the Blender-parity run: the vehicle_rig drill failed on one recipe, `hms_roberts_1940_split_fused`, on one

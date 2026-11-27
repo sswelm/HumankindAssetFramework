@@ -39,13 +39,15 @@ cp "$NEWTONSOFT" "$TMPD/project/Assets/Plugins/Newtonsoft.Json.dll"
 cp "$EROOT/editor/Plugins/Haf.Schema.dll" "$TMPD/project/Assets/Plugins/Haf.Schema.dll"
 cp "$EROOT/editor/Plugins/x86_64/hafkernels.dll" "$EROOT/editor/Plugins/x86_64/hafkernels.dll.meta" "$TMPD/project/Assets/Plugins/x86_64/"
 cp "$MODEL" "$TMPD/model.glb"   # a snapshot: the user may re-fuse while this runs
+python "$ROOT/tools/vehiclerig-drill/vehiclerig_fixtures.py" "$WTMP/fixtures" > "$TMPD/fixtures.log" 2>&1 || { tail -5 "$TMPD/fixtures.log"; echo 'FAIL — the rig fixtures (a skinned source for the fast path) were not generated'; exit 1; }
+[ -f "$TMPD/fixtures/models/fx_b_skinned.glb" ] || { echo 'FAIL — fx_b_skinned.glb missing from the rig fixtures'; exit 1; }
 WJSON="$(cygpath -m "$NEWTONSOFT")"
 sed -e "s|@UNITY@|$WUNITY|g" -e "s|@ROOT@|$WEROOT|g" -e "s|@NEWTONSOFT@|$WJSON|g" -e "s|@OUT@|$WTMP/project/Assets/Editor/HafStaleProbeTests.dll|g" "$ROOT/tools/editor_compile_check.rsp.in" > "$TMPD/compile.rsp"
 for f in "$EROOT"/editor/*.cs; do printf '"%s/editor/%s"\n' "$WEROOT" "${f##*/}" >> "$TMPD/compile.rsp"; done
 printf '"%s/tools/vehiclelab-stale-probe-drill/UnityVehicleLabStaleProbeTests.cs"\n' "$WROOT" >> "$TMPD/compile.rsp"
 dotnet "$UNITY/DotNetSdkRoslyn/csc.dll" "@$WTMP/compile.rsp" > "$TMPD/compile.log" 2>&1
 rc=$?; [ "$rc" -eq 0 ] || { cat "$TMPD/compile.log"; echo 'FAIL — stale-probe harness did not compile'; exit 1; }
-"$EDITOR" -batchmode -nographics -projectPath "$WTMP/project" -executeMethod UnityVehicleLabStaleProbeTests.Run -hafStaleModel "$WTMP/model.glb" -hafStaleOutput "$WTMP/result.txt" -logFile "$WTMP/unity.log"
+"$EDITOR" -batchmode -nographics -projectPath "$WTMP/project" -executeMethod UnityVehicleLabStaleProbeTests.Run -hafStaleModel "$WTMP/model.glb" -hafStaleSkinned "$WTMP/fixtures/models/fx_b_skinned.glb" -hafStaleOutput "$WTMP/result.txt" -logFile "$WTMP/unity.log"
 rc=$?
 [ -f "$TMPD/result.txt" ] || { tail -30 "$TMPD/unity.log"; echo 'FAIL — stale-probe harness did not run'; exit 1; }
 cat "$TMPD/result.txt"

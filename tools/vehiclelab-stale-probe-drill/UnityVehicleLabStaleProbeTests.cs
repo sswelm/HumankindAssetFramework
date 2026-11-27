@@ -22,10 +22,14 @@ public static class UnityVehicleLabStaleProbeTests
     static object Call(VehicleLabWindow w, string name, params object[] args) => typeof(VehicleLabWindow).GetMethod(name, Private).Invoke(w, args);
 
     // the glTF with every node and mesh called `from` renamed to `to` (both: the probe may name a part after either)
-    static byte[] Renamed(byte[] glb, params (string from, string to)[] renames)
+    static byte[] Renamed(byte[] glb, params (string from, string to)[] renames) => Edited(glb, false, renames);
+
+    // stillSkin: drop the clips, so a skinned fixture is probed in-process (an animated skin goes to Blender's evaluated pose)
+    static byte[] Edited(byte[] glb, bool stillSkin, params (string from, string to)[] renames)
     {
         int jsonLen = BitConverter.ToInt32(glb, 12);
         var json = JObject.Parse(Encoding.UTF8.GetString(glb, 20, jsonLen));
+        if (stillSkin) json.Remove("animations");
         foreach (string list in new[] { "nodes", "meshes" })
             foreach (var o in (json[list] as JArray ?? new JArray()).OfType<JObject>())
                 foreach (var (from, to) in renames)
@@ -34,6 +38,24 @@ public static class UnityVehicleLabStaleProbeTests
         int pad = (4 - j.Length % 4) % 4;
         byte[] rest = new byte[glb.Length - 20 - jsonLen];
         Array.Copy(glb, 20 + jsonLen, rest, 0, rest.Length);
+        // stillSkin also gives each BLENDED vertex wholly to its last weighted joint (the arm): the generator's skin blends half
+        // its vertices 50/50, and the probe calls a source rigged only when 90 % of the vertices have one joint above 0.5
+        // (VehicleProbe, RigBones). A vertex already above 0.5 keeps its joint, so both bones carry weights.
+        if (stillSkin)
+            foreach (var prim in json["meshes"].SelectMany(m => m["primitives"]))
+            {
+                var wa = prim["attributes"]?["WEIGHTS_0"]; if (wa == null) continue;
+                var acc = json["accessors"][(int)wa]; var view = json["bufferViews"][(int)acc["bufferView"]];
+                if ((int)acc["componentType"] != 5126) continue;   // float weights only
+                int at = 8 + ((int?)view["byteOffset"] ?? 0) + ((int?)acc["byteOffset"] ?? 0);   // 8: past the BIN chunk header
+                for (int v = 0; v < (int)acc["count"]; v++)
+                {
+                    var wv = Enumerable.Range(0, 4).Select(k => BitConverter.ToSingle(rest, at + v * 16 + k * 4)).ToArray();
+                    if (wv.Max() > 0.5f) continue;
+                    int last = Array.FindLastIndex(wv, x => x > 0f); if (last < 0) last = 0;
+                    for (int k = 0; k < 4; k++) Array.Copy(BitConverter.GetBytes(k == last ? 1f : 0f), 0, rest, at + v * 16 + k * 4, 4);
+                }
+            }
         using (var ms = new MemoryStream())
         using (var bw = new BinaryWriter(ms))
         {
@@ -159,6 +181,45 @@ public static class UnityVehicleLabStaleProbeTests
             Check("guessed role: Generate stops", !Generate() && Status().StartsWith("Generate stopped", StringComparison.Ordinal), Status());
             Check("guessed role: the status names the new part and the role it would take", Regex.IsMatch(Status(), Regex.Escape(guessedNew) + @" \((Rigging|Rotor)\)"), Status());
             Untouched("guessed role", names6, stamp6, (after, "Wheel"), (guessed, "Default"));
+
+            // 8. review round 2, reproduced: the migration's second probe read a file rewritten between the two reads and put its
+            // rows in unjudged (a guessed Rigging row generated, its newer stamp hid the change). The first read's rows must stay.
+            Session(Renamed(model, (after, before)), (before, "Wheel"));
+            WriteSource(model);   // the Skarv rewrite: the Wheel migrates, so Probe runs its second read
+            string propeller = "Fused_Xp_propeller_9"; bool rewrote = false;
+            Application.LogCallback hook = (msg, st, ty) => { if (!rewrote && msg.Contains("markings carried over by group")) { rewrote = true; WriteSource(Renamed(model, (guessed, propeller))); } };
+            Application.logMessageReceived += hook;
+            bool gen8; try { gen8 = Generate(); } finally { Application.logMessageReceived -= hook; }
+            Check("rewrite between the two reads: the hook fired (the fixture migrates)", rewrote);
+            Check("rewrite between the two reads: Generate stops, saying the source changed again", !gen8 && Status().Contains("changed again"), Status());
+            Check("rewrite between the two reads: the guessed row is not in the session", PartNamed(propeller) == null && RoleOf(guessed) == "Default", string.Join(", ", Names()));
+            Check("rewrite between the two reads: the Wheel carried from the first read", RoleOf(after) == "Wheel", RoleOf(after));
+            Check("rewrite between the two reads: the next press judges the new file and stops on the guess", !Generate() && Status().Contains(propeller + " (Rigging)"), Status());
+
+            // 9. review round 2, the fast path: a rigged source (the generator's skinned fixture) with a bone named so the probe
+            // guesses Turret, which the user cleared to Default. A merely touched file must not stop every Generate.
+            byte[] skinned = Edited(File.ReadAllBytes(Arg("-hafStaleSkinned")), true, ("Arm", "Turret_Arm"));
+            Session(skinned);
+            object[] Bones() => ((IEnumerable)Field("boneParts").GetValue(w)).Cast<object>().ToArray();
+            object BoneNamed(string n) => Bones().FirstOrDefault(b => (string)b.GetType().GetField("name").GetValue(b) == n);
+            string BoneRole(string n) { var b = BoneNamed(n); return b == null ? "(no such bone)" : b.GetType().GetField("role").GetValue(b).ToString(); }
+            void MarkBone(string n, string role) { var b = BoneNamed(n); var f = b.GetType().GetField("role"); f.SetValue(b, Enum.Parse(f.FieldType, role)); }
+            Check("rigged: the probe lists the bones and turns the fast path on", BoneNamed("Root") != null && (bool)Field("useSourceRig").GetValue(w), string.Join(", ", Bones().Select(b => b.GetType().GetField("name").GetValue(b))));
+            Check("rigged: the probe guesses Turret_Arm as Turret", BoneRole("Turret_Arm") == "Turret", BoneRole("Turret_Arm"));
+            MarkBone("Turret_Arm", "Default"); MarkBone("Root", "Wheel");
+            bool gen9a = Generate();
+            Check("rigged, unchanged: Generate runs", gen9a, Status());
+            File.SetLastWriteTimeUtc(src, clock = clock.AddSeconds(10));
+            Check("rigged, touched: Generate re-probes and runs (was: a stop on every Generate)", Generate() && Status().Contains("Re-probed first"), Status());
+            Check("rigged, touched: the cleared bone stays Default", BoneRole("Turret_Arm") == "Default", BoneRole("Turret_Arm"));
+            Check("rigged, touched: the Wheel bone stays Wheel", BoneRole("Root") == "Wheel", BoneRole("Root"));
+            // review round 2: a mesh marking on the fast path is the session's too - its loss stops Generate as well
+            var mesh9 = Names().First();
+            Mark(mesh9, "Detail");
+            var names9 = Names(); string stamp9 = Stamp();
+            WriteSource(Renamed(skinned, (mesh9, "Zz_Renamed_Mesh")));
+            Check("rigged: a lost MESH marking stops the fast-path Generate", !Generate() && Status().Contains(mesh9 + " (Detail)"), Status());
+            Untouched("rigged, lost mesh marking", names9, stamp9, (mesh9, "Detail"));
 
             // 7. a recipe-loaded session is not a probe: its parts run as saved, a touched source is not re-probed
             Session(model, (after, "Wheel"));
