@@ -506,6 +506,16 @@ namespace HumankindAssetFramework.Tests
         }
 
         [Fact]
+        public void A_split_child_the_session_already_listed_keeps_its_own_role_so_the_parent_marking_is_not_carried()
+        {
+            // PR review 2026-11-27: {A=Wheel, A_Part_001=Default}, the file now only A_Part_001 - Probe keeps its Default
+            var roles = new Dictionary<string, string> { ["A"] = "Wheel" };
+            var now = new[] { "A_Part_001" };
+            Assert.Equal(new[] { "A (Wheel)" }, VehicleLabRules.MarksNotCarried(roles, null, now, null, new[] { "A", "A_Part_001" }));
+            Assert.Empty(VehicleLabRules.MarksNotCarried(roles, null, now, null, new[] { "A" }));   // a child new to the session inherits
+        }
+
+        [Fact]
         public void The_stamp_is_one_tab_separated_line_per_file_and_a_missing_file_says_so()
         {
             Assert.Equal("Raw model\tD:/m/a.glb\t5\t7\nSecond model\tD:/m/s.glb\tmissing",

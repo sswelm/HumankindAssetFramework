@@ -1024,14 +1024,16 @@ public static class VehicleLabRules
     /// <summary>The markings a re-Probe could not land, as "name (Wheel)" / "name (placement)" / "name (Wheel + placement)",
     /// sorted. A kept role lands when its name is still a part, when it moved to a renamed fused group
     /// (<paramref name="migratedFrom"/>), or when a split child inherits it (<see cref="ProbeSessionRole"/>: a part whose
-    /// <see cref="ParentNames"/> include it). A kept placement lands by exact name or by migration only: placements are
-    /// not inherited.</summary>
+    /// <see cref="ParentNames"/> include it and that is new to the session: a row the session already listed keeps its own
+    /// role, Default included, as <see cref="ProbeSessionRole"/> rules). A kept placement lands by exact name or by migration
+    /// only: placements are not inherited.</summary>
     public static List<string> MarksNotCarried(IEnumerable<KeyValuePair<string, string>> keptRoles, IEnumerable<string> keptPlacements,
-                                               IEnumerable<string> newNames, IEnumerable<string> migratedFrom)
+                                               IEnumerable<string> newNames, IEnumerable<string> migratedFrom, IEnumerable<string> sessionNames = null)
     {
         var now = new HashSet<string>(newNames ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
         var moved = new HashSet<string>(migratedFrom ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
-        var parents = new HashSet<string>(now.SelectMany(ParentNames), StringComparer.Ordinal);
+        var listed = new HashSet<string>(sessionNames ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
+        var parents = new HashSet<string>(now.Where(n => !listed.Contains(n)).SelectMany(ParentNames), StringComparer.Ordinal);
         var lost = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
         void Lose(string name, string what) { if (!lost.TryGetValue(name, out var l)) lost[name] = l = new List<string>(); if (!l.Contains(what)) l.Add(what); }
         foreach (var kv in keptRoles ?? Enumerable.Empty<KeyValuePair<string, string>>())

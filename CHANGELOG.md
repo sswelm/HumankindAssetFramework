@@ -16,11 +16,17 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
   'Fused_P_Material2_11' not found`. A manual re-Probe carried the Wheel over at once.
   - Probe now records the files it read: path, write time and size, taken before the read.
   - When Generate finds either file different, it re-probes first, with the existing carry-overs (by name, by renamed
-    fused group, by split child), then generates.
-  - A marking with nowhere to land stops Generate before it writes. The status names each such marking with its role.
+    fused group, by split child). It generates only when the new parts need no review.
+  - Anything else stops Generate before it writes and changes nothing in the session. That covers a marking with
+    nowhere to land, a new part that would take a role nobody set (a name guess or a recovered role), and the fast path
+    switching. The status names each one.
+  - The PR's own review found that the first version replaced the session before it stopped. That dropped the named
+    markings, so a second press generated without them. The first version also let two marked members of one fused
+    group both "carry" onto one row, and generated name-guessed roles unseen. The group carry-over now gives a row
+    claimed by two markings neither role, in a manual Probe too.
   - A recipe-loaded session has no record and runs as before.
-  - Proven by `tools/vehiclelab_stale_probe_unity_drill.sh` on a copy of the Skarv: 12 of 12 checks pass. Against
-    master's editor, eight fail, the first with the user's error.
+  - Proven by `tools/vehiclelab_stale_probe_unity_drill.sh` on a copy of the Skarv: 46 of 46 checks pass. Against
+    master's editor, the rewrite scenario fails with the user's error. Against the PR's first commit, 29 fail.
 
 - **Vehicle Lab: the limited dissolve leaves faces wound against each other apart, as Blender does (2026-11-25).**
   Found by the Blender-parity run: the vehicle_rig drill failed on one recipe, `hms_roberts_1940_split_fused`, on one

@@ -3556,16 +3556,23 @@ the reset and the fixed +/-999 bounds. This checks the window's reset methods, n
 the real window in a temporary Unity project, without Blender, on a copy of a real fused model
 (`HAF_STALE_PROBE_MODEL`, default the Skarv; SKIP when it is missing). The model's glTF names play the "before" and
 "after" files of a re-fuse: `Fused_P_Material2_11` is probed and marked Wheel, then the source becomes the file in which
-it is `Fused_P_Material2_11_Part_001`. In the 12 checks:
+it is `Fused_P_Material2_11_Part_001`. In the 46 checks:
 - an unchanged source generates without a re-probe;
 - the rewritten source re-probes, generates and moves the Wheel;
-- a marking renamed out of every group stops Generate before it writes, names the marking, and the next press generates;
-- a recipe-loaded session is not re-probed when its source is touched;
-- a re-Probe of that session turns the check back on.
+- a marking renamed out of every group stops Generate. A stop must leave the session exactly as it was: nothing
+  written, the same parts list, the same probe record, every marking where it was. A second press stops again, and with
+  the file back both markings generate;
+- the Raw model pointed at another file stops, and pointed back it generates unprobed;
+- two marked members of one fused group fused into one row stop, naming both, and a manual Probe gives that row neither
+  role;
+- an unmarked part renamed to `…propeller…` stops, naming the role the probe would guess;
+- a recipe-loaded session is not re-probed when its source is touched, and a re-Probe turns the check back on.
 
-All 12 pass. With `HAF_EDITOR_ROOT` pointed at master's `editor/`, eight fail, and the first reproduces the user's
-`VEHICLE ERROR: part 'Fused_P_Material2_11' not found`. The record's rules are unit cases in
-`Tests/VehicleLabRulesTests.cs`. Not drilled: a domain reload between Probe and Generate (the record is a
+All 46 pass. With `HAF_EDITOR_ROOT` pointed at master's `editor/`, the first scenario that changes the source fails
+with the user's `VEHICLE ERROR: part 'Fused_P_Material2_11' not found`. Pointed at the PR's first commit (607a21b8),
+29 fail: its stop had already replaced the session, its second press generated without the dropped marking, and it
+generated the shared row and the guessed role. The review's three defects are the last three scenarios. The record's
+rules are unit cases in `Tests/VehicleLabRulesTests.cs`. Not drilled: a domain reload between Probe and Generate (the record is a
 `[SerializeField]` string), and a Blender-route probe (OBJ/.blend sources take the same code after the probe).
 
 **Definition lists after a database edit (2026-11-24):** `bash tools/definition_caches_unity_drill.sh` runs the real

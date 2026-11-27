@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -12,6 +13,8 @@ using UnityEngine;
 // Run in the temporary project made by vehiclelab_stale_probe_unity_drill.sh: the real Vehicle Lab window, a real fused
 // model, and the sequence that failed on 2026-11-26 - Probe, mark, the Fuser rewrites the source (renaming a fused
 // group), Generate. The model's fused meshes are renamed in its glTF JSON to play the "before" and "after" files.
+// Scenarios 5-7 are the PR review's (2026-11-27): a stop must leave the session as it was, two marked members fused into
+// one row are not both "carried", and a new row's guessed role is not generated unseen.
 public static class UnityVehicleLabStaleProbeTests
 {
     const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -47,7 +50,7 @@ public static class UnityVehicleLabStaleProbeTests
         void Check(string name, bool ok, string detail = "") { log.AppendLine((ok ? "PASS " : "FAIL ") + name + (ok || detail == "" ? "" : "\n     " + detail.Replace("\n", "\n     "))); if (!ok) failed++; }
         var args = Environment.GetCommandLineArgs();
         string Arg(string key) { int at = Array.IndexOf(args, key); return at >= 0 && at + 1 < args.Length ? args[at + 1] : ""; }
-        var w = ScriptableObject.CreateInstance<VehicleLabWindow>();
+        VehicleLabWindow w = null;
         try
         {
             byte[] model = File.ReadAllBytes(Arg("-hafStaleModel"));
@@ -57,62 +60,119 @@ public static class UnityVehicleLabStaleProbeTests
             var child = new Regex(@"^(Fused_.+)_Part_\d{3,}$");
             string after = meshes.Contains("Fused_P_Material2_11_Part_001") ? "Fused_P_Material2_11_Part_001" : meshes.First(n => child.IsMatch(n));
             string before = child.Match(after).Groups[1].Value;
-            string gone = meshes.First(n => n.StartsWith("Fused_", StringComparison.Ordinal) && n != after);   // renamed out of any group: a marking that cannot land
-            log.AppendLine($"model {Path.GetFileName(Arg("-hafStaleModel"))}: before '{before}' -> after '{after}'; lost '{gone}'");
+            var others = meshes.Where(n => n.StartsWith("Fused_", StringComparison.Ordinal) && n != after).ToList();
+            string gone = others[0];                       // renamed out of any group: a marking that cannot land
+            string pairA = others[1], pairB = others[2];   // two marked members of one group, fused into one row
+            string guessed = others[3];                    // an unmarked part whose new name the probe guesses a role from
+            log.AppendLine($"model {Path.GetFileName(Arg("-hafStaleModel"))}: before '{before}' -> after '{after}'; lost '{gone}'; pair '{pairA}' + '{pairB}'; guessed '{guessed}'");
 
             string proj = Directory.GetParent(Application.dataPath).FullName;
             string dir = Path.Combine(proj, "Logs", "stale"); Directory.CreateDirectory(dir);
             string src = Path.Combine(dir, "boat_fused.glb").Replace('\\', '/');
+            string elsewhere = Path.Combine(dir, "other_fused.glb").Replace('\\', '/');
             string outGlb = Path.Combine(dir, "boat_fused_Spin.glb").Replace('\\', '/');
             DateTime clock = DateTime.UtcNow.AddHours(-1);
-            void WriteSource(byte[] bytes) { File.WriteAllBytes(src, bytes); clock = clock.AddSeconds(10); File.SetLastWriteTimeUtc(src, clock); }   // a distinct write time per "fuse"
+            void WriteFile(string path, byte[] bytes) { File.WriteAllBytes(path, bytes); clock = clock.AddSeconds(10); File.SetLastWriteTimeUtc(path, clock); }   // a distinct write time per "fuse"
+            void WriteSource(byte[] bytes) => WriteFile(src, bytes);
 
-            Field("headless").SetValue(w, true); Field("headlessDir").SetValue(w, "Logs/stale");
-            Field("srcFile").SetValue(w, src); Field("outGlb").SetValue(w, outGlb); Field("generateRoute").SetValue(w, "csharp");
             string Status() => (string)Field("status").GetValue(w);
+            string Stamp() => (string)Field("probedSourceStamp").GetValue(w);
             object[] Parts() => ((IEnumerable)Field("parts").GetValue(w)).Cast<object>().ToArray();
+            string[] Names() => Parts().Select(p => (string)p.GetType().GetField("name").GetValue(p)).ToArray();
             object PartNamed(string n) => Parts().FirstOrDefault(p => (string)p.GetType().GetField("name").GetValue(p) == n);
             string RoleOf(string n) { var p = PartNamed(n); return p == null ? "(no such part)" : p.GetType().GetField("role").GetValue(p).ToString(); }
             void Mark(string n, string role) { var p = PartNamed(n); var f = p.GetType().GetField("role"); f.SetValue(p, Enum.Parse(f.FieldType, role)); }
             bool Generate() { if (File.Exists(outGlb)) File.Delete(outGlb); Call(w, "Vehicleize"); return Status().StartsWith("DONE", StringComparison.Ordinal) && File.Exists(outGlb); }
+            // a fresh window on `bytes`, probed, with these markings
+            void Session(byte[] bytes, params (string name, string role)[] marks)
+            {
+                if (w != null) { try { Call(w, "DestroyPreview"); } catch { } UnityEngine.Object.DestroyImmediate(w); }
+                foreach (var f in Directory.GetFiles(dir, "*.txt")) File.Delete(f);   // no role lists of an earlier scenario's Generate
+                w = ScriptableObject.CreateInstance<VehicleLabWindow>();
+                Field("headless").SetValue(w, true); Field("headlessDir").SetValue(w, "Logs/stale");
+                Field("srcFile").SetValue(w, src); Field("outGlb").SetValue(w, outGlb); Field("generateRoute").SetValue(w, "csharp");
+                WriteSource(bytes);
+                Call(w, "Probe");
+                foreach (var (n, r) in marks) Mark(n, r);
+            }
+            // the stop's contract: nothing written, the session exactly as it was
+            void Untouched(string what, string[] names, string stamp, params (string name, string role)[] roles)
+            {
+                Check(what + ": nothing written", !File.Exists(outGlb));
+                Check(what + ": the parts list is the probed one", Names().SequenceEqual(names), string.Join(", ", Names()));
+                Check(what + ": the probe record did not move (the next Generate checks again)", Stamp() == stamp);
+                foreach (var (n, r) in roles) Check(what + ": " + n + " is still " + r, RoleOf(n) == r, RoleOf(n));
+            }
 
             // 1. the file Probe read, unchanged: Generate as before, no re-probe
-            WriteSource(Renamed(model, (after, before)));
-            Call(w, "Probe");
+            Session(Renamed(model, (after, before)), (before, "Wheel"));
             Check("probe lists the pre-fuse name " + before, PartNamed(before) != null, Status());
-            Mark(before, "Wheel");
             Check("unchanged source: Generate runs without re-probing", Generate() && !Status().Contains("Re-probed"), Status());
 
             // 2. the Skarv: the Fuser rewrites the source and the group is now a split child
             WriteSource(model);
-            bool ok2 = Generate();
-            Check("rewritten source: Generate re-probes and succeeds (was: VEHICLE ERROR part '" + before + "' not found)", ok2 && Status().Contains("Re-probed first: the source changed since Probe: the Raw model was rewritten"), Status());
+            Check("rewritten source: Generate re-probes and succeeds (was: VEHICLE ERROR part '" + before + "' not found)", Generate() && Status().Contains("Re-probed first: the source changed since Probe: the Raw model was rewritten"), Status());
             Check("rewritten source: the Wheel landed on " + after, RoleOf(after) == "Wheel", RoleOf(after));
             Check("rewritten source: the old name is gone from the parts list", PartNamed(before) == null);
 
-            // 3. a marking with nowhere to land: Generate stops, names it, writes nothing; the next press generates
+            // 3. a marking with nowhere to land: Generate stops and names it; the session is untouched; a second press stops again
             Mark(gone, "Turret");
+            var names3 = Names(); string stamp3 = Stamp();
             WriteSource(Renamed(model, (gone, "Zz_Renamed_Part")));
-            bool ok3 = Generate();
-            Check("lost marking: Generate stops before writing", !ok3 && !File.Exists(outGlb) && Status().StartsWith("Generate stopped: the source changed since Probe", StringComparison.Ordinal), Status());
+            Check("lost marking: Generate stops", !Generate() && Status().StartsWith("Generate stopped: the source changed since Probe", StringComparison.Ordinal), Status());
             Check("lost marking: the status names it and its role", Status().Contains(gone + " (Turret)"), Status());
-            Check("lost marking: the Wheel still carried", RoleOf(after) == "Wheel", RoleOf(after));
-            Check("lost marking: the second press generates (the parts list now matches the file)", Generate() && !Status().Contains("Re-probed"), Status());
+            Untouched("lost marking", names3, stamp3, (gone, "Turret"), (after, "Wheel"));
+            Check("lost marking: a second press stops again (the review's 0-wheel DONE)", !Generate() && Status().StartsWith("Generate stopped", StringComparison.Ordinal), Status());
+            Untouched("lost marking, second press", names3, stamp3, (gone, "Turret"), (after, "Wheel"));
+            // the review's scenario A: the right file back - every marking is still there to generate with
+            WriteSource(model);
+            Check("file back: Generate re-probes and generates", Generate() && Status().Contains("Re-probed first"), Status());
+            Check("file back: the Turret survived the stop", RoleOf(gone) == "Turret", RoleOf(gone));
+            Check("file back: the Wheel survived the stop", RoleOf(after) == "Wheel", RoleOf(after));
 
-            // 4. a recipe-loaded session is not a probe: its parts run as saved, a touched source is not re-probed
+            // 4. re-pointed at another file and back (the review's wording): a stop, then the probed file generates unprobed
+            var names4 = Names(); string stamp4 = Stamp();
+            WriteFile(elsewhere, Renamed(model, (gone, "Zz_Renamed_Part")));
+            Field("srcFile").SetValue(w, elsewhere);
+            Check("re-pointed: Generate stops, naming the field", !Generate() && Status().Contains("the Raw model now names another file"), Status());
+            Untouched("re-pointed", names4, stamp4, (gone, "Turret"), (after, "Wheel"));
+            Field("srcFile").SetValue(w, src);
+            Check("pointed back: Generate runs on the probed file without re-probing", Generate() && !Status().Contains("Re-probed"), Status());
+
+            // 5. the review's scenario B: two marked members of one fused group are now ONE row - neither carries
+            string zqA1 = "Fused_Zq_A_Part_001", zqA2 = "Fused_Zq_A_Part_002";
+            Session(Renamed(model, (pairA, zqA1), (pairB, zqA2)), (after, "Wheel"), (zqA1, "Wheel"), (zqA2, "Turret"));
+            var names5 = Names(); string stamp5 = Stamp();
+            WriteSource(Renamed(model, (pairA, "Fused_Zq_B"), (pairB, "Other_Mesh_9")));
+            Check("two markings onto one row: Generate stops", !Generate() && Status().StartsWith("Generate stopped", StringComparison.Ordinal), Status());
+            Check("two markings onto one row: both are named", Status().Contains(zqA1 + " (Wheel)") && Status().Contains(zqA2 + " (Turret)"), Status());
+            Untouched("two markings onto one row", names5, stamp5, (zqA1, "Wheel"), (zqA2, "Turret"));
+            // a manual Probe takes the file as the user's decision: neither marking lands on the shared row
+            Call(w, "Probe");
+            Check("two markings onto one row: a manual Probe does not give the row either role", RoleOf("Fused_Zq_B") == "Default", RoleOf("Fused_Zq_B"));
+
+            // 6. the review's scenario C: an unmarked part renamed so the probe guesses a role ("propeller" contains "rope")
+            Session(model, (after, "Wheel"));
+            var names6 = Names(); string stamp6 = Stamp();
+            string guessedNew = "Fused_Xp_propeller_9";
+            WriteSource(Renamed(model, (guessed, guessedNew)));
+            Check("guessed role: Generate stops", !Generate() && Status().StartsWith("Generate stopped", StringComparison.Ordinal), Status());
+            Check("guessed role: the status names the new part and the role it would take", Regex.IsMatch(Status(), Regex.Escape(guessedNew) + @" \((Rigging|Rotor)\)"), Status());
+            Untouched("guessed role", names6, stamp6, (after, "Wheel"), (guessed, "Default"));
+
+            // 7. a recipe-loaded session is not a probe: its parts run as saved, a touched source is not re-probed
+            Session(model, (after, "Wheel"));
             string recipe = Path.Combine(dir, "boat.json");
             File.WriteAllText(recipe, JsonUtility.ToJson(Call(w, "BuildRecipe")));
             Call(w, "LoadRecipeFromPath", recipe);
-            Check("recipe load clears the probe record", (string)Field("probedSourceStamp").GetValue(w) == "");
+            Check("recipe load clears the probe record", Stamp() == "");
             File.SetLastWriteTimeUtc(src, clock.AddSeconds(30));
             Check("recipe session: a touched source generates as saved, no re-probe", Generate() && !Status().Contains("Re-probed"), Status());
-
-            // 5. a re-Probe of the recipe session arms the check again
             Call(w, "Probe");
-            Check("re-Probe records the source again", ((string)Field("probedSourceStamp").GetValue(w)).StartsWith("Raw model\t", StringComparison.Ordinal));
+            Check("re-Probe records the source again", Stamp().StartsWith("Raw model\t", StringComparison.Ordinal));
         }
         catch (Exception ex) { failed++; log.AppendLine("FAIL " + (ex is TargetInvocationException t && t.InnerException != null ? t.InnerException : ex)); }
-        finally { try { Call(w, "DestroyPreview"); } catch { } UnityEngine.Object.DestroyImmediate(w); }
+        finally { if (w != null) { try { Call(w, "DestroyPreview"); } catch { } UnityEngine.Object.DestroyImmediate(w); } }
         log.AppendLine("TOTAL failed " + failed);
         string output = Arg("-hafStaleOutput");
         if (output != "") File.WriteAllText(output, log.ToString());

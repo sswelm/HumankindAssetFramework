@@ -157,12 +157,26 @@ fuse report (only the Raw model's is read), and source bones on the source-skele
 
 **The source changed after Probe.** Probe records the Raw model (and the Second model, when one is set) it read: its
 path, write time and size. When you press **Generate** and either file differs (re-fused, re-saved or re-pointed),
-the Lab re-probes first, with the carry-overs above, then generates. The DONE status ends with
-"Re-probed first: …". When a marking has nowhere to land (its part is gone, it was not renamed within its fused group,
-and no split child inherits it), Generate stops before writing anything. The status names each such marking with its
-role (or "placement"). Check the parts list, re-mark what needs it, and press Generate again: the parts list now
-matches the file, so that press generates. A session whose parts came from **Load recipe** has no probe record, and
-Generate runs those parts as saved, as before. Probe once to turn the check on.
+the Lab re-probes first, with the carry-overs above. It generates only when the new parts need no review:
+- every marking of the list Generate uses lands (by name, by a renamed fused group, or on a split child new to the
+  session);
+- no new part takes a role nobody set (a name guess, such as Rigging for "propeller", which contains "rope", or a
+  role recovered from the last Generate or the fuse report);
+- the source-skeleton fast path does not switch on or off.
+
+The DONE status then ends with "Re-probed first: …".
+
+Otherwise Generate stops before writing anything and **changes nothing**: the parts list, its markings, the preview
+and the probe record stay as they were. The status names each marking that would not carry over (with its role, or
+"placement") and each new part with the role it would take. Two marked members of one fused group that are now a
+single part count as not carried: neither role is given to that part.
+
+From the stop, either point the field back at the file you probed (Generate then runs as before), or press
+**Probe parts** to take the new file's parts. Probe parts drops the named markings, so check those rows before you
+generate. Pressing Generate again without either changes nothing and stops again.
+
+A session whose parts came from **Load recipe** has no probe record, and Generate runs those parts as saved, as
+before. Probe once to turn the check on.
 
 ## 4. Tune and generate
 
