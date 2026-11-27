@@ -155,6 +155,37 @@ A part the session already listed keeps the role it has, Default included, and *
 So after a probe that came back undecided, **Reload** the recipe before probing again. Not covered: a second model's
 fuse report (only the Raw model's is read), and source bones on the source-skeleton fast path.
 
+**The source changed after Probe.** Probe records the Raw model (and the Second model, when one is set) it read: its
+path, write time and size. When you press **Generate** and either file differs (re-fused, re-saved or re-pointed),
+the Lab re-probes first, with the carry-overs above. It generates only when the new parts need no review:
+- every marking lands, on the mesh parts and on the source bones alike, whichever path generates. A role lands by
+  name, through a renamed fused group, or on a split child new to the session. A placement lands by name or through a
+  renamed fused group only, because split children do not inherit placements;
+- no new part or bone takes a role nobody set (a name guess, such as Rigging for "propeller", which contains "rope", or
+  a role recovered from the last Generate or the fuse report). A bone already in the session keeps its role, Default
+  included, so a bone you cleared from its guess stays cleared;
+- the source-skeleton fast path does not switch on or off.
+
+The DONE status then ends with "Re-probed first: …".
+
+Otherwise Generate stops before writing anything and **changes nothing**: the parts list, its markings, the turntable
+and the probe record stay as they were. The status names each marking that would not carry over (with its role, or
+"placement") and each new part with the role it would take. Two marked members of one fused group that are now a
+single part count as not carried: neither role is given to that part. A manual Probe says so in its status too.
+On a Blender-probed source (OBJ, .blend), the Lab publishes the preview FBX only after accepting the probe.
+A nested split child carries the nearest marked ancestor's role. Generate stops if another marked ancestor
+has no part left to carry its role.
+
+If the file changes again while the Lab re-probes it, Generate keeps the last accepted rows and preview and reports
+that the source changed again. Press Generate again to check the newest file.
+
+From the stop, either point the field back at the file you probed (Generate then runs as before), or press
+**Probe parts** to take the new file's parts. Probe parts drops the named markings, so check those rows before you
+generate. Pressing Generate again without either changes nothing and stops again.
+
+A session whose parts came from **Load recipe** has no probe record, and Generate runs those parts as saved, as
+before. Probe once to turn the check on.
+
 ## 4. Tune and generate
 
 For ordinary wheels, leave **Axle axis = Auto**, **Spin frames = 15**, and start with one full turn. If the wheels roll

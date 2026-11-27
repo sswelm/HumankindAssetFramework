@@ -10,6 +10,34 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
 
 ## Infrastructure
 
+- **Vehicle Lab: Generate re-probes a source that changed since Probe (2026-11-27).** On the Skarv, the Model
+  Fuser re-fused the Raw model after a Probe, and the fused group `Fused_P_Material2_11` (marked Wheel) became
+  `Fused_P_Material2_11_Part_001`. Generate still used the probed names and stopped with `VEHICLE ERROR: part
+  'Fused_P_Material2_11' not found`. A manual re-Probe carried the Wheel over at once.
+  - Probe now records the files it read: path, write time and size, taken before the read.
+  - When Generate finds either file different, it re-probes first, with the existing carry-overs (by name, by renamed
+    fused group, by split child). It generates only when the new parts need no review.
+  - Anything else stops Generate before it writes and changes nothing in the session. That covers a marking with
+    nowhere to land, a new part that would take a role nobody set (a name guess or a recovered role), and the fast path
+    switching. The status names each one.
+  - The PR's own review found that the first version replaced the session before it stopped. That dropped the named
+    markings, so a second press generated without them. The first version also let two marked members of one fused
+    group both "carry" onto one row, and generated name-guessed roles unseen. The group carry-over now gives a row
+    claimed by two markings neither role, in a manual Probe too.
+  - The second review round found three more defects:
+    - A write between Probe's two reads (the second redraws the migrated placements) went in unjudged. The second read
+      may now only redraw the same file.
+    - A bone the user had cleared from its name guess was guessed again on every probe, so a merely touched rigged
+      source stopped every Generate. Bones now keep an explicit Default, as mesh rows do.
+    - On the fast path, lost mesh markings were swapped away unnamed. Both lists are now judged on either path.
+  - The carry-over check tracks which old marking each new row actually received. A nested split child carries
+    the closest marked ancestor's role, and Generate stops if a farther mark would disappear.
+  - Each probe checks the source again before publishing its rows and preview. The Blender route stages the FBX
+    beside the final preview and publishes it only after the probe is accepted.
+  - A recipe-loaded session has no record and runs as before.
+  - `tools/vehiclelab_stale_probe_unity_drill.sh` covers the Skarv, the rig generator's skinned fixture, and
+    preservation of the imported preview when an OBJ probe is refused.
+
 - **Vehicle Lab: the limited dissolve leaves faces wound against each other apart, as Blender does (2026-11-25).**
   Found by the Blender-parity run: the vehicle_rig drill failed on one recipe, `hms_roberts_1940_split_fused`, on one
   part of its RAILING tier.
