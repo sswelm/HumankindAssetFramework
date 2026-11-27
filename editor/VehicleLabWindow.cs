@@ -235,8 +235,12 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] bool doubleSided = false;  // DOUBLE-SIDED at the source (2026-09-03): the game culls backfaces, so single-sided / CAD parts (thin spokes, plates) render see-through. On = vehicle_rig.py appends reversed, slightly-inset faces so the exported Spin GLB is genuinely two-sided — no runtime doubling, no preview mismatch.
     // THE ROLE MENUS IN ALPHABETICAL ORDER (2026-11-27, user: "could you also sort these groups alfabeticly?"): display order
     // only, with the names EnumPopup showed ("Tail Rotor", "Two Sided"); a part's role is still saved as the enum's integer.
-    static readonly Role[] RolesSorted = ((Role[])Enum.GetValues(typeof(Role))).OrderBy(r => ObjectNames.NicifyVariableName(r.ToString()), StringComparer.OrdinalIgnoreCase).ToArray();
-    static readonly GUIContent[] RoleLabelsSorted = RolesSorted.Select(r => new GUIContent(ObjectNames.NicifyVariableName(r.ToString()))).ToArray();
+    // Built on first use, never in a field initializer: Unity runs a window's static initializers while it constructs the
+    // ScriptableObject, and ObjectNames.NicifyVariableName refuses that ("not allowed to be called from a ScriptableObject
+    // constructor") - the Lab came up blank (2026-11-27).
+    static Role[] rolesSorted; static GUIContent[] roleLabelsSorted;
+    static Role[] RolesSorted => rolesSorted ?? (rolesSorted = ((Role[])Enum.GetValues(typeof(Role))).OrderBy(r => ObjectNames.NicifyVariableName(r.ToString()), StringComparer.OrdinalIgnoreCase).ToArray());
+    static GUIContent[] RoleLabelsSorted => roleLabelsSorted ?? (roleLabelsSorted = RolesSorted.Select(r => new GUIContent(ObjectNames.NicifyVariableName(r.ToString()))).ToArray());
     static Role RolePopup(Role current, params GUILayoutOption[] options)
     {
         int picked = EditorGUILayout.Popup(Array.IndexOf(RolesSorted, current), RoleLabelsSorted, options);
