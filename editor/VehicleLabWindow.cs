@@ -2666,6 +2666,10 @@ public class VehicleLabWindow : EditorWindow
             bool turned1 = modelRot != Vector3.zero, turned2 = turned1 || model2Rot != Vector3.zero;
             if ((hiders?.Count > 0 && turned1) || (hiders2?.Count > 0 && turned2))
                 problems.Add("The model is turned now (Orientation" + (hiders2?.Count > 0 ? " or the second model's Rotation" : "") + "), so the game looks at it from directions the fuse did not ask from.");
+            if (hiders2?.Count > 0 && GlbDisconnectedParts.UnseenScaleChangesViews(model2Scale.x, model2Scale.y, model2Scale.z))
+                problems.Add("The second model is scaled differently by axis, which changes the directions the cameras see in its model space.");
+            if (FastPath && ((hiders?.Count > 0) || (hiders2?.Count > 0)))
+                problems.Add("The source-skeleton fast path is enabled and can move parts the fuse treated as stationary.");
             if (problems.Count > 0)
             {
                 Debug.LogWarning("[VehicleLab] this model was fused with \"Leave out faces no camera can see\": " + string.Join(" ", problems) + " What was hidden may show as a hole: save the recipe, then fuse again in the Model Fuser (it reads the Lab's saved roles).");

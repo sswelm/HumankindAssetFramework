@@ -731,7 +731,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 "The fuse warns you when a group would need it."), checkMirrored);
             // UNSEEN FACES (2026-11-27, Saleg's Revenge: "most of the guns bodies are still inside that are not visible")
             leaveOutUnseen = EditorGUILayout.ToggleLeft(new GUIContent("Leave out faces no camera can see",
-                "After the fuse, every face that no camera of the game can see from EITHER side is left out: what lies inside the ship - " +
+                "After the fuse, the pass leaves out faces hidden on both sides in the sampled camera views, such as " +
                 "gun bodies under the deck, the inner skin of the hull, the undersides below the hull. The cameras are the game's: its camera " +
                 "tilts from 28 degrees below the horizon (fully zoomed in) to 80, so the pass looks from straight above and at 65, 40 and 28 degrees " +
                 "(larger faces from more directions). A face whose back shows stays, so the Lab's inside-out fix, Flip, TwoSided and " +
@@ -1821,17 +1821,17 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 }
             }
             if (done == 0) { status = "Nothing changed — no group produced a fused mesh and nothing was deleted (see warnings in the console)."; return; }
-            File.WriteAllBytes(outGlb, bytes);
             // the parts that hid faces, beside the output: the Vehicle Lab asks before it generates when one of them is no
             // longer a still, drawn part (it is ignored, moves or is placed now, and what it hid may show as a hole)
-            try
+            if (unseen != null && unseen.Changed)
+                GlbDisconnectedParts.WriteUnseenOutput(outGlb, unseen);
+            else
             {
+                File.WriteAllBytes(outGlb, bytes);
                 string unseenSidecar = GlbDisconnectedParts.UnseenSidecarPath(outGlb);
-                if (unseen != null && unseen.Changed)
-                    File.WriteAllLines(unseenSidecar, new[] { GlbDisconnectedParts.UnseenSidecarHeader + "|" + bytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) }.Concat(unseen.Hiders.Select(n => "hid|" + n)));
-                else if (File.Exists(unseenSidecar)) File.Delete(unseenSidecar);   // this output left nothing out: an old list would ask about nothing
+                try { if (File.Exists(unseenSidecar)) File.Delete(unseenSidecar); }
+                catch (Exception e) { Debug.LogWarning("[Workshop] could not remove the old unseen-faces list: " + e.Message); }
             }
-            catch (Exception e) { Debug.LogWarning("[Workshop] could not write the unseen-faces list beside the output: " + e.Message); }
             // the groupings and the marks, next to the source: a later Probe of this file restores them. An empty write
             // CLEARS the file (Save groups' documented "clear"), so a delete-only run — no letters at all — must not
             // touch it: it would silently drop the groups saved earlier (self-review of PR #63).
@@ -1903,6 +1903,13 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 bool Turned(Newtonsoft.Json.Linq.JToken r) => r is Newtonsoft.Json.Linq.JObject o && new[] { "x", "y", "z" }.Any(k => Math.Abs((float?)o[k] ?? 0f) > 0.01f);
                 if (Turned(recipe["modelRot"]) || (second && Turned(recipe["model2Rot"])))
                 { refusal = $"the Vehicle Lab recipe {recipeName} turns this model (Orientation{(second ? " or the second model's Rotation" : "")}): the game's cameras would look at it from other directions"; return found; }
+                if (second && recipe["model2ScaleXYZ"] is Newtonsoft.Json.Linq.JObject xyz)
+                {
+                    var scale = VehicleLabRules.Model2ScaleOnLoad((float?)recipe["model2Scale"] ?? 1f,
+                        (float?)xyz["x"] ?? 1f, (float?)xyz["y"] ?? 1f, (float?)xyz["z"] ?? 1f);
+                    if (GlbDisconnectedParts.UnseenScaleChangesViews(scale[0], scale[1], scale[2]))
+                    { refusal = $"the Vehicle Lab recipe {recipeName} scales this second model differently by axis, changing the camera angles"; return found; }
+                }
                 bool Off(Newtonsoft.Json.Linq.JToken v, float neutral) => v is Newtonsoft.Json.Linq.JObject o && new[] { "x", "y", "z" }.Any(k => Math.Abs(((float?)o[k] ?? neutral) - neutral) > 1e-5f);
                 // a name as this file has it: the first model's as the Lab lists it, the second model's without its "B_"
                 IEnumerable<string> Own(string labName)

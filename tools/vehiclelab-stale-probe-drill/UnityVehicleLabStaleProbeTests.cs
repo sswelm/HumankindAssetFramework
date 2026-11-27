@@ -197,7 +197,7 @@ public static class UnityVehicleLabStaleProbeTests
             Check("rewrite before the swap: the guessed row is not in the session", PartNamed(propeller) == null && RoleOf(guessed) == "Default", string.Join(", ", Names()));
             Check("rewrite before the swap: the original part and Wheel marking are intact", PartNamed(after) == null && RoleOf(before) == "Wheel", RoleOf(before));
             Check("rewrite before the swap: the probe record is intact", Stamp() == stamp8);
-            Check("rewrite before the swap: the next press judges the new file and stops on the guess", !Generate() && Status().Contains(propeller + " (Rigging)"), Status());
+            Check("rewrite before the swap: the next press judges the new file and stops on the rotor guess", !Generate() && Status().Contains(propeller + " (Rotor)"), Status());
 
             // The second read still redraws a migrated placement. A rewrite during that read may not publish it.
             var offset = new Vector3(0.25f, 0, 0);
