@@ -270,17 +270,15 @@ push_step run "plugin build (dotnet build -c Release)" dotnet build "$ROOT/Human
 for culture_var in $(compgen -e | grep -ix 'HAF_TEST_CULTURE'); do unset "$culture_var"; done
 push_step run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/HumankindAssetFramework.Tests.csproj" -c Release --nologo -v q
 
-# The gate's regression suite tests short subprocess deadlines. Run it before starting the Unity and native drills:
-# on Windows, their process startup load made a control that printed its result time out at two seconds.
+# These suites time subprocesses. Run them before starting the Unity and native drills, whose load on Windows
+# caused the regression suite's two-second controls and the temp sweep's 120-second sweep to time out.
 push_step run "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
+push_step run "temp sweep tests (our patterns go when old, decoys and young ones stay, the gate removes its own directory)" python "$ROOT/Tests/test_temp_sweep.py"
 # The suite's culture override seen from outside (it runs the assembly the unit-test step just built): a listed name runs
 # the suite under it, a made-up one fails the run and says why. No test inside the assembly can hold what its own
 # module initializer does with a refusal.
 push_step run_lane "test culture override tests (a listed name is honoured, a made-up one fails the run and says why)" python "$ROOT/Tests/test_culture_override.py"
 push_step run_lane "deploy timing wrapper tests (runtime failures, oracles and isolated artifacts)" python "$ROOT/Tests/test_deploy_time.py"
-# push-only like the gate regression tests above it (2026-11-10): it times bash-heavy sweeps with a 120 s limit and took
-# 113-206 s under the thirteen parity drills - two parity runs withheld a valid stamp over it; the push runs it alone in 27-46 s
-push_step run_lane "temp sweep tests (our patterns go when old, decoys and young ones stay, the gate removes its own directory)" python "$ROOT/Tests/test_temp_sweep.py"
 push_step run_lane "FBX model coverage tests (lost inputs and skipped fixtures cannot pass)" python "$ROOT/Tests/test_fbx_model_verdict.py"
 # THE PARITY STAMP'S DIGEST IS TAKEN HERE, before any parity drill starts: the verdict's write refuses a different one,
 # so a covered file edited during the run - which the drills did not test - gets no stamp (the review of PR #228).
