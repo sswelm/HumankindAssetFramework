@@ -576,7 +576,9 @@ windows. **Deep dive:**
   one place a removed face can show. **Lowest camera (°)** in the fuse options raises that 28 (15 to 85): on the Saleg's
   Revenge 45 leaves out 63 % instead of 57 % and looks the same from 47 degrees up, at the price of about twice the
   changed pixels at 28 to 40 degrees and five times as many, many of them sky, at the top of a fully zoomed-in screen. A face stops a camera's view only
-  where it shows its front, as under back-face culling; glass and cut-outs hide nothing and are kept. A face whose
+  where it shows its front, as under back-face culling. Glass, cut-outs, and primitives with a transmissive or
+  transparent material variant are kept and hide nothing. Across multiple scenes, occluders must appear in every
+  populated scene. A face whose
   back shows stays, so the Lab's inside-out fix, Flip, TwoSided and double-sided output turn a removed face into a
   hole no more often than the front rule misses one (rendered with both sides drawn, the first cut showed no sky). Rays from a few points along a few directions miss what a camera sees through a slit or past a lip, so
   two rings of faces around everything that shows stay as well (the rim). The Fuser reads the Vehicle Lab's saved records of the output — every
@@ -588,14 +590,16 @@ windows. **Deep dive:**
   name (a "Propeller" is a rotor). It does not run, and says why in the status and the fuse report,
   when such a recipe cannot be read (one that mentions a file of the output's name and does not parse: mend or move
   it), rigs the model on its own skeleton (the fast path, with bone rows), or turns the model
-  (Orientation, or the second model's Rotation): a part the Lab ignores hides nothing; a part that moves or changes
+  (Orientation or the second model's Rotation), or scales its second model differently by axis. A part the Lab
+  ignores hides nothing. A part that moves or changes
   facing (wheels, turrets, guns, rotors, trails, muzzles, cradles, oars, sails, flags, rudders, chains, caterpillars,
-  Flip, TwoSided, Edgecase), a placed part, a skinned or morphing mesh hides nothing and loses nothing — except a gun
-  nothing moves: a Gun, Muzzle or Cradle part stands still when the recipe has no Turret part, no deploy raise and no
-  recoil, and the pack's model built from the Lab's output has no gun elevation and no turret bone (no pack entry yet:
-  it counts as moving; the Saleg's Revenge marks every cannon Gun for the Gun reduce dial, and counted still they lose
-  1,391,036 faces); where the
-  recipe and the lists disagree the pass takes the careful reading; a node no scene reaches is not drawn. The Factory bakes the unit to a triangle budget, so what goes here is detail the visible ship gets back:
+  Flip, TwoSided, Edgecase), a placed part, a skinned or morphing mesh, and a mesh with an animated transform of
+  its own or an ancestor's stay whole and hide nothing — except a gun nothing moves: a Gun, Muzzle or Cradle part
+  stands still when the recipe has no Turret part, no deploy raise and no recoil, and the pack's model built from the
+  Lab's output has no gun elevation and no turret bone (no pack entry yet: it counts as moving; the Saleg's Revenge
+  marks every cannon Gun for the Gun reduce dial, and counted still they lose 1,391,036 faces). Where the recipe and
+  the lists disagree, the pass takes the careful reading. A node no scene reaches is excluded. The Factory bakes the
+  unit to a triangle budget, so what goes here is detail the visible ship gets back:
   on the Saleg's Revenge 1,369,211 of the 2,400,377 faces of the parts that stand still (57 %), in about 100 s in the
   editor (Unity's Mono; 43 s on .NET Framework; the bar shows the share of faces asked, and Cancel leaves every face
   in), and the fused file from
@@ -605,8 +609,9 @@ windows. **Deep dive:**
   show sky. The rest show a face a little behind the one left out (median 4.5 % of the model's radius). No sampled
   rule reaches zero. The result line leads the status (its first line) and closes the fuse report. Fusing the
   pruned output again leaves out next to nothing more (184 faces on that ship). Every part that could hide a face (each still, drawn part with an opaque face) is listed beside the
-  output (`<output>.unseen.txt`); when one of them is ignored, moving or placed in the Lab later, or the model is
-  turned, Generate says so and asks before it runs (save the recipe and fuse again). The pose is the file's: the water line is not
+  output (`<output>.unseen.txt`). The Fuser publishes the pruned model after saving that list. Generate asks before
+  it runs if a listed part is ignored, moving or placed, if the model is turned, if its second model is scaled
+  differently by axis, or if the source-skeleton fast path is enabled. The pose is the file's: the water line is not
   modelled, and a part the Lab moves without a role that says so is not known to move,
   leave **Fuse — groups at once** at **0** (auto: half the logical processors; measured on a 22-group ship, 8 at once is
   the sweet spot on 16 threads and more is no faster, since the largest group's weld slows as the others compete for

@@ -100,20 +100,34 @@ public static partial class GlbDisconnectedParts
         JArray materials = root["materials"] as JArray;
         Accessors reader = BinReader(document, root);
 
-        // a node no scene reaches is not drawn (review of the first cut): it hides nothing and is not asked
+        // A node from an alternate scene can be drawn on its own. Use only occluders shared by every
+        // populated scene so that a face visible in one scene cannot be removed on evidence from another.
         var inScene = new HashSet<int>();
+        HashSet<int> inEveryScene = null;
         if (root["scenes"] is JArray scenes && scenes.Count > 0)
         {
-            var todo = new Stack<int>();
-            foreach (JObject scene in scenes.OfType<JObject>()) foreach (JToken r in (scene["nodes"] as JArray ?? new JArray())) if (r.Type == JTokenType.Integer) todo.Push((int)r);
-            while (todo.Count > 0)
+            foreach (JObject scene in scenes.OfType<JObject>())
             {
-                int n = todo.Pop();
-                if (n < 0 || n >= nodes.Count || !inScene.Add(n)) continue;
-                foreach (JToken c in ((nodes[n] as JObject)?["children"] as JArray ?? new JArray())) if (c.Type == JTokenType.Integer) todo.Push((int)c);
+                var roots = (scene["nodes"] as JArray ?? new JArray()).Where(n => n.Type == JTokenType.Integer).Select(n => (int)n);
+                var reached = UnseenDescendants(nodes, roots);
+                if (reached.Count == 0) continue;
+                inScene.UnionWith(reached);
+                if (inEveryScene == null) inEveryScene = reached;
+                else inEveryScene.IntersectWith(reached);
             }
         }
         else for (int i = 0; i < nodes.Count; i++) inScene.Add(i);   // no scenes: every node counts as drawn
+        inEveryScene = inEveryScene ?? inScene;
+
+        // A rigid mesh can move without a skin or morph target, including through its parent.
+        var animated = (root["animations"] as JArray ?? new JArray()).OfType<JObject>()
+            .SelectMany(a => (a["channels"] as JArray ?? new JArray()).OfType<JObject>())
+            .Select(c => c["target"] as JObject)
+            .Where(t => t?["node"]?.Type == JTokenType.Integer &&
+                ((string)t["path"] == "translation" || (string)t["path"] == "rotation" || (string)t["path"] == "scale"))
+            .Select(t => (int)t["node"]);
+        var animatedNodes = UnseenDescendants(nodes, animated);
+
         var meshUsers = new Dictionary<int, int>();
         for (int i = 0; i < nodes.Count; i++)
             if ((nodes[i] as JObject)?["mesh"] is JToken m && m.Type == JTokenType.Integer) meshUsers[(int)m] = meshUsers.TryGetValue((int)m, out int c) ? c + 1 : 1;
@@ -129,7 +143,9 @@ public static partial class GlbDisconnectedParts
             string name = (string)node["name"] ?? ("node " + i);
             UnseenRole role = inScene.Contains(i) ? roleOf(i, name) : UnseenRole.NotDrawn;
             var meshPrims = (meshes.ElementAtOrDefault(meshIndex) as JObject)?["primitives"] as JArray;
-            if ((role == UnseenRole.Still || role == UnseenRole.Kept) && (node["skin"] != null || (meshPrims != null && meshPrims.OfType<JObject>().Any(p => p["targets"] != null)))) role = UnseenRole.Moves;   // a skinned or morphing mesh moves
+            // a skinned, morphing or animated mesh moves (also a part not opted in: it would hide what shows when it moves)
+            if ((role == UnseenRole.Still || role == UnseenRole.Kept) && (animatedNodes.Contains(i) || node["skin"] != null ||
+                (meshPrims != null && meshPrims.OfType<JObject>().Any(p => p["targets"] != null)))) role = UnseenRole.Moves;
             if (role == UnseenRole.NotDrawn) { notDrawn++; continue; }
             if (role == UnseenRole.Moves) { moving++; continue; }
             PartGeometry g;
@@ -154,7 +170,7 @@ public static partial class GlbDisconnectedParts
             var prims = TrianglePrimitives(meshPrims).ToList();
             for (int pi = 0; pi < prims.Count; pi++)
             {
-                bool opaque = !MaterialUsesAlpha(materials, prims[pi].Value<int?>("material") ?? -1);
+                bool opaque = UnseenPrimitiveIsOpaque(materials, prims[pi]);
                 int end = pi + 1 < prims.Count ? g.PrimitiveStart[pi + 1] : g.Triangles.Length;
                 for (int t = g.PrimitiveStart[pi] / 3; t < end / 3; t++) stop[t] = opaque;
             }
@@ -169,6 +185,7 @@ public static partial class GlbDisconnectedParts
         var hideSegs = new double[geos.Count][];
         for (int s = 0; s < geos.Count; s++)
         {
+            if (!inEveryScene.Contains(geos[s].NodeIndex)) { hideSegs[s] = Array.Empty<double>(); continue; }
             bool all = stops[s].All(b => b);
             if (all) { hideSegs[s] = corners[s]; continue; }
             var keep = new List<double>();
@@ -205,14 +222,17 @@ public static partial class GlbDisconnectedParts
                 {
                     do { if (!cancelRays.IsCancellationRequested && !progress(Volatile.Read(ref facesDone) / (double)Math.Max(1, work.Count))) cancelRays.Cancel(); }
                     while (!running.Wait(250));
+                    if (!cancelRays.IsCancellationRequested && !progress(1.0)) cancelRays.Cancel();
                 }
                 catch (AggregateException e) when (cancelRays.IsCancellationRequested && e.Flatten().InnerExceptions.All(x => x is OperationCanceledException))
+                { /* The worker stopped after the progress callback requested cancellation. */ }
+                catch { cancelRays.Cancel(); throw; }   // the callback itself threw: the rays stop rather than run on unseen
+                if (cancelRays.IsCancellationRequested)
                 {
                     result.Cancelled = true;
                     result.Details.Add(string.Format(CultureInfo.InvariantCulture, "unseen faces: cancelled after {0:N0} of {1:N0} face(s) - nothing was left out", Volatile.Read(ref facesDone), work.Count));
                     return result;
                 }
-                catch { cancelRays.Cancel(); throw; }   // the callback itself threw: the rays stop rather than run on unseen
             }
         }
         result.RayMs = clock.ElapsedMilliseconds;
@@ -331,6 +351,11 @@ public static partial class GlbDisconnectedParts
             result.LeftOutByNode[g.NodeIndex] = leftOut; result.FacesLeftOut += leftOut;
             result.VerticesLeftOut += vertsBefore - vertsAfter;
         }
+        if (result.FacesLeftOut == 0)
+        {
+            result.Details.Add("unseen faces: the candidate primitives could not be compacted safely");
+            return result;
+        }
         document.Chunks[document.BinIndex].Data = bin.ToArray();
         var writeResult = new Result();
         result.Bytes = Write(document, writeResult);
@@ -338,11 +363,40 @@ public static partial class GlbDisconnectedParts
         string byPart = string.Join(", ", result.LeftOutByNode.OrderByDescending(k => k.Value).Take(6)
             .Select(k => ((string)nodes[k.Key]["name"] ?? ("node " + k.Key)) + " " + k.Value.ToString("N0", CultureInfo.InvariantCulture)));
         result.Details.Add(string.Format(CultureInfo.InvariantCulture,
-            "unseen faces: {0:N0} of {1:N0} face(s) no camera of the game ({9:0.#} degrees and up) sees from either side - left out (by part: {2}){3}; {4:N0} vertices fewer; {5:N0} kept beside faces that show (the rim); {6} part(s) could hide them; {7}; rays {8} ms",
+            "unseen faces: {0:N0} of {1:N0} face(s) hidden from both sides in the sampled views ({9:0.#} degrees and up) - left out (by part: {2}){3}; {4:N0} vertices fewer; {5:N0} kept beside faces that show (the rim); {6} part(s) could hide them; {7}; rays {8} ms",
             result.FacesLeftOut, work.Count, byPart, result.NodesEmptied.Count > 0 ? "; " + result.NodesEmptied.Count + " part(s) lost every face and their mesh" : "",
             result.VerticesLeftOut, result.RimKept, result.Hiders.Count, kept, result.RayMs, lowestCamera));
         result.Details.AddRange(writeResult.Details);
         return result;
+    }
+
+    static HashSet<int> UnseenDescendants(JArray nodes, IEnumerable<int> roots)
+    {
+        var reached = new HashSet<int>();
+        var pending = new Stack<int>(roots);
+        while (pending.Count > 0)
+        {
+            int n = pending.Pop();
+            if (n < 0 || n >= nodes.Count || !reached.Add(n)) continue;
+            if ((nodes[n] as JObject)?["children"] is JArray children)
+                foreach (JToken child in children)
+                    if (child.Type == JTokenType.Integer) pending.Push((int)child);
+        }
+        return reached;
+    }
+
+    static bool UnseenPrimitiveIsOpaque(JArray materials, JObject primitive)
+    {
+        bool Opaque(int material)
+        {
+            if (MaterialUsesAlpha(materials, material)) return false;
+            var transmission = materials != null && material >= 0 && material < materials.Count
+                ? materials[material]?["extensions"]?["KHR_materials_transmission"] as JObject : null;
+            return (transmission?.Value<double?>("transmissionFactor") ?? 0) <= 0;
+        }
+        if (!Opaque(primitive.Value<int?>("material") ?? -1)) return false;
+        var variants = primitive["extensions"]?["KHR_materials_variants"]?["mappings"] as JArray;
+        return variants == null || variants.OfType<JObject>().All(mapping => Opaque(mapping.Value<int?>("material") ?? -1));
     }
 
     // THE VEHICLE LAB'S ROLES (VehicleLabWindow.Role, by number: the recipes and role lists store the number). What the
@@ -438,6 +492,60 @@ public static partial class GlbDisconnectedParts
     // read). The Lab reads it before it generates: such a part that is now ignored, moving or placed may leave a hole.
     public const string UnseenSidecarHeader = "#unseen-faces v1";
     public static string UnseenSidecarPath(string glb) => string.IsNullOrEmpty(glb) ? null : glb + ".unseen.txt";
+
+    /// <summary>Publish pruned bytes only after the Vehicle Lab's matching warning list is in place.</summary>
+    public static void WriteUnseenOutput(string path, UnseenResult result)
+    {
+        if (result == null || !result.Changed || result.Bytes == null)
+            throw new ArgumentException("The unseen-faces pass did not produce an output.", nameof(result));
+        path = Path.GetFullPath(path);
+        string sidecar = UnseenSidecarPath(path);
+        string suffix = "." + Guid.NewGuid().ToString("N") + ".tmp";
+        string stagedModel = path + suffix, stagedList = sidecar + suffix, previousList = sidecar + ".previous" + suffix;
+        bool published = false;
+        try
+        {
+            File.WriteAllBytes(stagedModel, result.Bytes);
+            File.WriteAllLines(stagedList, new[] { UnseenSidecarHeader + "|" + result.Bytes.Length.ToString(CultureInfo.InvariantCulture) }
+                .Concat(result.Hiders.Select(n => "hid|" + n)));
+            if (File.Exists(sidecar)) File.Replace(stagedList, sidecar, previousList);
+            else File.Move(stagedList, sidecar);
+            try
+            {
+                if (File.Exists(path)) File.Replace(stagedModel, path, null);
+                else File.Move(stagedModel, path);
+                published = true;
+            }
+            catch (Exception publishError)
+            {
+                try
+                {
+                    if (File.Exists(previousList)) File.Replace(previousList, sidecar, null);
+                    else File.Delete(sidecar);
+                }
+                catch (Exception restoreError)
+                {
+                    throw new IOException("Could not publish the pruned model or restore its previous unseen-faces list. Check '" +
+                        sidecar + "' and its backup '" + previousList + "'.", new AggregateException(publishError, restoreError));
+                }
+                throw;
+            }
+        }
+        finally
+        {
+            // Keep the prior list's backup if restoring it failed.
+            foreach (string temporary in published ? new[] { stagedModel, stagedList, previousList } : new[] { stagedModel, stagedList })
+                try { File.Delete(temporary); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    /// <summary>Nonuniform scaling changes the model-space directions seen from the same cameras.</summary>
+    public static bool UnseenScaleChangesViews(float x, float y, float z)
+    {
+        string[] axes = VehicleLabRules.Merge2ScaleField(x, y, z).Split(',');
+        string Effective(string axis) => axis == "0" ? "1" : axis;   // the merger treats a zero axis as 1
+        return Effective(axes[0]) != Effective(axes[1]) || Effective(axes[0]) != Effective(axes[2]);
+    }
 
     /// <summary>The hiders the list names, or null when the list does not describe a file of <paramref name="glbLength"/> bytes.</summary>
     public static List<string> ReadUnseenSidecar(IEnumerable<string> lines, long glbLength)

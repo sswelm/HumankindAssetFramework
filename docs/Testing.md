@@ -803,8 +803,9 @@ together (`run_bg`), each into its own log, and prints the logs in declaration o
 time and reports progress as soon as it finishes; the wall time is the longest step's. Measured on the deploy port's
 branch: 870 s where the sequence took about 1,500. Until 2026-10-29 the source guards still ran in sequence BEFORE the
 drills started - nine minutes of `check-member-shape.sh`, `drill-reader-gates.sh` and their kin on a tree of 340 C#
-files - and the gate's wall was those nine plus the deploy drill's ten. Now the build and the unit tests run first
-(they are what everything else assumes), and then the gate regressions, guards and small Python tests run in sequence on ONE background lane
+files - and the gate's wall was those nine plus the deploy drill's ten. The build, unit tests, and timed gate
+regressions run first. This keeps the two-second subprocess controls clear of the Unity and native drills' startup
+load on Windows. The other guards and small Python tests run in sequence on ONE background lane
 (`run_lane` / `run_lane_go`, each step judged like a `run_bg` step) while the drills run at once. Each launch clears
 its previous log/metadata first and fails if that cannot be done, so a later phase cannot reuse an earlier success.
 Missing or unreadable queued commands fail their own step instead of replaying a preceding command. A lane, not a block:

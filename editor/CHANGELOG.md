@@ -21,8 +21,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   raise, or gun elevation in the pack) stands still. **Lowest camera (°)** raises the 28-degree floor (45 leaves out
   63 % on that ship, with small gaps when zoomed in fully). The progress bar has a Cancel (about 100 s on that
   ship). The Lab's name guess now makes a "Propeller" a rotor (it was Rigging: "propeller" contains "rope").
-  Generate in the Lab names any part that could hide faces and has since become ignored, moving or placed (or a model
-  turned since), and asks before it runs. Off by default: no group is ticked.
+  Animated transforms and their descendants stay whole. Only opaque geometry present in every populated scene can
+  hide another part. The Fuser saves the warning list before publishing pruned geometry. Generate asks when a hider
+  changes role or placement, the model is turned, the second model changes scale by axis, or the fast path is enabled.
+  Off by default: no group is ticked.
 - **Vehicle Lab: a probe of a fused file keeps the roles** (2026-11-25, user report, the Khelandion galley: "when I
   probe I lose everything again"). Roles are kept by part name, and a fuse renames every part it groups: the galley's
   recipe named 149 parts, the fused file has 15, and all 15 came back Default, oars and sail included. A part new to

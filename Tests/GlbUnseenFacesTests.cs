@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -122,6 +123,100 @@ public class GlbUnseenFacesTests
     static Part Gun() => new Part { Name = "Gun", Faces = new Soup().Box("gun", V(5, 2, 10), V(15, 6, 30)) };
 
     // ---- the rule ----
+
+    [Fact]
+    public void An_occluder_must_be_in_the_same_scene_as_the_geometry_it_hides()
+    {
+        Part hull = Hull(), gun = Gun();
+        byte[] glb = BuildGlb(null, (root, bin) =>
+        {
+            // The gun is visible in the second scene even though the hull hides it in the first.
+            ((JArray)root["scenes"]).Add(new JObject { ["nodes"] = new JArray(1) });
+        }, hull, gun);
+        var r = Run(glb);
+        Assert.DoesNotContain("Hull", r.Hiders);
+        Assert.DoesNotContain(1, r.NodesEmptied);
+
+        byte[] shared = BuildGlb(null, (root, bin) =>
+            ((JArray)root["scenes"]).Add(new JObject { ["nodes"] = new JArray(0, 1) }), hull, gun);
+        Assert.Contains(1, Run(shared).NodesEmptied);
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    public void A_transform_animation_keeps_the_animated_node_and_its_children_whole(int moving, bool animateParent)
+    {
+        Part hull = Hull(), gun = Gun();
+        byte[] glb = BuildGlb(null, (root, bin) =>
+        {
+            int target = moving;
+            if (animateParent)
+            {
+                var nodes = (JArray)root["nodes"];
+                target = nodes.Count;
+                nodes.Add(new JObject { ["children"] = new JArray(moving) });
+                root["scenes"][0]["nodes"][moving] = target;
+            }
+            var views = (JArray)root["bufferViews"];
+            var accessors = (JArray)root["accessors"];
+            int Append(string type, float[] values)
+            {
+                int offset = bin.Count;
+                foreach (float value in values) bin.AddRange(BitConverter.GetBytes(value));
+                views.Add(new JObject { ["buffer"] = 0, ["byteOffset"] = offset, ["byteLength"] = 4 * values.Length });
+                accessors.Add(new JObject { ["bufferView"] = views.Count - 1, ["componentType"] = 5126, ["count"] = 2, ["type"] = type });
+                return accessors.Count - 1;
+            }
+            int times = Append("SCALAR", new[] { 0f, 1f });
+            accessors[times]["min"] = new JArray(0f);
+            accessors[times]["max"] = new JArray(1f);
+            int translations = Append("VEC3", new[] { 0f, 0f, 0f, 100f, 0f, 0f });
+            root["animations"] = new JArray(new JObject
+            {
+                ["samplers"] = new JArray(new JObject { ["input"] = times, ["output"] = translations }),
+                ["channels"] = new JArray(new JObject
+                {
+                    ["sampler"] = 0, ["target"] = new JObject { ["node"] = target, ["path"] = "translation" }
+                })
+            });
+        }, hull, gun);
+        var r = Run(glb);
+        Assert.DoesNotContain(moving == 0 ? "Hull" : "Gun", r.Hiders);
+        Assert.DoesNotContain(moving, r.LeftOutByNode.Keys);
+        Assert.DoesNotContain(1, r.NodesEmptied);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_transmissive_material_or_transparent_variant_does_not_hide_geometry(bool variant)
+    {
+        var transparent = new JObject { ["alphaMode"] = "BLEND" };
+        if (!variant)
+        {
+            transparent["alphaMode"] = "OPAQUE";
+            transparent["extensions"] = new JObject { ["KHR_materials_transmission"] = new JObject { ["transmissionFactor"] = 1 } };
+        }
+        var materials = new JArray(new JObject { ["name"] = "Metal" }, transparent);
+        byte[] glb = BuildGlb(materials, (root, bin) =>
+        {
+            if (variant)
+            {
+                root["extensionsUsed"] = new JArray("KHR_materials_variants");
+                root["extensions"] = new JObject { ["KHR_materials_variants"] = new JObject
+                    { ["variants"] = new JArray(new JObject { ["name"] = "Glass" }) } };
+                PrimitiveOf(root, "Hull")["extensions"] = new JObject { ["KHR_materials_variants"] = new JObject
+                    { ["mappings"] = new JArray(new JObject { ["material"] = 1, ["variants"] = new JArray(0) }) } };
+            }
+            else root["extensionsUsed"] = new JArray("KHR_materials_transmission");
+        }, Hull(material: variant ? 0 : 1), Gun());
+        var r = Run(glb);
+        Assert.DoesNotContain("Hull", r.Hiders);
+        Assert.DoesNotContain(0, r.LeftOutByNode.Keys);
+        Assert.DoesNotContain(1, r.NodesEmptied);
+    }
 
     [Fact]
     public void A_part_inside_a_closed_hull_loses_every_face_and_the_hull_keeps_what_shows()
@@ -535,6 +630,48 @@ public class GlbUnseenFacesTests
     }
 
     [Fact]
+    public void Cancel_at_the_end_of_ray_sampling_keeps_the_original()
+    {
+        var r = GlbDisconnectedParts.LeaveOutUnseenFaces(GridOnDeck(),
+            (i, n) => GlbDisconnectedParts.UnseenRole.Still, 1, 0, p => p < 1);
+        Assert.True(r.Cancelled);
+        Assert.False(r.Changed);
+        Assert.Null(r.Bytes);
+    }
+
+    [Fact]
+    public void A_primitive_that_cannot_be_compacted_leaves_the_output_unchanged()
+    {
+        byte[] glb = BuildGlb(null, (root, bin) =>
+        {
+            var primitive = PrimitiveOf(root, "Hull");
+            var views = (JArray)root["bufferViews"];
+            var accessors = (JArray)root["accessors"];
+            int start = bin.Count;
+            bin.AddRange(new byte[12]);
+            int sparseIndex = views.Count;
+            views.Add(new JObject { ["buffer"] = 0, ["byteOffset"] = start, ["byteLength"] = 1 });
+            views.Add(new JObject { ["buffer"] = 0, ["byteOffset"] = start + 4, ["byteLength"] = 8 });
+            primitive["attributes"]["TEXCOORD_0"] = accessors.Count;
+            accessors.Add(new JObject
+            {
+                ["componentType"] = 5126, ["type"] = "VEC2", ["count"] = accessors[(int)primitive["attributes"]["POSITION"]]["count"],
+                ["sparse"] = new JObject
+                {
+                    ["count"] = 1,
+                    ["indices"] = new JObject { ["bufferView"] = sparseIndex, ["componentType"] = 5121 },
+                    ["values"] = new JObject { ["bufferView"] = sparseIndex + 1 }
+                }
+            });
+        }, Hull());
+        var r = Run(glb);
+        Assert.Contains(r.Warnings, w => w.Contains("sparse accessor"));
+        Assert.Equal(0, r.FacesLeftOut);
+        Assert.False(r.Changed);
+        Assert.Null(r.Bytes);
+    }
+
+    [Fact]
     public void Cancel_leaves_every_face_in_and_a_bar_that_never_cancels_changes_nothing()
     {
         byte[] glb = GridOnDeck();
@@ -714,6 +851,60 @@ public class GlbUnseenFacesTests
         Assert.Equal("Fused_A_Object_9", GlbDisconnectedParts.LabSecondModelName("B_Fused_A_Object_9"));
         Assert.Null(GlbDisconnectedParts.LabSecondModelName("Fused_A_Hull"));
         Assert.Null(GlbDisconnectedParts.LabSecondModelName("B_"));
+    }
+
+    [Fact]
+    public void Publishing_pruned_bytes_requires_a_warning_list_and_restores_the_old_list_on_failure()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "haf-unseen-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        string output = Path.Combine(dir, "ship.glb");
+        string list = GlbDisconnectedParts.UnseenSidecarPath(output);
+        try
+        {
+            byte[] original = BuildGlb(null, Hull(), Gun());
+            var pruned = Run(original);
+            Assert.True(pruned.Changed);
+            File.WriteAllBytes(output, original);
+            Directory.CreateDirectory(list);
+            Assert.NotNull(Record.Exception(() => GlbDisconnectedParts.WriteUnseenOutput(output, pruned)));
+            Assert.Equal(original, File.ReadAllBytes(output));
+            Assert.Single(Directory.EnumerateFiles(dir));
+
+            Directory.Delete(list);
+            string[] previousList = { GlbDisconnectedParts.UnseenSidecarHeader + "|" + original.Length, "hid|Old hull" };
+            File.WriteAllLines(list, previousList);
+            File.Delete(output);
+            Directory.CreateDirectory(output);
+            Assert.NotNull(Record.Exception(() => GlbDisconnectedParts.WriteUnseenOutput(output, pruned)));
+            Assert.True(Directory.Exists(output));
+            Assert.Equal(previousList, File.ReadAllLines(list));
+            Assert.Single(Directory.EnumerateFiles(dir));
+
+            Directory.Delete(output);
+            File.WriteAllBytes(output, original);
+            GlbDisconnectedParts.WriteUnseenOutput(output, pruned);
+            Assert.Equal(pruned.Bytes, File.ReadAllBytes(output));
+            Assert.Equal(pruned.Hiders, GlbDisconnectedParts.ReadUnseenSidecar(File.ReadAllLines(list), pruned.Bytes.Length));
+            Assert.Equal(2, Directory.EnumerateFiles(dir).Count());
+        }
+        finally
+        {
+            foreach (string file in Directory.EnumerateFiles(dir)) File.Delete(file);
+            if (Directory.Exists(output)) Directory.Delete(output);
+            if (Directory.Exists(list)) Directory.Delete(list);
+            Directory.Delete(dir);
+        }
+    }
+
+    [Theory]
+    [InlineData(1, 2, 1, true)]
+    [InlineData(2, 2, 2, false)]
+    [InlineData(-1, 1, 1, false)]
+    [InlineData(0.000001f, 1, 1, false)]
+    public void Only_effectively_nonuniform_second_model_scales_change_the_viewing_directions(float x, float y, float z, bool changes)
+    {
+        Assert.Equal(changes, GlbDisconnectedParts.UnseenScaleChangesViews(x, y, z));
     }
 
     [Fact]
