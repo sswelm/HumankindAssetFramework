@@ -44,7 +44,9 @@ public class GlbUnseenFacesTests
 
     // one node per part, every face its own three vertices (indexed), a TEXCOORD_0 holding (vertex number, tag number)
     // when asked, so a test can tell which source vertex an output vertex came from
-    static byte[] BuildGlb(JArray materials, params Part[] parts)
+    static byte[] BuildGlb(JArray materials, params Part[] parts) => BuildGlb(materials, null, parts);
+    // `edit`: change the JSON (and append to the BIN) before the file is written
+    static byte[] BuildGlb(JArray materials, Action<JObject, List<byte>> edit, params Part[] parts)
     {
         var bin = new List<byte>();
         var accessors = new JArray(); var views = new JArray(); var meshes = new JArray(); var nodes = new JArray(); var sceneNodes = new JArray();
@@ -82,6 +84,8 @@ public class GlbUnseenFacesTests
             ["nodes"] = nodes, ["meshes"] = meshes, ["accessors"] = accessors, ["bufferViews"] = views,
             ["buffers"] = new JArray { new JObject { ["byteLength"] = bin.Count } }, ["materials"] = materials ?? new JArray(new JObject { ["name"] = "m0" }),
         };
+        edit?.Invoke(root, bin);
+        root["buffers"][0]["byteLength"] = bin.Count;
         byte[] json = Encoding.UTF8.GetBytes(root.ToString(Newtonsoft.Json.Formatting.None));
         int jsonPad = (4 - json.Length % 4) % 4, binPad = (4 - bin.Count % 4) % 4;
         var bytes = new List<byte>();
@@ -248,6 +252,93 @@ public class GlbUnseenFacesTests
         Assert.Contains("2 kept beside faces that show (the rim)", rim.Details[0]);
     }
 
+    // ---- the written file (review of the first cut) ----
+
+    static (JObject root, int binAt) Json(byte[] glb) { int n = BitConverter.ToInt32(glb, 12); return (JObject.Parse(Encoding.UTF8.GetString(glb, 20, n)), 20 + n + 8); }
+    static JObject PrimitiveOf(JObject root, string node) => (JObject)root["meshes"][root["nodes"].OfType<JObject>().First(n => (string)n["name"] == node).Value<int>("mesh")]["primitives"][0];
+    static int Offset(JObject root, int binAt, int acc) { var a = (JObject)root["accessors"][acc]; var v = (JObject)root["bufferViews"][a.Value<int>("bufferView")]; return binAt + (v.Value<int?>("byteOffset") ?? 0) + (a.Value<int?>("byteOffset") ?? 0); }
+
+    [Fact]
+    public void A_copied_attribute_keeps_every_element_on_a_four_byte_boundary()
+    {
+        // a ubyte RGB colour (3 bytes an element, stride 4 in the source): copied tight, the elements would sit 3 apart
+        Part hull = Hull(false, null, 0, "top"), gun = Gun(); gun.Uvs = true;
+        byte[] glb = BuildGlb(null, (root, bin) =>
+        {
+            var prim = PrimitiveOf(root, "Gun"); int verts = gun.Faces.Count * 3;
+            while ((bin.Count & 3) != 0) bin.Add(0);
+            int off = bin.Count;
+            for (int v = 0; v < verts; v++) { bin.Add((byte)v); bin.Add((byte)(2 * v)); bin.Add(7); bin.Add(0); }
+            ((JArray)root["bufferViews"]).Add(new JObject { ["buffer"] = 0, ["byteOffset"] = off, ["byteLength"] = 4 * verts, ["byteStride"] = 4, ["target"] = 34962 });
+            ((JArray)root["accessors"]).Add(new JObject { ["bufferView"] = root["bufferViews"].Count() - 1, ["componentType"] = 5121, ["normalized"] = true, ["count"] = verts, ["type"] = "VEC3" });
+            prim["attributes"]["COLOR_0"] = root["accessors"].Count() - 1;
+        }, hull, gun);
+        var r = Run(glb);
+        var (root2, binAt) = Json(r.Bytes);
+        var p = PrimitiveOf(root2, "Gun");
+        int colour = p["attributes"].Value<int>("COLOR_0"), uv = p["attributes"].Value<int>("TEXCOORD_0");
+        var view = (JObject)root2["bufferViews"][root2["accessors"][colour].Value<int>("bufferView")];
+        Assert.Equal(4, view.Value<int>("byteStride"));
+        Assert.Equal(0, (Offset(root2, binAt, colour) - binAt) % 4);
+        Assert.True(root2["accessors"][colour].Value<bool>("normalized"));
+        int count = root2["accessors"][colour].Value<int>("count");
+        for (int v = 0; v < count; v++)
+        {
+            int source = (int)BitConverter.ToSingle(r.Bytes, Offset(root2, binAt, uv) + 8 * v);
+            int at = Offset(root2, binAt, colour) + 4 * v;
+            Assert.Equal(new[] { (byte)source, (byte)(2 * source), (byte)7 }, new[] { r.Bytes[at], r.Bytes[at + 1], r.Bytes[at + 2] });
+        }
+    }
+
+    [Fact]
+    public void A_quantized_position_keeps_its_stride_and_its_bounds()
+    {
+        // KHR_mesh_quantization: POSITION as shorts, 6 bytes an element at stride 8
+        Part hull = Hull(false, null, 0, "top"), gun = Gun();
+        byte[] glb = BuildGlb(null, (root, bin) =>
+        {
+            var prim = PrimitiveOf(root, "Gun"); var c = gun.Faces.Corners; int verts = c.Count / 3;
+            while ((bin.Count & 3) != 0) bin.Add(0);
+            int off = bin.Count;
+            for (int v = 0; v < verts; v++) { for (int a = 0; a < 3; a++) bin.AddRange(BitConverter.GetBytes((short)c[3 * v + a])); bin.Add(0); bin.Add(0); }
+            ((JArray)root["bufferViews"]).Add(new JObject { ["buffer"] = 0, ["byteOffset"] = off, ["byteLength"] = 8 * verts, ["byteStride"] = 8, ["target"] = 34962 });
+            ((JArray)root["accessors"]).Add(new JObject { ["bufferView"] = root["bufferViews"].Count() - 1, ["componentType"] = 5122, ["count"] = verts, ["type"] = "VEC3", ["min"] = new JArray(5, 2, 10), ["max"] = new JArray(15, 6, 30) });
+            prim["attributes"]["POSITION"] = root["accessors"].Count() - 1;
+            root["extensionsUsed"] = new JArray("KHR_mesh_quantization"); root["extensionsRequired"] = new JArray("KHR_mesh_quantization");
+        }, hull, gun);
+        var r = Run(glb);
+        Assert.True(r.Changed);
+        var (root2, _) = Json(r.Bytes);
+        var pos = (JObject)root2["accessors"][PrimitiveOf(root2, "Gun")["attributes"].Value<int>("POSITION")];
+        Assert.Equal(5122, pos.Value<int>("componentType"));
+        Assert.Equal(8, root2["bufferViews"][pos.Value<int>("bufferView")].Value<int>("byteStride"));
+        Assert.Equal(new long[] { 5, 2, 10 }, pos["min"].Select(t => (long)t));
+        Assert.Equal(new long[] { 15, 6, 30 }, pos["max"].Select(t => (long)t));
+        Assert.DoesNotContain("gun:bottom", KeptTags(r.Bytes, gun));
+    }
+
+    [Fact]
+    public void A_part_that_loses_every_face_loses_its_mesh_and_the_mesh_stays_valid()
+    {
+        // an extension the compaction does not know: it is refused, and the mesh no node uses any more stays in the file -
+        // with its primitives, since glTF forbids a mesh with none
+        Part hull = Hull(), gun = Gun();
+        var r = Run(BuildGlb(null, (root, bin) => root["extensionsUsed"] = new JArray("EXT_some_vendor_thing"), hull, gun));
+        var (root2, _) = Json(r.Bytes);
+        var gunNode = root2["nodes"].OfType<JObject>().First(n => (string)n["name"] == "Gun");
+        Assert.Null(gunNode["mesh"]);
+        Assert.All(root2["meshes"].OfType<JObject>(), m => Assert.NotEmpty((JArray)m["primitives"]));
+    }
+
+    [Fact]
+    public void A_node_no_scene_reaches_hides_nothing()
+    {
+        Part hull = Hull(), gun = Gun();
+        var r = Run(BuildGlb(null, (root, bin) => root["scenes"][0]["nodes"] = new JArray(1), hull, gun));   // only the gun is in the scene
+        Assert.Contains("gun:top", KeptTags(r.Bytes ?? BuildGlb(null, hull, gun), gun));
+        Assert.DoesNotContain("Hull", r.Hiders);
+    }
+
     [Fact]
     public void A_second_pass_finds_nothing_more()
     {
@@ -270,7 +361,7 @@ public class GlbUnseenFacesTests
     [InlineData(new[] { 14 }, false, GlbDisconnectedParts.UnseenRole.Moves)]         // Sail
     [InlineData(new[] { 20 }, false, GlbDisconnectedParts.UnseenRole.Moves)]         // Flip turns its faces round
     [InlineData(new[] { 25 }, false, GlbDisconnectedParts.UnseenRole.Moves)]         // TwoSided shows backs
-    [InlineData(new int[0], false, GlbDisconnectedParts.UnseenRole.Still)]           // the Lab has not seen it: it would be Default
+    [InlineData(new int[0], false, GlbDisconnectedParts.UnseenRole.Still)]           // no role given (the Fuser passes the Lab's name guess for a part with no record)
     public void Lab_roles_map_to_what_hides_and_what_is_asked(int[] roles, bool placed, GlbDisconnectedParts.UnseenRole expected)
     {
         Assert.Equal(expected, GlbDisconnectedParts.UnseenRoleOfLab(roles, placed));

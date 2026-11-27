@@ -569,12 +569,14 @@ windows. **Deep dive:**
   where it shows its front, as under back-face culling; glass and cut-outs hide nothing and are kept. A face whose
   back shows stays, so the Lab's inside-out fix, Flip, TwoSided and double-sided output cannot turn a removed face
   into a hole. Rays from a few points along a few directions miss what a camera sees through a slit or past a lip, so
-  two rings of faces around everything that shows stay as well (the rim). The Fuser reads the Vehicle Lab's records of the output — the recipe named after it, when it reads this
-  file, and the role lists of its last Generate: a part the Lab ignores hides nothing; a part that moves or changes
+  two rings of faces around everything that shows stay as well (the rim). The Fuser reads the Vehicle Lab's records of the output — every
+  recipe whose source is this file, whatever it is named, and the role lists of its last Generate; a part with no
+  record takes the role the Lab would guess from its name (a "Propeller" is a rotor). It does not run, and says why,
+  when such a recipe cannot be read, rigs the model on its own skeleton (the fast path), or turns the model
+  (Orientation): a part the Lab ignores hides nothing; a part that moves or changes
   facing (wheels, turrets, guns, rotors, trails, muzzles, cradles, oars, sails, flags, rudders, chains, caterpillars,
   Flip, TwoSided, Edgecase), a placed part, a skinned or morphing mesh hides nothing and loses nothing; where the
-  recipe and the lists disagree the pass takes the careful reading. With no recipe yet, every part counts as standing
-  still. The Factory bakes the unit to a triangle budget, so what goes here is detail the visible ship gets back:
+  recipe and the lists disagree the pass takes the careful reading; a node no scene reaches is not drawn. The Factory bakes the unit to a triangle budget, so what goes here is detail the visible ship gets back:
   on the Saleg's Revenge 1,217,786 of the 2,400,377 faces of the parts that stand still (51 %), in 43 s, and the
   fused file from 97.6 to 64.6 MB. Rendered before and after from 96 directions the pass does not ask (640 x 640, back
   faces culled), 258 of 2.83 million ship pixels changed, 7 of them to sky; the rest show a face about 2 % of the

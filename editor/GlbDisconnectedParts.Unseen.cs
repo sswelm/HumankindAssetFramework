@@ -54,7 +54,7 @@ public static partial class GlbDisconnectedParts
         public bool Changed;
         public int FacesAsked, FacesLeftOut, VerticesLeftOut;
         public readonly Dictionary<int, int> LeftOutByNode = new Dictionary<int, int>();   // node index -> faces left out
-        public readonly List<string> Hiders = new List<string>();    // the names of the nodes whose faces stopped the rays (the Lab checks them)
+        public readonly List<string> Hiders = new List<string>();    // the names of the nodes whose opaque faces made up the ray tree (the Lab checks them)
         public readonly List<int> NodesEmptied = new List<int>();    // nodes that lost every face, and so their mesh
         public readonly List<string> Details = new List<string>();
         public readonly List<string> Warnings = new List<string>();
@@ -92,6 +92,20 @@ public static partial class GlbDisconnectedParts
         JArray materials = root["materials"] as JArray;
         Accessors reader = BinReader(document, root);
 
+        // a node no scene reaches is not drawn (review of the first cut): it hides nothing and is not asked
+        var inScene = new HashSet<int>();
+        if (root["scenes"] is JArray scenes && scenes.Count > 0)
+        {
+            var todo = new Stack<int>();
+            foreach (JObject scene in scenes.OfType<JObject>()) foreach (JToken r in (scene["nodes"] as JArray ?? new JArray())) if (r.Type == JTokenType.Integer) todo.Push((int)r);
+            while (todo.Count > 0)
+            {
+                int n = todo.Pop();
+                if (n < 0 || n >= nodes.Count || !inScene.Add(n)) continue;
+                foreach (JToken c in ((nodes[n] as JObject)?["children"] as JArray ?? new JArray())) if (c.Type == JTokenType.Integer) todo.Push((int)c);
+            }
+        }
+        else for (int i = 0; i < nodes.Count; i++) inScene.Add(i);   // no scenes: every node counts as drawn
         var meshUsers = new Dictionary<int, int>();
         for (int i = 0; i < nodes.Count; i++)
             if ((nodes[i] as JObject)?["mesh"] is JToken m && m.Type == JTokenType.Integer) meshUsers[(int)m] = meshUsers.TryGetValue((int)m, out int c) ? c + 1 : 1;
@@ -105,7 +119,7 @@ public static partial class GlbDisconnectedParts
             if (node?["mesh"] == null || node["mesh"].Type != JTokenType.Integer) continue;
             int meshIndex = (int)node["mesh"];
             string name = (string)node["name"] ?? ("node " + i);
-            UnseenRole role = roleOf(i, name);
+            UnseenRole role = inScene.Contains(i) ? roleOf(i, name) : UnseenRole.NotDrawn;
             var meshPrims = (meshes.ElementAtOrDefault(meshIndex) as JObject)?["primitives"] as JArray;
             if (role == UnseenRole.Still && (node["skin"] != null || (meshPrims != null && meshPrims.OfType<JObject>().Any(p => p["targets"] != null)))) role = UnseenRole.Moves;   // a skinned or morphing mesh moves
             if (role == UnseenRole.NotDrawn) { notDrawn++; continue; }
@@ -202,7 +216,7 @@ public static partial class GlbDisconnectedParts
             if (!dropOf.TryGetValue(s, out bool[] d)) dropOf[s] = d = new bool[stops[s].Length];
             d[f] = true;
         }
-        for (int s = 0; s < geos.Count; s++) result.Hiders.Add(geos[s].NodeName);
+        for (int s = 0; s < geos.Count; s++) if (hideSegs[s].Length > 0) result.Hiders.Add(geos[s].NodeName);   // what could stop a ray: an opaque face of a still part
         string kept = string.Format(CultureInfo.InvariantCulture, "{0} part(s) move, {1} are not drawn, {2} share a mesh, {3} could not be read: kept whole", moving, notDrawn, shared, unread);
         if (dropOf.Count == 0)
         {
@@ -229,12 +243,21 @@ public static partial class GlbDisconnectedParts
                 int firstFace = g.PrimitiveStart[pi] / 3, endFace = (pi + 1 < prims.Count ? g.PrimitiveStart[pi + 1] : g.Triangles.Length) / 3;
                 int dropped = 0; for (int f = firstFace; f < endFace; f++) if (drop[f]) dropped++;
                 if (dropped == 0) continue;
-                if (dropped == endFace - firstFace) { emptied.Add(primitive); leftOut += dropped; continue; }
                 var attributes = (JObject)primitive["attributes"];
                 int posAcc = attributes.Value<int>("POSITION");
                 int vertCount = reader.Count(posAcc);
                 int? indexAcc = primitive.Value<int?>("indices");
-                var remap = new int[vertCount]; for (int v = 0; v < vertCount; v++) remap[v] = -1;
+                if (dropped == endFace - firstFace)
+                {
+                    emptied.Add(primitive); leftOut += dropped;
+                    vertsBefore += CountReferenced(reader, indexAcc, endFace - firstFace, vertCount);
+                    continue;
+                }
+                // source vertex -> kept vertex. A split fragment indexes a few vertices of its parent's whole buffer, so a
+                // buffer far larger than the faces asks for a map, not an array the buffer's size (review of the first cut)
+                bool sparse = vertCount > 12 * (endFace - firstFace);
+                int[] remapArray = sparse ? null : new int[vertCount]; var remapMap = sparse ? new Dictionary<int, int>() : null;
+                if (!sparse) for (int v = 0; v < vertCount; v++) remapArray[v] = -1;
                 var pick = new List<int>(); var indices = new List<uint>((endFace - firstFace - dropped) * 3);
                 for (int f = firstFace; f < endFace; f++)
                 {
@@ -243,8 +266,10 @@ public static partial class GlbDisconnectedParts
                     for (uint k = 0; k < 3; k++)
                     {
                         int v = (int)(indexAcc.HasValue ? reader.Index(indexAcc.Value, local + k) : local + k);
-                        if (remap[v] < 0) { remap[v] = pick.Count; pick.Add(v); }
-                        indices.Add((uint)remap[v]);
+                        int to;
+                        if (sparse) { if (!remapMap.TryGetValue(v, out to)) { to = pick.Count; remapMap[v] = to; pick.Add(v); } }
+                        else { to = remapArray[v]; if (to < 0) { to = remapArray[v] = pick.Count; pick.Add(v); } }
+                        indices.Add((uint)to);
                     }
                 }
                 var newAttributes = new JObject();
@@ -265,10 +290,12 @@ public static partial class GlbDisconnectedParts
                 leftOut += dropped;
             }
             if (leftOut == 0) continue;
-            foreach (JObject p in emptied) primitives.Remove(p);
+            // a node that loses every face loses its mesh, and the mesh stays as it was: glTF forbids a mesh with no
+            // primitives, and Write's compaction, which drops a mesh no node uses, may be refused (review of the first cut)
+            if (emptied.Count == primitives.Count) { node.Remove("mesh"); result.NodesEmptied.Add(g.NodeIndex); }
+            else foreach (JObject p in emptied) primitives.Remove(p);
             result.LeftOutByNode[g.NodeIndex] = leftOut; result.FacesLeftOut += leftOut;
             result.VerticesLeftOut += vertsBefore - vertsAfter;
-            if (primitives.Count == 0) { node.Remove("mesh"); result.NodesEmptied.Add(g.NodeIndex); }
         }
         document.Chunks[document.BinIndex].Data = bin.ToArray();
         var writeResult = new Result();
@@ -395,12 +422,14 @@ public static partial class GlbDisconnectedParts
     static int CountReferenced(Accessors reader, int? indexAcc, int faces, int vertCount)
     {
         if (!indexAcc.HasValue) return faces * 3;
-        var used = new bool[vertCount]; int n = 0;
-        for (uint i = 0; i < faces * 3; i++) { uint v = reader.Index(indexAcc.Value, i); if (!used[v]) { used[v] = true; n++; } }
-        return n;
+        var used = new HashSet<uint>();
+        for (uint i = 0; i < faces * 3; i++) used.Add(reader.Index(indexAcc.Value, i));
+        return used.Count;
     }
 
-    // the elements `pick` of an accessor, byte for byte, as a new tightly packed accessor at the end of the BIN
+    // the elements `pick` of an accessor, byte for byte, as a new accessor at the end of the BIN. Each element starts on a
+    // 4-byte boundary, as glTF asks of a vertex attribute (a ubyte VEC3 colour is padded to 4 and the view states its
+    // stride); POSITION carries its min and max whatever its component type (KHR_mesh_quantization) - review of the first cut
     static int CopyElements(JObject root, byte[] sourceBin, List<byte> bin, int accessorIndex, IList<int> pick, bool withMinMax)
     {
         var accessor = (JObject)root["accessors"][accessorIndex];
@@ -420,6 +449,7 @@ public static partial class GlbDisconnectedParts
             start = (view.Value<int?>("byteOffset") ?? 0) + (accessor.Value<int?>("byteOffset") ?? 0);
             stride = view.Value<int?>("byteStride") ?? elementSize;
         }
+        int elementStride = (elementSize + 3) & ~3;
         while ((bin.Count & 3) != 0) bin.Add(0);
         int byteOffset = bin.Count;
         var min = new double[components]; var max = new double[components];
@@ -427,19 +457,38 @@ public static partial class GlbDisconnectedParts
         foreach (int v in pick)
         {
             int at = start + v * stride;
-            if (accessor["bufferView"] == null) { for (int b = 0; b < elementSize; b++) bin.Add(0); continue; }   // an accessor with no view reads as zeros
+            if (accessor["bufferView"] == null)   // an accessor with no view reads as zeros
+            {
+                for (int b = 0; b < elementStride; b++) bin.Add(0);
+                if (withMinMax) for (int k = 0; k < components; k++) { min[k] = Math.Min(min[k], 0); max[k] = Math.Max(max[k], 0); }
+                continue;
+            }
             if (at < 0 || at + elementSize > sourceBin.Length) throw new InvalidDataException("Accessor element outside the BIN.");
             for (int b = 0; b < elementSize; b++) bin.Add(sourceBin[at + b]);
-            if (withMinMax && componentType == 5126)
-                for (int k = 0; k < components; k++) { double x = BitConverter.ToSingle(sourceBin, at + 4 * k); if (x < min[k]) min[k] = x; if (x > max[k]) max[k] = x; }
+            for (int b = elementSize; b < elementStride; b++) bin.Add(0);
+            if (withMinMax)
+                for (int k = 0; k < components; k++)
+                {
+                    int o = at + k * componentSize;
+                    double x = componentType == 5126 ? BitConverter.ToSingle(sourceBin, o) : componentType == 5125 ? BitConverter.ToUInt32(sourceBin, o)
+                             : componentType == 5123 ? BitConverter.ToUInt16(sourceBin, o) : componentType == 5122 ? BitConverter.ToInt16(sourceBin, o)
+                             : componentType == 5121 ? sourceBin[o] : (sbyte)sourceBin[o];
+                    if (x < min[k]) min[k] = x; if (x > max[k]) max[k] = x;
+                }
         }
         var views = (JArray)root["bufferViews"];
         int viewIndex = views.Count;
-        views.Add(new JObject { ["buffer"] = 0, ["byteOffset"] = byteOffset, ["byteLength"] = bin.Count - byteOffset, ["target"] = 34962 });
+        var newView = new JObject { ["buffer"] = 0, ["byteOffset"] = byteOffset, ["byteLength"] = bin.Count - byteOffset, ["target"] = 34962 };
+        if (elementStride != elementSize) newView["byteStride"] = elementStride;
+        views.Add(newView);
         var accessors = (JArray)root["accessors"];
         var copy = new JObject { ["bufferView"] = viewIndex, ["componentType"] = componentType, ["count"] = pick.Count, ["type"] = type };
         if (accessor.Value<bool?>("normalized") == true) copy["normalized"] = true;
-        if (withMinMax && componentType == 5126 && pick.Count > 0) { copy["min"] = new JArray(min.Select(d => (float)d)); copy["max"] = new JArray(max.Select(d => (float)d)); }
+        if (withMinMax && pick.Count > 0)
+        {
+            if (componentType == 5126) { copy["min"] = new JArray(min.Select(d => (float)d)); copy["max"] = new JArray(max.Select(d => (float)d)); }
+            else { copy["min"] = new JArray(min.Select(d => (long)d)); copy["max"] = new JArray(max.Select(d => (long)d)); }
+        }
         accessors.Add(copy);
         return accessors.Count - 1;
     }

@@ -84,6 +84,27 @@ public class VehicleLabWindow : EditorWindow
         // initializers) keep old recipes neutral; carried across a re-Probe by name, exactly like the role.
         public Vector3 offset = Vector3.zero; public Vector3 scale = Vector3.one; }
     static bool IsPlaced(Part p) => p.offset.sqrMagnitude > 1e-10f || (p.scale - Vector3.one).sqrMagnitude > 1e-10f;
+    // THE ROLE A NEW PART IS GUESSED FROM ITS NAME (a Probe's part with no session role). One copy: the Model Fuser asks
+    // it too, for a part the Lab has no record of yet, when it decides what the unseen-faces pass may leave out.
+    internal static int GuessRoleFromName(string name)
+    {
+        string low = (name ?? "").ToLowerInvariant();
+        return (int)(low.Contains("tail") && (low.Contains("rotor") || low.Contains("prop")) ? Role.TailRotor  // "tail rotor" before the generic rotor guess
+            : low.Contains("fantail") || low.Contains("fenestron") ? Role.TailRotor
+            : low.Contains("oar") ? Role.Oar   // before the generic "blade" -> Rotor guess: an oar blade contains "blade"
+            : low.Contains("sail") ? Role.Sail
+            : low.Contains("shroud") || low.Contains("ratline") ? Role.Shroud   // standing rigging, before the generic rope guess
+            : low.Contains("rigging") || low.Contains("rope") ? Role.Rigging
+            : low.Contains("window") || low.Contains("windshield") || low.Contains("windscreen") || low.Contains("glass") ? Role.Window   // glazing (2026-09-25)
+            : low.Contains("railing") || low.Contains("handrail") || low.Contains("stanchion") ? Role.Railing   // its own soup tier since 2026-11-12 (was Structure)
+            : low.Contains("chain") ? Role.Chain   // anchor chains, their own soup tier since 2026-11-25
+            : low.Contains("flag") || low.Contains("banner") || low.Contains("pennant") ? Role.Flag
+            : low.Contains("rudder") ? Role.Rudder
+            : low.Contains("rotor") || low.Contains("helix") || low.Contains("blade") || low.Contains("propeller") ? Role.Rotor
+            : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
+            : low.Contains("turret") ? Role.Turret : Role.Default);
+    }
+
 
     // The Generate-time fix skips these roles entirely (authored winding wins there) — the ⟲ row tag must agree.
     static bool FixSkipsRole(Role r) => r == Role.Sail || r == Role.Oar || r == Role.Flag || r == Role.Rudder || r == Role.Preserve || r == Role.TwoSided;
@@ -1716,20 +1737,7 @@ public class VehicleLabWindow : EditorWindow
             // Preserve explicit defaults and inherit marked roles for split children before guessing from the name.
             int? sessionRole = VehicleLabRules.ProbeSessionRole(p.name, rigBone ? keptBones : sessionRoles, (int)Role.Default);
             p.role = sessionRole.HasValue ? (Role)sessionRole.Value
-                   : low.Contains("tail") && (low.Contains("rotor") || low.Contains("prop")) ? Role.TailRotor  // "tail rotor" before the generic rotor guess
-                   : low.Contains("fantail") || low.Contains("fenestron") ? Role.TailRotor
-                   : low.Contains("oar") ? Role.Oar   // before the generic "blade" -> Rotor guess: an oar blade contains "blade"
-                   : low.Contains("sail") ? Role.Sail
-                   : low.Contains("shroud") || low.Contains("ratline") ? Role.Shroud   // standing rigging, before the generic rope guess
-                   : low.Contains("rigging") || low.Contains("rope") ? Role.Rigging
-                   : low.Contains("window") || low.Contains("windshield") || low.Contains("windscreen") || low.Contains("glass") ? Role.Window   // glazing (2026-09-25)
-                   : low.Contains("railing") || low.Contains("handrail") || low.Contains("stanchion") ? Role.Railing   // its own soup tier since 2026-11-12 (was Structure)
-                   : low.Contains("chain") ? Role.Chain   // anchor chains, their own soup tier since 2026-11-25
-                   : low.Contains("flag") || low.Contains("banner") || low.Contains("pennant") ? Role.Flag
-                   : low.Contains("rudder") ? Role.Rudder
-                   : low.Contains("rotor") || low.Contains("helix") || low.Contains("blade") || low.Contains("propeller") ? Role.Rotor
-                   : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
-                   : low.Contains("turret") ? Role.Turret : Role.Default;
+                   : (Role)GuessRoleFromName(p.name);
             if (!rigBone && !sessionRole.HasValue) fresh.Add(p);
             (rigBone ? newBoneParts : newParts).Add(p);
         }
@@ -2479,19 +2487,22 @@ public class VehicleLabWindow : EditorWindow
         if (sourceRefusal != null) { status = sourceRefusal; return; }
         // UNSEEN FACES (2026-11-27; GlbDisconnectedParts.Unseen.cs): a fuse that left out the faces no camera sees counted
         // some parts as standing still and drawn, and left out what they hid. If one of them is now ignored, moving or
-        // placed, what it hid can show as a hole: ask before generating, and name them.
-        if (!headless)
+        // placed, what it hid can show as a hole: name them, and ask before generating (a headless run only logs it).
         {
-            string unseenList = GlbDisconnectedParts.UnseenSidecarPath(srcFile);
-            List<string> hiders = null;
-            try { if (File.Exists(unseenList) && File.Exists(srcFile)) hiders = GlbDisconnectedParts.ReadUnseenSidecar(File.ReadAllLines(unseenList), new FileInfo(srcFile).Length); }
-            catch (Exception e) { Debug.LogWarning("[VehicleLab] could not read " + unseenList + ": " + e.Message); }
+            var hiders = new List<string>();
+            foreach (string model in new[] { srcFile, srcFile2 })
+            {
+                if (string.IsNullOrEmpty(model)) continue;
+                string unseenList = GlbDisconnectedParts.UnseenSidecarPath(model);
+                try { if (File.Exists(unseenList) && File.Exists(model)) hiders.AddRange(GlbDisconnectedParts.ReadUnseenSidecar(File.ReadAllLines(unseenList), new FileInfo(model).Length) ?? new List<string>()); }
+                catch (Exception e) { Debug.LogWarning("[VehicleLab] could not read " + unseenList + ": " + e.Message); }
+            }
             var clash = GlbDisconnectedParts.UnseenConflicts(ActiveParts.Select(p => (p.name, (int)p.role, IsPlaced(p))), hiders);
             if (clash.Count > 0)
             {
                 string names = string.Join(", ", clash.Take(8)) + (clash.Count > 8 ? $" and {clash.Count - 8} more" : "");
-                Debug.LogWarning($"[VehicleLab] {clash.Count} part(s) hid faces when the fuse left out unseen faces and are now ignored, moving or placed: {names}");
-                if (!EditorUtility.DisplayDialog("Faces the fuse left out",
+                Debug.LogWarning($"[VehicleLab] {clash.Count} part(s) hid faces when the fuse left out unseen faces and are now ignored, moving or placed: {names}. What they hid may show as a hole: fuse again in the Model Fuser with the Lab's current roles.");
+                if (!headless && !EditorUtility.DisplayDialog("Faces the fuse left out",
                         $"This model was fused with \"Leave out faces no camera can see\", and these parts hid faces then: {names}.\n\n" +
                         "They are now ignored, moving or placed, so what was behind them may show as a hole.\n\n" +
                         "Fuse again in the Model Fuser (it reads the Lab's current roles), or generate anyway.", "Generate anyway", "Cancel"))
