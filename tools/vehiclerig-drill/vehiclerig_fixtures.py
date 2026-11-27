@@ -29,6 +29,8 @@ Stage 2 (step (c), the weld tiers):
                      one n-gon and collapses the straight-run vertices, the triangulate cuts the square, the decimate follows
   fx_c_soup_railing  the fx_c_soup_L strip and a flat 6 x 6 grid in the RAILING tier at 60 (role 24, names in the railingreduce= tag)
   fx_c_soup_chain    the same strip and grid in the CHAIN tier at 70 (role 26, names in the chainreduce= tag, which only a marked part sends)
+  fx_c_deck          the fx_c_grid seam grid in the DECK tier at 60 beside a BODY box at 50 (role 27, names in the deckreduce= tag, which
+                     only a marked part sends): a WELD tier, so the seam welds before the collapse, right after BODY
   fx_c_soup_L        a flat L-shaped strip in the SHROUD tier at 50: the dissolve leaves a CONCAVE n-gon, so the ear clipping's
                      kd-tree of concave corners decides the ears; a lone flat quad beside it takes the quad rule
   fx_c_soup_attributes custom normals, vertex colours and two UV layers through the soup operators
@@ -180,7 +182,7 @@ Argument variants (recipes_exit, post-edited by --exits): fx_r_numeric_pct (the 
   fx_x_turret_quote / fx_x_turret_space hold Python's quote choice and non-ASCII whitespace escapes in malformed-tag errors.
 Exits and deaths (recipes_exit, keys renamed by --exits): fx_x_allignored (every part Ignored: the _guard crash), fx_x_bright (bright=1.5|x),
   fx_x_flagfold (flagfold=a|b), fx_x_defaultreduce (no '|'), fx_x_shroudreduce (a percent float() refuses), fx_x_gunreduce (likewise), fx_x_turretreduce (an infinite percent),
-  fx_x_windowreduce (no '|'), fx_x_railingreduce (a nan percent), fx_x_chainreduce (an infinite percent), fx_x_merge_missing (a second model path that is not there); fx_d_frames (argv[7] "15.0": int() dies),
+  fx_x_windowreduce (no '|'), fx_x_railingreduce (a nan percent), fx_x_chainreduce (an infinite percent), fx_x_deckreduce (no '|'), fx_x_merge_missing (a second model path that is not there); fx_d_frames (argv[7] "15.0": int() dies),
   fx_d_merge_offset (merge2 offset "a,0,0": float() dies), fx_d_names (a wheels file that is not there: namelist() dies)
 """
 import json, math, os, sys
@@ -586,7 +588,7 @@ def main(out):
     # the exits and deaths: plain recipes the --exits mode edits into the malformed shapes
     recipe(out, "fx_x_allignored", src, [("A", 3, {}), ("B", 3, {})], sub="recipes_exit")
     recipe(out, "fx_x_bright", src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit", model1Bright=1.5)
-    for k in ("fx_x_flagfold", "fx_x_defaultreduce", "fx_x_shroudreduce", "fx_x_gunreduce", "fx_x_turretreduce", "fx_x_turret_quote", "fx_x_turret_space", "fx_x_windowreduce", "fx_x_railingreduce", "fx_x_chainreduce", "fx_d_frames", "fx_d_names", "fx_d_infinite_count", "fx_d_nan_count", "fx_d_flagfold_infinite", "fx_d_reduce_before_names"):
+    for k in ("fx_x_flagfold", "fx_x_defaultreduce", "fx_x_shroudreduce", "fx_x_gunreduce", "fx_x_turretreduce", "fx_x_turret_quote", "fx_x_turret_space", "fx_x_windowreduce", "fx_x_railingreduce", "fx_x_chainreduce", "fx_x_deckreduce", "fx_d_frames", "fx_d_names", "fx_d_infinite_count", "fx_d_nan_count", "fx_d_flagfold_infinite", "fx_d_reduce_before_names"):
         recipe(out, k, src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit")
     for k in ("fx_x_merge_missing", "fx_d_merge_offset"):
         recipe(out, k, src, [("A", 0, {}), ("B", 0, {})], sub="recipes_exit", srcFile2=second)
@@ -640,6 +642,10 @@ def main(out):
     r = Rig(); ma = r.material("Paint", (0.3, 0.5, 0.7))
     r.node("Deck", mesh=grid_seam(r, "Deck", ma), scale=[2.0, 1.0, 0.5], rotation=[0.0, 0.258819, 0.0, 0.9659258])
     recipe(out, "fx_c_scaled", r.write(models, "fx_c_scaled"), [("Deck", 0, {})], bodyReducePct=60.0)
+    # the DECK tier (2026-11-27): role 27, its names in the deckreduce= tag (sent because a part is marked); a WELD tier like BODY
+    r = Rig(); ma = r.material("Paint", (0.3, 0.5, 0.7)); mb = r.material("Steel", (0.5, 0.5, 0.55))
+    r.node("Deck", mesh=grid_seam(r, "Deck", ma)); r.node("Hull", mesh=box_split(r, "Hull", (ma, mb)), translation=[3.0, 0.0, 0.0])
+    recipe(out, "fx_c_deck", r.write(models, "fx_c_deck"), [("Deck", 27, {}), ("Hull", 0, {})], deckReducePct=60.0, bodyReducePct=50.0)
     # the soup tiers: the limited dissolve, the n-gon triangulation, the chunked path
     r = Rig(); ma = r.material("Rope", (0.4, 0.3, 0.2))
     r.node("Net", mesh=flat_grid(r, "Net", ma, 6, 6)); r.node("Other", mesh=r.mesh("Other", at=(3.0, 0.0, 0.0), material=ma))
@@ -1343,6 +1349,7 @@ EXITS = {
     "fx_x_windowreduce": ("EXIT", lambda a: set_tag(a, "windowreduce", "nopipe")),
     "fx_x_railingreduce": ("EXIT", lambda a: set_tag(a, "railingreduce", "|nan")),
     "fx_x_chainreduce": ("EXIT", lambda a: set_tag(a, "chainreduce", "|inf")),
+    "fx_x_deckreduce": ("EXIT", lambda a: set_tag(a, "deckreduce", "nopipe")),
     "fx_x_merge_missing": ("EXIT", lambda a: set_tag(a, "merge2", "|".join([a[[t.startswith("merge2=") for t in a].index(True)][7:].split("|")[0] + ".missing.glb"] + a[[t.startswith("merge2=") for t in a].index(True)][7:].split("|")[1:]))),
     "fx_d_frames": ("DIES", lambda a: a.__setitem__(7, "15.0")),
     "fx_d_reduce_before_names": ("DIES", lambda a: (a.__setitem__(52, "half"), a.__setitem__(69, a[69] + ".missing.txt"))),

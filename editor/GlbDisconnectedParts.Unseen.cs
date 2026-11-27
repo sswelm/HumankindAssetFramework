@@ -403,7 +403,7 @@ public static partial class GlbDisconnectedParts
     // game draws standing still hides and is asked; Ignore is not drawn; every other role moves or is turned round by
     // the Lab (wheels, turrets, guns, rotors, trails, muzzles, cradles, oars, sails, flags, rudders, chains, caterpillars;
     // Flip and TwoSided change which side shows; Edgecase is not a still part by any rule this file knows).
-    static readonly HashSet<int> LabStillRoles = new HashSet<int> { 0 /*Body*/, 4 /*Default*/, 15 /*Rigging*/, 16 /*Structure*/, 19 /*Preserve*/, 21 /*Detail*/, 22 /*Shroud*/, 23 /*Window*/, 24 /*Railing*/ };
+    static readonly HashSet<int> LabStillRoles = new HashSet<int> { 0 /*Body*/, 4 /*Default*/, 15 /*Rigging*/, 16 /*Structure*/, 19 /*Preserve*/, 21 /*Detail*/, 22 /*Shroud*/, 23 /*Window*/, 24 /*Railing*/, 27 /*Deck*/ };
     const int LabIgnoreRole = 3;
 
     /// <summary>How the pass treats a part the Lab knows under <paramref name="labRoles"/> (every role any of the Lab's

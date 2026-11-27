@@ -74,7 +74,7 @@ public class VehicleLabWindow : EditorWindow
     // geometry on a sailing ship and want a harder cut than the running rigging. Unlike Rigging it never rides the
     // Sail bone: it holds the mast up, so it stays standing while the canvas gathers. ALWAYS APPENDED LAST: Part.role
     // is serialized as its integer, so inserting a value anywhere else renumbers every saved recipe's roles.
-    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase, Caterpillar, Gun, Rotor, TailRotor, Trail, Muzzle, Cradle, Oar, Sail, Rigging, Structure, Flag, Rudder, Preserve, Flip, Detail, Shroud, Window, Railing, TwoSided, Chain }   // TwoSided (2026-11-14, user: "the double walling should be applied discriminately"): a face whose back can be seen is doubled, every other face left - for a part that mixes closed solids with single sheets; appended last. Window (2026-09-25, user: "add the reducable part type Window"): glazing as a weld reduce tier of its own; appended last, see above. Railing (2026-11-12, user: "add Railing as a new reducible classification"): deck railings, stanchions, guard wires, ladders - a SOUP tier like Rigging and Shroud with its own dial; appended last
+    enum Role { Body, Wheel, Turret, Ignore, Default, Edgecase, Caterpillar, Gun, Rotor, TailRotor, Trail, Muzzle, Cradle, Oar, Sail, Rigging, Structure, Flag, Rudder, Preserve, Flip, Detail, Shroud, Window, Railing, TwoSided, Chain, Deck }   // TwoSided (2026-11-14, user: "the double walling should be applied discriminately"): a face whose back can be seen is doubled, every other face left - for a part that mixes closed solids with single sheets; appended last. Window (2026-09-25, user: "add the reducable part type Window"): glazing as a weld reduce tier of its own; appended last, see above. Railing (2026-11-12, user: "add Railing as a new reducible classification"): deck railings, stanchions, guard wires, ladders - a SOUP tier like Rigging and Shroud with its own dial; appended last
     [Serializable] class Part { public string name; public int verts; public Vector3 center, size; public Role role;
         public int vis = -1;   // probe's escape-ray verdict: 1 = external (visible from outside), 0 = interior (never visible — strippable), -1 = unclassified (pre-visibility probe)
         public string bone = "";   // rigged sources: the bone this shard is weighted to (probe 2026-08-20) — lets a BONE row highlight its shards
@@ -167,6 +167,7 @@ public class VehicleLabWindow : EditorWindow
     [SerializeField] float gunReducePct = 0f;      // Gun role (2026-09-25, user: "add Gun part type as a reducable group"): a weld tier like Wheel, 0 = untouched
     [SerializeField] float windowReducePct = 0f;   // Window role (2026-09-25): glazing's own weld-tier dial, 0 = untouched
     [SerializeField] float railingReducePct = 0f;  // Railing role (2026-11-12): deck railings' own soup-pass dial, 0 = untouched
+    [SerializeField] float deckReducePct = 0f;     // Deck role (2026-11-27, user: "could you add one additional Reduce group called Deck"): decks' own weld-tier dial, 0 = untouched
     [SerializeField] float chainReducePct = 0f;    // Chain role (2026-11-25, user: "an additional Reduce group called Chains"): anchor chains' own soup-pass dial, 0 = untouched
     [SerializeField] float defaultReducePct = 0f;  // Default role (2026-09-19): the catch-all — every part still unmarked, cut like Body
     // SAIL IDLE FOLD (2026-09-09, vanilla parity): at idle the canvas FOLDS at the yard — visible brailed-up
@@ -232,6 +233,15 @@ public class VehicleLabWindow : EditorWindow
     static readonly string[] WheelCentreNames = { "Box centre (round wheels)", "Surface centroid (screws, propellers)" };
     [SerializeField] bool spinEnabled = true;   // MASTER spin switch (2026-08-19, user request: disabling spin on a wheeled vehicle meant unmarking every wheel — the wave-checkbox lesson again). Off = generate with 0 spin degrees + static tracks; bones/markings all kept.
     [SerializeField] bool doubleSided = false;  // DOUBLE-SIDED at the source (2026-09-03): the game culls backfaces, so single-sided / CAD parts (thin spokes, plates) render see-through. On = vehicle_rig.py appends reversed, slightly-inset faces so the exported Spin GLB is genuinely two-sided — no runtime doubling, no preview mismatch.
+    // THE ROLE MENUS IN ALPHABETICAL ORDER (2026-11-27, user: "could you also sort these groups alfabeticly?"): display order
+    // only, with the names EnumPopup showed ("Tail Rotor", "Two Sided"); a part's role is still saved as the enum's integer.
+    static readonly Role[] RolesSorted = ((Role[])Enum.GetValues(typeof(Role))).OrderBy(r => ObjectNames.NicifyVariableName(r.ToString()), StringComparer.OrdinalIgnoreCase).ToArray();
+    static readonly GUIContent[] RoleLabelsSorted = RolesSorted.Select(r => new GUIContent(ObjectNames.NicifyVariableName(r.ToString()))).ToArray();
+    static Role RolePopup(Role current, params GUILayoutOption[] options)
+    {
+        int picked = EditorGUILayout.Popup(Array.IndexOf(RolesSorted, current), RoleLabelsSorted, options);
+        return picked >= 0 && picked < RolesSorted.Length ? RolesSorted[picked] : current;
+    }
     [SerializeField] Role bulkRole = Role.Ignore;   // "Mark all shown as" — the role applied to every filtered-in part at once
     [SerializeField] bool fixInsideOut = false; // FIX INSIDE-OUT FACES (2026-09-04): a source whose winding ships consistently inverted (the Khalandion hull) reads see-through from outside while showing the far wall's interior. On = vehicle_rig.py recalculates face normals outward (Shift+N) — the cheap single-sided fix; no extra triangles.
     // WAVE ROCK (2026-07-31): slow idle sway for FLOATING units, authored on a Hull bone under Root. 0 = off.
@@ -336,7 +346,7 @@ public class VehicleLabWindow : EditorWindow
         flatShareFor = inst;
     }
     [SerializeField] int partFilter;      // list filter: 0 = all; see FilterOptions (Unreviewed = Default + Edgecase)
-    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar", "Gun", "Rotor", "Tail rotor", "Trail", "Muzzle", "Cradle", "Oar", "Sail", "Rigging", "Structure", "Flag", "Rudder", "Preserve", "Flip", "Detail", "Shroud", "Window", "Railing", "Two-sided", "Chain" };
+    static readonly string[] FilterOptions = { "None (all parts)", "Undecided (Default + Edgecase)", "Default", "Wheel", "Turret", "Body", "Ignore", "Edgecase", "Caterpillar", "Gun", "Rotor", "Tail rotor", "Trail", "Muzzle", "Cradle", "Oar", "Sail", "Rigging", "Structure", "Flag", "Rudder", "Preserve", "Flip", "Detail", "Shroud", "Window", "Railing", "Two-sided", "Chain", "Deck" };
     bool MatchesFilter(Role r) => partFilter == 1 ? (r == Role.Default || r == Role.Edgecase)
                                 : partFilter == 2 ? r == Role.Default
                                 : partFilter == 3 ? r == Role.Wheel
@@ -364,13 +374,17 @@ public class VehicleLabWindow : EditorWindow
                                 : partFilter == 25 ? r == Role.Window
                                 : partFilter == 26 ? r == Role.Railing
                                 : partFilter == 27 ? r == Role.TwoSided
-                                : partFilter == 28 ? r == Role.Chain : true;
+                                : partFilter == 28 ? r == Role.Chain
+                                : partFilter == 29 ? r == Role.Deck : true;
     // Roles that SPIN (get a bone + the Spin action): wheels and both rotor kinds. Used for the Generate-enable gate,
     // the spin-section summary, Verify, and the "inside the wheel" test — so a rotorcraft with no Wheel parts still rigs.
     static bool IsSpinner(Role r) => r == Role.Wheel || r == Role.Rotor || r == Role.TailRotor;
     // Visibility switch (probe's escape-ray verdict): All / External / Interior. Interior = never visible from any
     // outside direction — the strip candidates (mark them Ignore to reclaim triangle budget for visible surfaces).
     [SerializeField] int visFilter;
+    // FilterOptions' indices in the order the menu shows them: "None" and "Undecided" first, then the roles alphabetically
+    static readonly int[] FilterOrder = new[] { 0, 1 }.Concat(Enumerable.Range(2, FilterOptions.Length - 2).OrderBy(i => FilterOptions[i], StringComparer.OrdinalIgnoreCase)).ToArray();
+    static readonly string[] FilterLabelsSorted = FilterOrder.Select(i => FilterOptions[i]).ToArray();
     static readonly string[] VisFilterOptions = { "All parts", "External only", "Interior only" };
     bool MatchesVis(Part p) => visFilter == 0 || (visFilter == 1 ? p.vis != 0 : p.vis == 0);   // unclassified (-1, old probe) counts as external
     Vector2 partsScroll;
@@ -441,6 +455,7 @@ public class VehicleLabWindow : EditorWindow
         public float turretReducePct = 0f;     // Turret-role decimation percentage (absent-key 0 == the do-nothing default)
         public float windowReducePct = 0f;     // Window-role decimation percentage (absent-key 0 == the do-nothing default)
         public float railingReducePct = 0f;    // Railing-role decimation percentage (absent-key 0 == the do-nothing default)
+        public float deckReducePct = 0f;       // Deck-role decimation percentage (absent-key 0 == the do-nothing default)
         public float chainReducePct = 0f;      // Chain-role decimation percentage (absent-key 0 == the do-nothing default)
         public float defaultReducePct = 0f;    // Default-role decimation percentage (absent-key 0 == the do-nothing default)
         public bool sailFoldIdle = false;      // idle sail FOLDS at the yard instead of hiding below the keel (absent-key false == the legacy strike)
@@ -807,8 +822,12 @@ public class VehicleLabWindow : EditorWindow
                     "measured on the preview meshes). Slide up to ~60 and the walking decks, platforms and hatch tops " +
                     "remain while masts, hull plating and rigging vanish; combine with the height sliders to pick one deck " +
                     "level. 0 = off. Parts the preview can't measure stay visible."), minFlatPct, 0f, 100f);
-                partFilter = EditorGUILayout.Popup(new GUIContent("Show only",
-                    "Filter the list to one classification. Marking a part out of the current filter removes it from the list and auto-advances to the next."), partFilter, FilterOptions);
+                {   // the role entries in alphabetical order after the two fixed ones (2026-11-27); partFilter keeps its number
+                    int shownAt = Array.IndexOf(FilterOrder, partFilter);
+                    int picked = EditorGUILayout.Popup(new GUIContent("Show only",
+                        "Filter the list to one classification. Marking a part out of the current filter removes it from the list and auto-advances to the next."), shownAt < 0 ? 0 : shownAt, FilterLabelsSorted);
+                    partFilter = picked >= 0 && picked < FilterOrder.Length ? FilterOrder[picked] : 0;
+                }
                 int interiorN = list.Count(x => x.vis == 0);
                 visFilter = EditorGUILayout.Popup(new GUIContent("Visibility",
                     "The probe's escape-ray verdict per part: External = some surface point can see out; Interior = provably " +
@@ -827,7 +846,7 @@ public class VehicleLabWindow : EditorWindow
                     using (new EditorGUILayout.HorizontalScope())
                     {
                         GUILayout.Label("Mark all shown as:", GUILayout.Width(120));
-                        bulkRole = (Role)EditorGUILayout.EnumPopup(bulkRole, GUILayout.Width(90));
+                        bulkRole = RolePopup(bulkRole, GUILayout.Width(90));
                         if (GUILayout.Button(new GUIContent($"Apply to {shown.Count} shown part(s)",
                                 "Sets this role on EVERY part the filters currently show (sliders, Show only, Visibility) — filter first, then apply. " +
                                 "Undo: filter the same way and apply Default."), GUILayout.Width(200)))
@@ -836,7 +855,7 @@ public class VehicleLabWindow : EditorWindow
                     }
                 if (useSourceRig && boneParts.Count > 0)   // 2026-08-20: a user hunted for the turret's shards here — in this mode they are ONE row
                     EditorGUILayout.LabelField("Each row is one BONE of the shipped skeleton; all the shards skinned to it count as that row (the turret's parts = the Turret bone). Untick the fast path to list and mark individual parts.", EditorStyles.wordWrappedMiniLabel);
-                EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rigging   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   O = Oar   ·   S = Structure   ·   F = Flip (reverse winding)   ·   P = Preserve (ship byte-identical)   ·   H = sHroud (standing rigging, soup-reduced)   ·   A = rAiling (deck railings, soup-reduced)   ·   N = chaiN (anchor chains, soup-reduced)   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("  Keys:  ↑/↓ = previous/next part   ·   W/T/B = Wheel/Turret/Body   ·   R = Rigging   ·   L = taiL rotor (spins about the lateral axis)   ·   G = Gun (rides the Turret; muzzle/socket anchor)   ·   C = Caterpillar (tread loop)   ·   O = Oar   ·   S = Structure   ·   F = Flip (reverse winding)   ·   P = Preserve (ship byte-identical)   ·   H = sHroud (standing rigging, soup-reduced)   ·   A = rAiling (deck railings, soup-reduced)   ·   N = chaiN (anchor chains, soup-reduced)   ·   K = decK (decks, own weld reduce)   ·   I = Ignore (DELETED)   ·   D = Default   ·   E = Edgecase", EditorStyles.miniLabel);
                 // Keyboard review loop: ↑/↓ step the selection (zoom+highlight follows), W/T/B/I mark the selected
                 // part's role — the whole list can be reviewed without mousing between rows and dropdowns.
                 var ev = Event.current;
@@ -851,7 +870,7 @@ public class VehicleLabWindow : EditorWindow
                         GUIUtility.keyboardControl = 0;                    // a focused slider/popup must not swallow the arrows
                         ev.Use(); Repaint();
                     }
-                    else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C || ev.keyCode == KeyCode.G || ev.keyCode == KeyCode.R || ev.keyCode == KeyCode.L || ev.keyCode == KeyCode.O || ev.keyCode == KeyCode.S || ev.keyCode == KeyCode.H || ev.keyCode == KeyCode.A || ev.keyCode == KeyCode.N || ev.keyCode == KeyCode.F || ev.keyCode == KeyCode.P))
+                    else if (idx >= 0 && (ev.keyCode == KeyCode.W || ev.keyCode == KeyCode.T || ev.keyCode == KeyCode.B || ev.keyCode == KeyCode.I || ev.keyCode == KeyCode.D || ev.keyCode == KeyCode.E || ev.keyCode == KeyCode.C || ev.keyCode == KeyCode.G || ev.keyCode == KeyCode.R || ev.keyCode == KeyCode.L || ev.keyCode == KeyCode.O || ev.keyCode == KeyCode.S || ev.keyCode == KeyCode.H || ev.keyCode == KeyCode.A || ev.keyCode == KeyCode.N || ev.keyCode == KeyCode.K || ev.keyCode == KeyCode.F || ev.keyCode == KeyCode.P))
                     {
                         shown[idx].role = ev.keyCode == KeyCode.W ? Role.Wheel
                                         : ev.keyCode == KeyCode.T ? Role.Turret
@@ -860,6 +879,7 @@ public class VehicleLabWindow : EditorWindow
                                         : ev.keyCode == KeyCode.H ? Role.Shroud      // H = sHroud (2026-10-20 user request, reclassifying the galley: masts and stays are marked by the dozen)
                                         : ev.keyCode == KeyCode.A ? Role.Railing     // A = rAiling (2026-11-12): a warship carries railing sections by the dozen; R is Rigging
                                         : ev.keyCode == KeyCode.N ? Role.Chain       // N = chaiN (2026-11-25): an anchor chain is links by the hundred; C is Caterpillar
+                                        : ev.keyCode == KeyCode.K ? Role.Deck        // K = decK (2026-11-27): D is Default
                                         : ev.keyCode == KeyCode.E ? Role.Edgecase
                                         : ev.keyCode == KeyCode.C ? Role.Caterpillar
                                         : ev.keyCode == KeyCode.G ? Role.Gun
@@ -883,7 +903,7 @@ public class VehicleLabWindow : EditorWindow
                 foreach (var p in shown)
                     using (new EditorGUILayout.HorizontalScope())
                     {
-                        p.role = (Role)EditorGUILayout.EnumPopup(p.role, GUILayout.Width(70));
+                        p.role = RolePopup(p.role, GUILayout.Width(70));
                         // the row label is a BUTTON: click = zoom the preview onto this part and tint it yellow
                         bool isSel = selectedPart == p.name;
                         var st = isSel ? EditorStyles.whiteMiniLabel : EditorStyles.miniLabel;
@@ -1031,13 +1051,14 @@ public class VehicleLabWindow : EditorWindow
                 int nWin = ActiveParts.Count(p => p.role == Role.Window);
                 int nRai = ActiveParts.Count(p => p.role == Role.Railing);
                 int nCha = ActiveParts.Count(p => p.role == Role.Chain);
+                int nDck = ActiveParts.Count(p => p.role == Role.Deck);
                 int nDef = ActiveParts.Count(p => p.role == Role.Default);
                 string facingSummary = (doubleSided ? "2-sided" : null);
                 if (fixInsideOut) facingSummary = facingSummary == null ? "winding fix" : facingSummary + " · winding fix";
                 // Only tiers with parts marked make the header — five always-on entries would drown it.
                 string reduceSummary = null;
                 void Tier(int n, string label, float pct) { if (n > 0) reduceSummary = (reduceSummary == null ? "" : reduceSummary + " · ") + $"{n} {label} @ {pct:0}%"; }
-                Tier(nDef, "default", defaultReducePct); Tier(nRig, "rigging", riggingReducePct); Tier(nShr, "shroud", shroudReducePct); Tier(nRai, "railing", railingReducePct); Tier(nCha, "chain", chainReducePct); Tier(nStr, "structure", structureReducePct); Tier(nBod, "body", bodyReducePct); Tier(nOar, "oar", oarReducePct); Tier(nSail, "sail", sailReducePct); Tier(nRud, "rudder", rudderReducePct); Tier(nWhl, "wheel", wheelReducePct); Tier(nFlp, "flip", flipReducePct); Tier(nPre, "preserve", preserveReducePct); Tier(nDet, "detail", detailReducePct); Tier(nTur, "turret", turretReducePct); Tier(nGun, "gun", gunReducePct); Tier(nWin, "window", windowReducePct);
+                Tier(nDef, "default", defaultReducePct); Tier(nRig, "rigging", riggingReducePct); Tier(nShr, "shroud", shroudReducePct); Tier(nRai, "railing", railingReducePct); Tier(nCha, "chain", chainReducePct); Tier(nStr, "structure", structureReducePct); Tier(nBod, "body", bodyReducePct); Tier(nDck, "deck", deckReducePct); Tier(nOar, "oar", oarReducePct); Tier(nSail, "sail", sailReducePct); Tier(nRud, "rudder", rudderReducePct); Tier(nWhl, "wheel", wheelReducePct); Tier(nFlp, "flip", flipReducePct); Tier(nPre, "preserve", preserveReducePct); Tier(nDet, "detail", detailReducePct); Tier(nTur, "turret", turretReducePct); Tier(nGun, "gun", gunReducePct); Tier(nWin, "window", windowReducePct);
                 if (Section(ref foldReduce, "Vertices control — facing & density at the source",
                         facingSummary == null && reduceSummary == null ? "geometry exported as authored"
                             : facingSummary == null ? reduceSummary
@@ -1120,6 +1141,13 @@ public class VehicleLabWindow : EditorWindow
                             "model's face, and the Factory's global 'Reduce to ~tris' is usually the smarter place to slim " +
                             "it. Use this only when the reviewed body geometry is itself needlessly dense at the source."),
                             bodyReducePct, 0f, 95f);
+                    using (new EditorGUI.DisabledScope(nDck == 0))
+                        deckReducePct = EditorGUILayout.Slider(new GUIContent("Deck reduce (%)",
+                            "The Deck parts' own dial - the decks: a few large flat faces the eye reads at once. Cut like Body " +
+                            "(weld within each material, then the collapse) but separately, so a deck can keep its big faces while " +
+                            "the hull and fittings take a harder cut (2026-11-27, the Saleg's Revenge: at Body 65 % its deck lost a " +
+                            "wedge once the fuse had left out its hidden faces). Mark parts Deck in the dropdown (or press K). 0 = untouched."),
+                            deckReducePct, 0f, 95f);
                     using (new EditorGUI.DisabledScope(nOar == 0))
                         oarReducePct = EditorGUILayout.Slider(new GUIContent("Oar reduce (%)",
                             "Cuts the Oar-marked meshes themselves (a galley's merged oar meshes can be very dense). " +
@@ -1516,7 +1544,7 @@ public class VehicleLabWindow : EditorWindow
                 || TierActive(Role.Sail, sailReducePct) || TierActive(Role.Rudder, rudderReducePct)
                 || TierActive(Role.Wheel, wheelReducePct) || TierActive(Role.Flip, flipReducePct)
                 || TierActive(Role.Preserve, preserveReducePct) || TierActive(Role.Detail, detailReducePct)
-                || TierActive(Role.Default, defaultReducePct) || TierActive(Role.Shroud, shroudReducePct) || TierActive(Role.Turret, turretReducePct) || TierActive(Role.Gun, gunReducePct) || TierActive(Role.Window, windowReducePct) || TierActive(Role.Railing, railingReducePct) || TierActive(Role.Chain, chainReducePct);
+                || TierActive(Role.Default, defaultReducePct) || TierActive(Role.Shroud, shroudReducePct) || TierActive(Role.Turret, turretReducePct) || TierActive(Role.Gun, gunReducePct) || TierActive(Role.Window, windowReducePct) || TierActive(Role.Railing, railingReducePct) || TierActive(Role.Chain, chainReducePct) || TierActive(Role.Deck, deckReducePct);
             bool twoSidedMarked = list.Any(x => x.role == Role.TwoSided);
             bool geometryWork = VehicleLabRules.HasGeometryWork(FastPath, doubleSided || fixInsideOut,
                 list.Any(x => x.role == Role.Flip), twoSidedMarked, reduceWork);
@@ -1535,7 +1563,7 @@ public class VehicleLabWindow : EditorWindow
             // the section silently did nothing on this path since it existed).
             if (FastPath && (doubleSided || fixInsideOut || riggingReducePct > 0f || structureReducePct > 0f || bodyReducePct > 0f
                              || oarReducePct > 0f || sailReducePct > 0f || rudderReducePct > 0f || wheelReducePct > 0f
-                             || flipReducePct > 0f || preserveReducePct > 0f || detailReducePct > 0f || defaultReducePct > 0f || shroudReducePct > 0f || turretReducePct > 0f || gunReducePct > 0f || windowReducePct > 0f || railingReducePct > 0f || chainReducePct > 0f))
+                             || flipReducePct > 0f || preserveReducePct > 0f || detailReducePct > 0f || defaultReducePct > 0f || shroudReducePct > 0f || turretReducePct > 0f || gunReducePct > 0f || windowReducePct > 0f || railingReducePct > 0f || chainReducePct > 0f || deckReducePct > 0f))
                 EditorGUILayout.HelpBox("Vertices control (Double-sided, Fix inside-out, and every reduce dial) does not run " +
                     "on the source-skeleton fast path — rigfast exports the source geometry as-is. Disable Use source " +
                     "skeleton for facing fixes or reduction.", MessageType.Info);
@@ -2097,7 +2125,7 @@ public class VehicleLabWindow : EditorWindow
             report.Add(("— Statistics (probe verts; projected = after the source-reduce dials) —", null));
             float DialFor(Role r) => r == Role.Rigging ? riggingReducePct : r == Role.Structure ? structureReducePct
                                    : r == Role.Body ? bodyReducePct : r == Role.Oar ? oarReducePct : r == Role.Sail ? sailReducePct
-                                   : r == Role.Rudder ? rudderReducePct : r == Role.Wheel ? wheelReducePct : r == Role.Flip ? flipReducePct : r == Role.Preserve ? preserveReducePct : r == Role.Detail ? detailReducePct : r == Role.Default ? defaultReducePct : r == Role.Shroud ? shroudReducePct : r == Role.Turret ? turretReducePct : r == Role.Gun ? gunReducePct : r == Role.Window ? windowReducePct : r == Role.Railing ? railingReducePct : r == Role.Chain ? chainReducePct : 0f;
+                                   : r == Role.Rudder ? rudderReducePct : r == Role.Wheel ? wheelReducePct : r == Role.Flip ? flipReducePct : r == Role.Preserve ? preserveReducePct : r == Role.Detail ? detailReducePct : r == Role.Default ? defaultReducePct : r == Role.Shroud ? shroudReducePct : r == Role.Turret ? turretReducePct : r == Role.Gun ? gunReducePct : r == Role.Window ? windowReducePct : r == Role.Railing ? railingReducePct : r == Role.Chain ? chainReducePct : r == Role.Deck ? deckReducePct : 0f;
             long totalV = 0, totalProj = 0;
             foreach (var grp in vlist.Where(p => p.role != Role.Ignore).GroupBy(p => p.role).OrderByDescending(g => g.Sum(p => (long)p.verts)))
             {
@@ -2184,7 +2212,7 @@ public class VehicleLabWindow : EditorWindow
         // stroke into the next model) — reset to the live defaults, same values as a fresh window.
         doubleSided = false; fixInsideOut = false;
         oarSweepDeg = 24f; oarDipDeg = 18f; oarFrames = 24; oarBladeRollDeg = 0f; oarLiftDeg = 0f; oarRakeDeg = 0f; oarPivotPct = 30f; oarLengthPct = 100f;
-        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f; wheelReducePct = 0f; flipReducePct = 0f; preserveReducePct = 0f; defaultReducePct = 0f; detailReducePct = 0f; shroudReducePct = 0f; turretReducePct = 0f; gunReducePct = 0f; windowReducePct = 0f; railingReducePct = 0f; chainReducePct = 0f; sailFoldIdle = false; sailFoldFrames = 12; sailFoldAngleDeg = 270f; sailFoldReverse = false; sailFoldSag = 0f; flagFoldOn = false; flagFoldDeg = 0f; flagFoldFrames = 12; srcFile2 = ""; model2Off = Vector3.zero; model2Rot = Vector3.zero; model2Scale = Vector3.one; model1Bright = 1f; model2Bright = 1f;
+        riggingReducePct = 75f; structureReducePct = 50f; bodyReducePct = 0f; oarReducePct = 0f; sailReducePct = 0f; rudderReducePct = 0f; wheelReducePct = 0f; flipReducePct = 0f; preserveReducePct = 0f; defaultReducePct = 0f; detailReducePct = 0f; shroudReducePct = 0f; turretReducePct = 0f; gunReducePct = 0f; windowReducePct = 0f; railingReducePct = 0f; chainReducePct = 0f; deckReducePct = 0f; sailFoldIdle = false; sailFoldFrames = 12; sailFoldAngleDeg = 270f; sailFoldReverse = false; sailFoldSag = 0f; flagFoldOn = false; flagFoldDeg = 0f; flagFoldFrames = 12; srcFile2 = ""; model2Off = Vector3.zero; model2Rot = Vector3.zero; model2Scale = Vector3.one; model1Bright = 1f; model2Bright = 1f;
         // …and the pre-0.5.4 generation dials the reset had ALWAYS skipped (review round 2): a tuned trail
         // spread, gun trunnion, recoil or tail-rotor trim silently carried into the next model too.
         spinEnabled = true; trailSpreadDeg = 35f; trailFrames = 12; gunPivot = 0.5f; gunDeployElev = 0f;
@@ -2313,7 +2341,7 @@ public class VehicleLabWindow : EditorWindow
         srcFile = srcFile, outGlb = outGlb, frames = frames, axisChoice = axisChoice, minVerts = minVerts, degrees = degrees,
         parts = parts, boneParts = boneParts, useSourceRig = useSourceRig, treadAdvCells = treadAdvCells, treadCellsPerLink = treadCellsPerLink,
         // orientation + tread isolation + wave rock — the rest of what the bake command consumes
-        tracksStatic = tracksStatic, treadMode = treadMode, wheelCentre = wheelCentre, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, defaultReducePct = defaultReducePct, shroudReducePct = shroudReducePct, turretReducePct = turretReducePct, gunReducePct = gunReducePct, windowReducePct = windowReducePct, railingReducePct = railingReducePct, chainReducePct = chainReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, flagFoldOn = flagFoldOn, flagFoldDeg = flagFoldDeg, flagFoldFrames = flagFoldFrames, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = 1f, model2ScaleXYZ = model2Scale, model1Bright = model1Bright, model2Bright = model2Bright, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
+        tracksStatic = tracksStatic, treadMode = treadMode, wheelCentre = wheelCentre, spinEnabled = spinEnabled, doubleSided = doubleSided, fixInsideOut = fixInsideOut, oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct, riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct, wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, defaultReducePct = defaultReducePct, shroudReducePct = shroudReducePct, turretReducePct = turretReducePct, gunReducePct = gunReducePct, windowReducePct = windowReducePct, railingReducePct = railingReducePct, chainReducePct = chainReducePct, deckReducePct = deckReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag, flagFoldOn = flagFoldOn, flagFoldDeg = flagFoldDeg, flagFoldFrames = flagFoldFrames, srcFile2 = srcFile2, model2Off = model2Off, model2Rot = model2Rot, model2Scale = 1f, model2ScaleXYZ = model2Scale, model1Bright = model1Bright, model2Bright = model2Bright, tailAxisChoice = tailAxisChoice, tailYawAdj = tailYawAdj, tailPitchAdj = tailPitchAdj, modelRot = modelRot, waveEnabled = waveEnabled,
         trailSpreadDeg = trailSpreadDeg, trailFrames = trailFrames, gunPivot = gunPivot, gunDeployElev = gunDeployElev, recoilDist = recoilDist, recoilFrames = recoilFrames, recoilLead = recoilLead,
         rockDegrees = rockDegrees, rockFrames = rockFrames, rockAxisChoice = rockAxisChoice, rockHeading = rockHeading,
         rockPitchDeg = rockPitchDeg, rockRollCycles = rockRollCycles, rockPitchCycles = rockPitchCycles, rockPitchPhase = rockPitchPhase,
@@ -2425,7 +2453,7 @@ public class VehicleLabWindow : EditorWindow
             oarLengthPct = r.oarLengthPct;         // DTO initializer 100 — an absent key cannot crush the oars
             riggingReducePct = r.riggingReducePct; structureReducePct = r.structureReducePct;
             bodyReducePct = r.bodyReducePct;   // DTO initializer 0 = do-nothing
-            oarReducePct = r.oarReducePct; sailReducePct = r.sailReducePct; rudderReducePct = r.rudderReducePct; wheelReducePct = r.wheelReducePct; flipReducePct = r.flipReducePct; defaultReducePct = r.defaultReducePct; shroudReducePct = r.shroudReducePct; turretReducePct = r.turretReducePct; gunReducePct = r.gunReducePct; windowReducePct = r.windowReducePct; railingReducePct = r.railingReducePct; chainReducePct = r.chainReducePct; preserveReducePct = r.preserveReducePct; detailReducePct = r.detailReducePct;   // same: absent-key 0 == untouched (Preserve: byte-identical)
+            oarReducePct = r.oarReducePct; sailReducePct = r.sailReducePct; rudderReducePct = r.rudderReducePct; wheelReducePct = r.wheelReducePct; flipReducePct = r.flipReducePct; defaultReducePct = r.defaultReducePct; shroudReducePct = r.shroudReducePct; turretReducePct = r.turretReducePct; gunReducePct = r.gunReducePct; windowReducePct = r.windowReducePct; railingReducePct = r.railingReducePct; chainReducePct = r.chainReducePct; deckReducePct = r.deckReducePct; preserveReducePct = r.preserveReducePct; detailReducePct = r.detailReducePct;   // same: absent-key 0 == untouched (Preserve: byte-identical)
             sailFoldIdle = r.sailFoldIdle;   // absent-key false == the legacy strike below the keel
             sailFoldFrames = r.sailFoldFrames <= 0 ? 12 : r.sailFoldFrames; sailFoldAngleDeg = r.sailFoldAngleDeg <= 0f ? 270f : r.sailFoldAngleDeg;   // absent-key: initializer defaults; <=0 guards a hand-edited file
             sailFoldReverse = r.sailFoldReverse;   // absent-key false == the drill-verified default direction
@@ -2790,6 +2818,9 @@ public class VehicleLabWindow : EditorWindow
         // CHAIN (2026-11-25): anchor chains' own soup tier. The file is always written, the tag sent only when a part is marked (VehicleRigArgs.chainMarked).
         string chainFile = Path.Combine(projRoot, prevDir, baseName + "_chain.txt").Replace('\\', '/');
         File.WriteAllLines(chainFile, src.Where(p => p.role == Role.Chain).Select(p => p.name).ToArray());
+        // DECK (2026-11-27): the decks' own weld tier. The file is always written, the tag sent only when a part is marked (VehicleRigArgs.deckMarked).
+        string deckFile = Path.Combine(projRoot, prevDir, baseName + "_deck.txt").Replace('\\', '/');
+        File.WriteAllLines(deckFile, src.Where(p => p.role == Role.Deck).Select(p => p.name).ToArray());
         // TWO-SIDED (2026-11-14): the file is always written, the tag sent only when a part is marked (VehicleRigArgs.twoSidedMarked).
         string twoSidedFile = Path.Combine(projRoot, prevDir, baseName + "_twosided.txt").Replace('\\', '/');
         File.WriteAllLines(twoSidedFile, src.Where(p => p.role == Role.TwoSided).Select(p => p.name).ToArray());
@@ -2807,7 +2838,7 @@ public class VehicleLabWindow : EditorWindow
             { "wheels", wheelsFile }, { "turrets", turretsFile }, { "ignore", ignoreFile }, { "tracks", tracksFile }, { "guns", gunsFile }, { "rotors", rotorsFile },
             { "tailrotors", tailrotorsFile }, { "trails", trailsFile }, { "muzzles", muzzlesFile }, { "cradles", cradlesFile }, { "oars", oarsFile }, { "sails", sailsFile },
             { "rigging", riggingFile }, { "structure", structureFile }, { "bodies", bodiesFile }, { "flags", flagsFile }, { "rudders", ruddersFile }, { "preserve", preserveFile },
-            { "flip", flipFile }, { "detail", detailFile }, { "default", defaultFile }, { "shroud", shroudFile }, { "window", windowFile }, { "railing", railingFile }, { "twosided", twoSidedFile }, { "chain", chainFile },
+            { "flip", flipFile }, { "detail", detailFile }, { "default", defaultFile }, { "shroud", shroudFile }, { "window", windowFile }, { "railing", railingFile }, { "twosided", twoSidedFile }, { "chain", chainFile }, { "deck", deckFile },
         }, PartTxFile(projRoot, prevDir, baseName));
         lastRigArgLine = VehicleRigArgLine.RigArgLine(rigArgs);
         string stdout;
@@ -2971,8 +3002,8 @@ public class VehicleLabWindow : EditorWindow
         oarSweepDeg = oarSweepDeg, oarDipDeg = oarDipDeg, oarFrames = oarFrames, oarBladeRollDeg = oarBladeRollDeg, oarLiftDeg = oarLiftDeg, oarRakeDeg = oarRakeDeg, oarPivotPct = oarPivotPct, oarLengthPct = oarLengthPct,
         riggingReducePct = riggingReducePct, structureReducePct = structureReducePct, bodyReducePct = bodyReducePct, oarReducePct = oarReducePct, sailReducePct = sailReducePct, rudderReducePct = rudderReducePct,
         wheelReducePct = wheelReducePct, flipReducePct = flipReducePct, preserveReducePct = preserveReducePct, detailReducePct = detailReducePct, shroudReducePct = shroudReducePct, turretReducePct = turretReducePct, gunReducePct = gunReducePct,
-        twoSidedMarked = ActiveParts.Any(p => p.role == Role.TwoSided), chainMarked = ActiveParts.Any(p => p.role == Role.Chain),
-        windowReducePct = windowReducePct, railingReducePct = railingReducePct, chainReducePct = chainReducePct, defaultReducePct = defaultReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag,
+        twoSidedMarked = ActiveParts.Any(p => p.role == Role.TwoSided), chainMarked = ActiveParts.Any(p => p.role == Role.Chain), deckMarked = ActiveParts.Any(p => p.role == Role.Deck),
+        windowReducePct = windowReducePct, railingReducePct = railingReducePct, chainReducePct = chainReducePct, deckReducePct = deckReducePct, defaultReducePct = defaultReducePct, sailFoldIdle = sailFoldIdle, sailFoldFrames = sailFoldFrames, sailFoldAngleDeg = sailFoldAngleDeg, sailFoldReverse = sailFoldReverse, sailFoldSag = sailFoldSag,
         flagFoldOn = flagFoldOn, flagFoldDeg = flagFoldDeg, flagFoldFrames = flagFoldFrames, srcFile2 = srcFile2, model2OffX = model2Off.x, model2OffY = model2Off.y, model2OffZ = model2Off.z,
         model2RotX = model2Rot.x, model2RotY = model2Rot.y, model2RotZ = model2Rot.z, model2ScaleX = model2Scale.x, model2ScaleY = model2Scale.y, model2ScaleZ = model2Scale.z,
         model1Bright = model1Bright, model2Bright = model2Bright, namesFiles = namesFiles, partTxFile = partTxFile,

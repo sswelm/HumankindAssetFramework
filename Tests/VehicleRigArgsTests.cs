@@ -247,6 +247,34 @@ public class VehicleRigArgsTests
         Assert.Equal(0f, VehicleRigArgLine.RigArgsFromRecipe("{\"srcFile\":\"D:/m/a.glb\",\"outGlb\":\"D:/m/a_Spin.glb\",\"frames\":15,\"parts\":[]}").args.chainReducePct);
     }
 
+    // 2026-11-27, the Deck role: its reduce tag (names file and dial) travels only when a part is marked, after chainreduce=.
+    [Fact]
+    public void The_deckreduce_tag_is_sent_only_when_a_part_is_marked()
+    {
+        var a = Sample();
+        a.deckReducePct = 35f;   // the dial alone sends nothing: without a marked part there is nothing to reduce
+        Assert.DoesNotContain(VehicleRigArgLine.RigArgv(a), x => x.value.StartsWith("deckreduce="));
+        a.chainMarked = true; a.deckMarked = true; a.twoSidedMarked = true; a.chainReducePct = 40f;
+        var t = VehicleRigArgLine.RigArgv(a).ToList();
+        Assert.Equal(("chainreduce=@C:/p/ship_chain.txt|40", true), t[79]);
+        Assert.Equal(("deckreduce=@C:/p/ship_deck.txt|35", true), t[80]);
+        Assert.Equal(("twosided=@C:/p/ship_twosided.txt", true), t[81]);
+        Assert.Equal(82, t.Count);
+    }
+
+    [Theory]
+    [InlineData(27, true)][InlineData(0, false)][InlineData(26, false)]
+    public void A_recipe_with_a_Deck_part_asks_for_the_tag_and_reads_its_dial(int role, bool expected)
+    {
+        var r = VehicleRigArgLine.RigArgsFromRecipe("{\"srcFile\":\"D:/m/a.glb\",\"outGlb\":\"D:/m/a_Spin.glb\",\"frames\":15,\"deckReducePct\":42.5,\"parts\":[{\"name\":\"Hull\",\"role\":0},{\"name\":\"Main deck\",\"role\":" + role + "}]}");
+        Assert.Equal(expected, r.args.deckMarked);
+        Assert.Equal(42.5f, r.args.deckReducePct);
+        Assert.Equal(expected ? new[] { "Main deck" } : new string[0], VehicleRigArgLine.NamesOf(r, "deck"));
+        Assert.Equal(27, VehicleRigArgLine.RoleOfNamesFile["deck"]);
+        // a recipe saved before the role existed has no key: the dial is 0
+        Assert.Equal(0f, VehicleRigArgLine.RigArgsFromRecipe("{\"srcFile\":\"D:/m/a.glb\",\"outGlb\":\"D:/m/a_Spin.glb\",\"frames\":15,\"parts\":[]}").args.deckReducePct);
+    }
+
     [Theory]
     [InlineData(25, true)][InlineData(18, false)][InlineData(24, false)]
     public void A_recipe_with_a_Two_sided_part_asks_for_the_tag(int role, bool expected)

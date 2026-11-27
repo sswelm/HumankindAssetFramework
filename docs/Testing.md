@@ -2734,7 +2734,7 @@ of 506,759 rays; Rudder's all-doubled 23,516; a first per-face version that also
 
 **Step (c), stage 2 of item (5), the weld tiers (2026-10-15).** `editor/BlenderVehicleRig.Stage2.cs` + `editor/BlenderWeld.cs`
 are the script's SOURCE-SIDE reduction tiers in C#, held by `vehiclerig.exe --stages 2` after stage 1 on the same rows. Per
-tier (DEFAULT, RIGGING, SHROUD, RAILING, CHAIN, STRUCTURE, BODY, OAR, SAIL, RUDDER, WHEEL, GUN, WINDOW, FLIP, PRESERVE, DETAIL; skipped without
+tier (DEFAULT, RIGGING, SHROUD, RAILING, CHAIN, STRUCTURE, BODY, DECK, OAR, SAIL, RUDDER, WHEEL, GUN, WINDOW, FLIP, PRESERVE, DETAIL; skipped without
 names or at 0.5 % or less, the dials read as `min(95, max(0, float))` - a `nan` is 0, as Python's max keeps its first
 argument) and per named part (the first object of the name; a name the scene has not is the WARN): the mesh into a bmesh;
 the WELD tiers (all but RIGGING, SHROUD, RAILING and CHAIN) run `remove_doubles` within each material - the vertices whose corners all

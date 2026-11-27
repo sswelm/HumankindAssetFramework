@@ -5,6 +5,14 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: a Deck role with its own reduce dial** (2026-11-27, user request). Decks can be marked **Deck**
+  (dropdown, or key **K**) and cut by a **Deck reduce (%)** slider in Vertices control, welded and collapsed like
+  Body but on their own dial, with their own Show-only filter. A reduce percentage counts from what a part holds: on
+  the Saleg's Revenge, once the Model Fuser had left out the deck part's hidden faces, Body 65 % cut a wedge out of the
+  visible deck, and a lower dial for the deck alone keeps it. Not guessed from names. A recipe that marks no part
+  Deck generates exactly as before.
+- **Vehicle Lab: the role menus are in alphabetical order** (2026-11-27, user request): the part dropdown, "Mark all
+  shown as" and the Show-only filter (after its None and Undecided entries). Saved recipes are unchanged.
 - **Model Fuser: Leave out faces no camera can see** (2026-11-27, user, the Saleg's Revenge: "most of the guns bodies
   are still inside that are not visible"). An optional pass after the fuse leaves out every face that no camera of the
   game sees from either side, keeping two rings around what shows. It is opted in per fuse group (View mode → the

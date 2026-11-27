@@ -770,9 +770,9 @@ public class GlbUnseenFacesTests
     [Fact]
     public void Every_Lab_role_has_its_place()
     {
-        // all 27 (VehicleLabWindow.Role): what the game draws standing still, what it does not draw, and what moves
-        var still = new[] { 0 /*Body*/, 4 /*Default*/, 15 /*Rigging*/, 16 /*Structure*/, 19 /*Preserve*/, 21 /*Detail*/, 22 /*Shroud*/, 23 /*Window*/, 24 /*Railing*/ };
-        for (int role = 0; role <= 26; role++)
+        // all 28 (VehicleLabWindow.Role): what the game draws standing still, what it does not draw, and what moves
+        var still = new[] { 0 /*Body*/, 4 /*Default*/, 15 /*Rigging*/, 16 /*Structure*/, 19 /*Preserve*/, 21 /*Detail*/, 22 /*Shroud*/, 23 /*Window*/, 24 /*Railing*/, 27 /*Deck*/ };
+        for (int role = 0; role <= 27; role++)
         {
             var expected = role == 3 ? GlbDisconnectedParts.UnseenRole.NotDrawn : still.Contains(role) ? GlbDisconnectedParts.UnseenRole.Still : GlbDisconnectedParts.UnseenRole.Moves;
             Assert.True(expected == GlbDisconnectedParts.UnseenRoleOfLab(new[] { role }, false), "role " + role);
