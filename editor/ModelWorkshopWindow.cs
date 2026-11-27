@@ -164,6 +164,14 @@ public abstract class ModelWorkshopWindow : EditorWindow
     {
         groupsAtOnce = EditorPrefs.GetInt(GroupsAtOncePref, 0);   // Unity forbids EditorPrefs reads in ScriptableObject field initializers
         if (rows.Count > 0 && triangleFreeCleanupVersion < 1) analyzePending = true;
+        // a script reload brings null strings back as "" and null arrays as empty ones (WorkshopRules.RestoredReason)
+        foreach (Row r in rows)
+        {
+            r.blocked = WorkshopRules.RestoredReason(r.blocked);
+            r.fileName = WorkshopRules.RestoredFileName(r.fileName, r.node);
+            r.min = WorkshopRules.RestoredBox(r.min); r.max = WorkshopRules.RestoredBox(r.max);
+            if (r.min == null || r.max == null) r.min = r.max = null;
+        }
     }
     void OnDisable() => DestroyPreview();
 
@@ -892,7 +900,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         {
             var fileNames = GlbDisconnectedParts.NodeNames(File.ReadAllBytes(srcFile)).ToDictionary(kv => kv.Key, kv => kv.Value);
             rows = GlbDisconnectedParts.Analyze(UniqueBytes(srcFile), mergePct / 100.0)
-                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, fileName = fileNames.TryGetValue(p.NodeIndex, out string fn) ? fn : p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = p.Blocked, triangleFree = p.TriangleFree, split = kept.Contains(p.NodeIndex), tear = keptTear.Contains(p.NodeIndex), delete = keptDelete.Contains(p.NodeIndex),
+                .Select(p => new Row { nodeIndex = p.NodeIndex, node = p.NodeName, fileName = fileNames.TryGetValue(p.NodeIndex, out string fn) ? fn : p.NodeName, mesh = p.MeshName, tris = p.Triangles, islands = p.Islands, blocked = WorkshopRules.AnalyzerReason(p.Blocked), triangleFree = p.TriangleFree, split = kept.Contains(p.NodeIndex), tear = keptTear.Contains(p.NodeIndex), delete = keptDelete.Contains(p.NodeIndex),
                                        fuse = keptFuse.TryGetValue(p.NodeIndex, out string kf) ? kf : "",
                                        verts = p.Vertices, min = p.Min?.Select(d => (float)d).ToArray(), max = p.Max?.Select(d => (float)d).ToArray() })
                 .OrderBy(r => NaturalPrefix(r.node), StringComparer.OrdinalIgnoreCase)
