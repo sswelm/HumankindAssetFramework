@@ -496,13 +496,14 @@ namespace HumankindAssetFramework.Tests
             };
             var placed = new[] { "Fused_P_Material2_11", "Fused_Y_Object_1722", "Mast" };
             var now = new[] { "Fused_P_Material2_11_Part_001", "Fused_Y_Object_1740", "Hull" };
-            var lost = VehicleLabRules.MarksNotCarried(roles, placed, now, new[] { "Fused_Y_Object_1722" });
+            var sources = new[] { "Fused_P_Material2_11", "Fused_Y_Object_1722", "Hull" };
+            var lost = VehicleLabRules.MarksNotCarried(roles, placed, sources, now, new[] { "Fused_Y_Object_1722" });
             // a placement is not inherited by a split child (Probe restores it by exact name only), so the Skarv's would be named
             Assert.Equal(new[] { "Fused_P_Material2_11 (placement)", "Fused_Q_Gone (Rotor)", "Mast (placement)" }, lost);
             // the Skarv as it was: a Wheel and no placement - everything lands
-            Assert.Empty(VehicleLabRules.MarksNotCarried(new Dictionary<string, string> { ["Fused_P_Material2_11"] = "Wheel" }, null, now, null));
+            Assert.Empty(VehicleLabRules.MarksNotCarried(new Dictionary<string, string> { ["Fused_P_Material2_11"] = "Wheel" }, null, sources, now, null));
             Assert.Equal(new[] { "X (Wheel + placement)" },
-                VehicleLabRules.MarksNotCarried(new Dictionary<string, string> { ["X"] = "Wheel" }, new[] { "X" }, new string[0], null));
+                VehicleLabRules.MarksNotCarried(new Dictionary<string, string> { ["X"] = "Wheel" }, new[] { "X" }, null, null, null));
         }
 
         [Fact]
@@ -511,8 +512,24 @@ namespace HumankindAssetFramework.Tests
             // PR review 2026-11-27: {A=Wheel, A_Part_001=Default}, the file now only A_Part_001 - Probe keeps its Default
             var roles = new Dictionary<string, string> { ["A"] = "Wheel" };
             var now = new[] { "A_Part_001" };
-            Assert.Equal(new[] { "A (Wheel)" }, VehicleLabRules.MarksNotCarried(roles, null, now, null, new[] { "A", "A_Part_001" }));
-            Assert.Empty(VehicleLabRules.MarksNotCarried(roles, null, now, null, new[] { "A" }));   // a child new to the session inherits
+            var session = new Dictionary<string, int> { ["A"] = 1, ["A_Part_001"] = 0 };
+            Assert.Equal(0, VehicleLabRules.ProbeSessionRole(now[0], session, 0, out string exact));
+            Assert.Equal("A_Part_001", exact);
+            Assert.Equal(new[] { "A (Wheel)" }, VehicleLabRules.MarksNotCarried(roles, null, new[] { exact }, now, null));
+            session.Remove("A_Part_001");
+            Assert.Equal(1, VehicleLabRules.ProbeSessionRole(now[0], session, 0, out string inherited));
+            Assert.Empty(VehicleLabRules.MarksNotCarried(roles, null, new[] { inherited }, now, null));
+        }
+
+        [Fact]
+        public void A_nested_split_child_carries_only_its_nearest_marked_ancestors_role()
+        {
+            var session = new Dictionary<string, int> { ["Hull"] = 1, ["Hull_Part_001"] = 2 };
+            const string child = "Hull_Part_001_Part_002";
+            Assert.Equal(2, VehicleLabRules.ProbeSessionRole(child, session, 0, out string inherited));
+            Assert.Equal("Hull_Part_001", inherited);
+            var roles = new Dictionary<string, string> { ["Hull"] = "Wheel", ["Hull_Part_001"] = "Turret" };
+            Assert.Equal(new[] { "Hull (Wheel)" }, VehicleLabRules.MarksNotCarried(roles, null, new[] { inherited }, new[] { child }, null));
         }
 
         [Fact]

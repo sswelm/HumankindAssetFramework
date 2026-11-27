@@ -3,6 +3,7 @@
 # Fused_P_Material2_11_Part_001 and Generate stopped with "part not found"). Runs the real Vehicle Lab window in an
 # isolated Unity project on a COPY of a real fused model: probe, mark, rewrite the source, Generate.
 #   HAF_STALE_PROBE_MODEL  the fused .glb to copy (default: the Skarv). Missing -> SKIP (exit 3).
+#   HAF_STALE_PROBE_BLENDER  optional Blender executable for the rejected OBJ preview regression.
 #   HAF_EDITOR_ROOT        the checkout whose editor/ is compiled (default: this one) - point it at master for the counterfactual.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -47,7 +48,13 @@ for f in "$EROOT"/editor/*.cs; do printf '"%s/editor/%s"\n' "$WEROOT" "${f##*/}"
 printf '"%s/tools/vehiclelab-stale-probe-drill/UnityVehicleLabStaleProbeTests.cs"\n' "$WROOT" >> "$TMPD/compile.rsp"
 dotnet "$UNITY/DotNetSdkRoslyn/csc.dll" "@$WTMP/compile.rsp" > "$TMPD/compile.log" 2>&1
 rc=$?; [ "$rc" -eq 0 ] || { cat "$TMPD/compile.log"; echo 'FAIL — stale-probe harness did not compile'; exit 1; }
-"$EDITOR" -batchmode -nographics -projectPath "$WTMP/project" -executeMethod UnityVehicleLabStaleProbeTests.Run -hafStaleModel "$WTMP/model.glb" -hafStaleSkinned "$WTMP/fixtures/models/fx_b_skinned.glb" -hafStaleOutput "$WTMP/result.txt" -logFile "$WTMP/unity.log"
+blender_args=()
+if [ -n "${HAF_STALE_PROBE_BLENDER:-}" ]; then
+  [ -f "$HAF_STALE_PROBE_BLENDER" ] || { echo 'FAIL — HAF_STALE_PROBE_BLENDER is not an executable file'; exit 2; }
+  cp -R "$EROOT/editor/Tools~" "$TMPD/project/Tools" || exit 2
+  blender_args=(-hafStaleBlender "$(cygpath -m "$HAF_STALE_PROBE_BLENDER")")
+fi
+"$EDITOR" -batchmode -nographics -projectPath "$WTMP/project" -executeMethod UnityVehicleLabStaleProbeTests.Run -hafStaleModel "$WTMP/model.glb" -hafStaleSkinned "$WTMP/fixtures/models/fx_b_skinned.glb" -hafStaleOutput "$WTMP/result.txt" -logFile "$WTMP/unity.log" "${blender_args[@]}"
 rc=$?
 [ -f "$TMPD/result.txt" ] || { tail -30 "$TMPD/unity.log"; echo 'FAIL — stale-probe harness did not run'; exit 1; }
 cat "$TMPD/result.txt"

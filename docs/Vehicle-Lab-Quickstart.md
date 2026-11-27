@@ -172,11 +172,12 @@ Otherwise Generate stops before writing anything and **changes nothing**: the pa
 and the probe record stay as they were. The status names each marking that would not carry over (with its role, or
 "placement") and each new part with the role it would take. Two marked members of one fused group that are now a
 single part count as not carried: neither role is given to that part. A manual Probe says so in its status too.
-On a Blender-probed source (OBJ, .blend), the stopped probe has already rewritten its preview FBX on disk, so the kept
-turntable can change at the next asset refresh.
+On a Blender-probed source (OBJ, .blend), the Lab publishes the preview FBX only after accepting the probe.
+A nested split child carries the nearest marked ancestor's role. Generate stops if another marked ancestor
+has no part left to carry its role.
 
-If the file changes again while the Lab re-probes it, Generate stops with "the source changed again" and keeps the
-first read's rows. Press Generate again.
+If the file changes again while the Lab re-probes it, Generate keeps the last accepted rows and preview and reports
+that the source changed again. Press Generate again to check the newest file.
 
 From the stop, either point the field back at the file you probed (Generate then runs as before), or press
 **Probe parts** to take the new file's parts. Probe parts drops the named markings, so check those rows before you

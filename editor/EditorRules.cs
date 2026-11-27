@@ -964,10 +964,22 @@ public static class VehicleLabRules
 
     /// <summary>An exact session role wins, including Default. Split children inherit only a marked role.</summary>
     public static int? ProbeSessionRole(string name, IReadOnlyDictionary<string, int> roles, int defaultRole)
+        => ProbeSessionRole(name, roles, defaultRole, out _);
+
+    public static int? ProbeSessionRole(string name, IReadOnlyDictionary<string, int> roles, int defaultRole, out string source)
     {
-        if (roles.TryGetValue(name, out int exact)) return exact;
+        if (roles.TryGetValue(name, out int exact))
+        {
+            source = name;
+            return exact;
+        }
         foreach (string parent in ParentNames(name))
-            if (roles.TryGetValue(parent, out int inherited) && inherited != defaultRole) return inherited;
+            if (roles.TryGetValue(parent, out int inherited) && inherited != defaultRole)
+            {
+                source = parent;
+                return inherited;
+            }
+        source = null;
         return null;
     }
 
@@ -1022,22 +1034,19 @@ public static class VehicleLabRules
     }
 
     /// <summary>The markings a re-Probe could not land, as "name (Wheel)" / "name (placement)" / "name (Wheel + placement)",
-    /// sorted. A kept role lands when its name is still a part, when it moved to a renamed fused group
-    /// (<paramref name="migratedFrom"/>), or when a split child inherits it (<see cref="ProbeSessionRole"/>: a part whose
-    /// <see cref="ParentNames"/> include it and that is new to the session: a row the session already listed keeps its own
-    /// role, Default included, as <see cref="ProbeSessionRole"/> rules). A kept placement lands by exact name or by migration
-    /// only: placements are not inherited.</summary>
+    /// sorted. Probe supplies the old names whose roles were actually assigned to the final rows, including exact matches,
+    /// the nearest marked ancestor of a new split child, and renamed fused groups. Placements land by exact name or by migration.
+    /// </summary>
     public static List<string> MarksNotCarried(IEnumerable<KeyValuePair<string, string>> keptRoles, IEnumerable<string> keptPlacements,
-                                               IEnumerable<string> newNames, IEnumerable<string> migratedFrom, IEnumerable<string> sessionNames = null)
+                                               IEnumerable<string> roleSources, IEnumerable<string> newNames, IEnumerable<string> migratedPlacements)
     {
+        var carried = new HashSet<string>(roleSources ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
         var now = new HashSet<string>(newNames ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
-        var moved = new HashSet<string>(migratedFrom ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
-        var listed = new HashSet<string>(sessionNames ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
-        var parents = new HashSet<string>(now.Where(n => !listed.Contains(n)).SelectMany(ParentNames), StringComparer.Ordinal);
+        var moved = new HashSet<string>(migratedPlacements ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
         var lost = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
         void Lose(string name, string what) { if (!lost.TryGetValue(name, out var l)) lost[name] = l = new List<string>(); if (!l.Contains(what)) l.Add(what); }
         foreach (var kv in keptRoles ?? Enumerable.Empty<KeyValuePair<string, string>>())
-            if (!string.IsNullOrEmpty(kv.Key) && !now.Contains(kv.Key) && !moved.Contains(kv.Key) && !parents.Contains(kv.Key)) Lose(kv.Key, kv.Value);
+            if (!string.IsNullOrEmpty(kv.Key) && !carried.Contains(kv.Key)) Lose(kv.Key, kv.Value);
         foreach (string n in keptPlacements ?? Enumerable.Empty<string>())
             if (!string.IsNullOrEmpty(n) && !now.Contains(n) && !moved.Contains(n)) Lose(n, "placement");
         return lost.Select(kv => kv.Key + " (" + string.Join(" + ", kv.Value) + ")").ToList();

@@ -30,11 +30,13 @@ Dates are first-verified-in-game. Many entries pre-date the dating convention an
     - A bone the user had cleared from its name guess was guessed again on every probe, so a merely touched rigged
       source stopped every Generate. Bones now keep an explicit Default, as mesh rows do.
     - On the fast path, lost mesh markings were swapped away unnamed. Both lists are now judged on either path.
-    - Caveat: on a Blender-probed source, a stop has already rewritten the probe's preview FBX on disk.
+  - The carry-over check tracks which old marking each new row actually received. A nested split child carries
+    the closest marked ancestor's role, and Generate stops if a farther mark would disappear.
+  - Each probe checks the source again before publishing its rows and preview. The Blender route stages the FBX
+    beside the final preview and publishes it only after the probe is accepted.
   - A recipe-loaded session has no record and runs as before.
-  - Proven by `tools/vehiclelab_stale_probe_unity_drill.sh` on a copy of the Skarv plus the rig generator's skinned
-    fixture: 62 of 62 checks pass. Against master's editor, the rewrite scenario fails with the user's error. Against
-    the PR's first commit, 29 fail; against its second, five fail.
+  - `tools/vehiclelab_stale_probe_unity_drill.sh` covers the Skarv, the rig generator's skinned fixture, and
+    preservation of the imported preview when an OBJ probe is refused.
 
 - **Vehicle Lab: the limited dissolve leaves faces wound against each other apart, as Blender does (2026-11-25).**
   Found by the Blender-parity run: the vehicle_rig drill failed on one recipe, `hms_roberts_1940_split_fused`, on one

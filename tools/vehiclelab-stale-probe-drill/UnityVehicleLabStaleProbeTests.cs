@@ -104,6 +104,8 @@ public static class UnityVehicleLabStaleProbeTests
             object PartNamed(string n) => Parts().FirstOrDefault(p => (string)p.GetType().GetField("name").GetValue(p) == n);
             string RoleOf(string n) { var p = PartNamed(n); return p == null ? "(no such part)" : p.GetType().GetField("role").GetValue(p).ToString(); }
             void Mark(string n, string role) { var p = PartNamed(n); var f = p.GetType().GetField("role"); f.SetValue(p, Enum.Parse(f.FieldType, role)); }
+            void Place(string n, Vector3 offset) { var p = PartNamed(n); p.GetType().GetField("offset").SetValue(p, offset); }
+            int Swaps() => (int)Field("probeSwaps").GetValue(w);
             bool Generate() { if (File.Exists(outGlb)) File.Delete(outGlb); Call(w, "Vehicleize"); return Status().StartsWith("DONE", StringComparison.Ordinal) && File.Exists(outGlb); }
             // a fresh window on `bytes`, probed, with these markings
             void Session(byte[] bytes, params (string name, string role)[] marks)
@@ -182,19 +184,49 @@ public static class UnityVehicleLabStaleProbeTests
             Check("guessed role: the status names the new part and the role it would take", Regex.IsMatch(Status(), Regex.Escape(guessedNew) + @" \((Rigging|Rotor)\)"), Status());
             Untouched("guessed role", names6, stamp6, (after, "Wheel"), (guessed, "Default"));
 
-            // 8. review round 2, reproduced: the migration's second probe read a file rewritten between the two reads and put its
-            // rows in unjudged (a guessed Rigging row generated, its newer stamp hid the change). The first read's rows must stay.
+            // A source rewrite after the read but before the swap leaves the previously accepted session intact.
             Session(Renamed(model, (after, before)), (before, "Wheel"));
-            WriteSource(model);   // the Skarv rewrite: the Wheel migrates, so Probe runs its second read
+            string stamp8 = Stamp();
+            WriteSource(model);
             string propeller = "Fused_Xp_propeller_9"; bool rewrote = false;
             Application.LogCallback hook = (msg, st, ty) => { if (!rewrote && msg.Contains("markings carried over by group")) { rewrote = true; WriteSource(Renamed(model, (guessed, propeller))); } };
             Application.logMessageReceived += hook;
             bool gen8; try { gen8 = Generate(); } finally { Application.logMessageReceived -= hook; }
-            Check("rewrite between the two reads: the hook fired (the fixture migrates)", rewrote);
-            Check("rewrite between the two reads: Generate stops, saying the source changed again", !gen8 && Status().Contains("changed again"), Status());
-            Check("rewrite between the two reads: the guessed row is not in the session", PartNamed(propeller) == null && RoleOf(guessed) == "Default", string.Join(", ", Names()));
-            Check("rewrite between the two reads: the Wheel carried from the first read", RoleOf(after) == "Wheel", RoleOf(after));
-            Check("rewrite between the two reads: the next press judges the new file and stops on the guess", !Generate() && Status().Contains(propeller + " (Rigging)"), Status());
+            Check("rewrite before the swap: the hook fired (the fixture migrates)", rewrote);
+            Check("rewrite before the swap: Generate stops, saying the source changed again", !gen8 && Status().Contains("changed again"), Status());
+            Check("rewrite before the swap: the guessed row is not in the session", PartNamed(propeller) == null && RoleOf(guessed) == "Default", string.Join(", ", Names()));
+            Check("rewrite before the swap: the original part and Wheel marking are intact", PartNamed(after) == null && RoleOf(before) == "Wheel", RoleOf(before));
+            Check("rewrite before the swap: the probe record is intact", Stamp() == stamp8);
+            Check("rewrite before the swap: the next press judges the new file and stops on the guess", !Generate() && Status().Contains(propeller + " (Rigging)"), Status());
+
+            // The second read still redraws a migrated placement. A rewrite during that read may not publish it.
+            var offset = new Vector3(0.25f, 0, 0);
+            Session(Renamed(model, (after, before)), (before, "Wheel"));
+            Place(before, offset);
+            WriteSource(model);
+            int beforeRedraw = Swaps();
+            Check("placement migration: both stable reads complete and Generate runs", Generate() && Swaps() == beforeRedraw + 2, Status());
+            var moved = PartNamed(after);
+            Check("placement migration: the new name keeps the Wheel and its offset", moved != null && RoleOf(after) == "Wheel" &&
+                (Vector3)moved.GetType().GetField("offset").GetValue(moved) == offset, Status());
+
+            Session(Renamed(model, (after, before)), (before, "Wheel"));
+            Place(before, offset);
+            WriteSource(model);
+            beforeRedraw = Swaps();
+            int reads = 0;
+            Application.LogCallback redrawHook = (msg, st, ty) =>
+            {
+                if (msg.StartsWith("[VehicleLab] probe (C#, in-process):", StringComparison.Ordinal) && ++reads == 2)
+                    WriteSource(Renamed(model, (guessed, propeller)));
+            };
+            Application.logMessageReceived += redrawHook;
+            bool genRedraw;
+            try { genRedraw = Generate(); } finally { Application.logMessageReceived -= redrawHook; }
+            Check("placement redraw rewrite: the second read ran", reads == 2);
+            Check("placement redraw rewrite: Generate stops and no second swap occurs",
+                !genRedraw && Status().Contains("changed again") && Swaps() == beforeRedraw + 1, Status());
+            Check("placement redraw rewrite: the first accepted Wheel remains", RoleOf(after) == "Wheel" && PartNamed(propeller) == null, Status());
 
             // 9. review round 2, the fast path: a rigged source (the generator's skinned fixture) with a bone named so the probe
             // guesses Turret, which the user cleared to Default. A merely touched file must not stop every Generate.
@@ -220,6 +252,51 @@ public static class UnityVehicleLabStaleProbeTests
             WriteSource(Renamed(skinned, (mesh9, "Zz_Renamed_Mesh")));
             Check("rigged: a lost MESH marking stops the fast-path Generate", !Generate() && Status().Contains(mesh9 + " (Detail)"), Status());
             Untouched("rigged, lost mesh marking", names9, stamp9, (mesh9, "Detail"));
+
+            // A nested child inherits the nearest marked ancestor only. Its Wheel and Turret ancestors cannot
+            // both count as carried when that child is the only survivor of their two markings.
+            const string ancestor = "ReviewAncestor", nested = ancestor + "_Part_001", leaf = nested + "_Part_002";
+            Session(Renamed(model, (pairA, ancestor), (pairB, nested)), (ancestor, "Wheel"), (nested, "Turret"));
+            var nestedNames = Names(); string nestedStamp = Stamp();
+            WriteSource(Renamed(model, (pairA, "ReviewReplacement"), (pairB, leaf)));
+            Check("nested split: Generate stops and names the farther marking", !Generate() && Status().Contains(ancestor + " (Wheel)"), Status());
+            Untouched("nested split", nestedNames, nestedStamp, (ancestor, "Wheel"), (nested, "Turret"));
+
+            string blender = Arg("-hafStaleBlender");
+            if (blender.Length > 0)
+            {
+                string obj = Path.Combine(dir, "preview.obj").Replace('\\', '/');
+                const string previewDir = "Assets/StaleBlenderPreview";
+                string fbx = Path.Combine(proj, previewDir, "preview_probe.fbx");
+                byte[] Obj(string name, int width) => Encoding.UTF8.GetBytes(
+                    $"o {name}\nv 0 0 0\nv {width} 0 0\nv 0 1 0\nv 0 0 1\nf 1 3 2\nf 1 2 4\nf 2 3 4\nf 1 4 3\n");
+                Session(model);
+                Field("findBlender").SetValue(w, new Func<string>(() => blender));
+                Field("headlessDir").SetValue(w, previewDir);
+                Field("srcFile").SetValue(w, obj);
+                WriteFile(obj, Obj("PreviewHull", 1));
+                Call(w, "Probe");
+                string marked = Names().SingleOrDefault();
+                Check("Blender probe: initial preview was written", marked != null && File.Exists(fbx), Status());
+                var oldPreview = (GameObject)Field("inst").GetValue(w);
+                Check("Blender probe: the preview was imported and instantiated", oldPreview != null);
+                byte[] previousPreview = File.ReadAllBytes(fbx);
+                Mark(marked, "Detail");
+                Place(marked, Vector3.right);
+                string oldStamp = Stamp();
+                WriteFile(obj, Obj("PreviewReplacement", 3));
+                Check("Blender probe: Generate stops when the role and placement would be lost",
+                    !Generate() && Status().Contains(marked + " (Detail + placement)"), Status());
+                Untouched("Blender probe", new[] { marked }, oldStamp, (marked, "Detail"));
+                var placed = PartNamed(marked);
+                Check("Blender probe: refusal preserves the marked placement",
+                    placed != null && (Vector3)placed.GetType().GetField("offset").GetValue(placed) == Vector3.right);
+                Check("Blender probe: refusal preserves the imported preview file", previousPreview.SequenceEqual(File.ReadAllBytes(fbx)));
+                Check("Blender probe: refusal preserves the turntable instance", oldPreview != null && ReferenceEquals(oldPreview, Field("inst").GetValue(w)));
+                Call(w, "Probe");
+                Check("Blender probe: manually accepted probe publishes the new preview", Names().Single() != marked && !previousPreview.SequenceEqual(File.ReadAllBytes(fbx)), Status());
+                Check("Blender probe: staged files were cleaned up", Directory.GetFiles(Path.Combine(proj, previewDir), ".haf-probe-*").Length == 0);
+            }
 
             // 7. a recipe-loaded session is not a probe: its parts run as saved, a touched source is not re-probed
             Session(model, (after, "Wheel"));
