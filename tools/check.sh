@@ -270,10 +270,9 @@ push_step run "plugin build (dotnet build -c Release)" dotnet build "$ROOT/Human
 for culture_var in $(compgen -e | grep -ix 'HAF_TEST_CULTURE'); do unset "$culture_var"; done
 push_step run "plugin unit tests (dotnet test)" dotnet test "$ROOT/Tests/HumankindAssetFramework.Tests.csproj" -c Release --nologo -v q
 
-# The gate's own regression tests head the lane: they time subprocesses (a gate's workers, a shell sourcing the oracle
-# wrapper) and timed out under the thirteen parity drills - which the push no longer runs (2026-10-30). The oracle tests
-# belong to the parity mode, where the record machinery is used.
-push_step run_lane "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
+# The gate's regression suite tests short subprocess deadlines. Run it before starting the Unity and native drills:
+# on Windows, their process startup load made a control that printed its result time out at two seconds.
+push_step run "parallel gate regression tests (completion, paths and verdicts)" python "$ROOT/Tests/test_parallel_gate.py"
 # The suite's culture override seen from outside (it runs the assembly the unit-test step just built): a listed name runs
 # the suite under it, a made-up one fails the run and says why. No test inside the assembly can hold what its own
 # module initializer does with a refusal.
