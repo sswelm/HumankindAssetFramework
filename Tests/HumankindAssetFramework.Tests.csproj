@@ -34,6 +34,7 @@
     <Compile Include="..\editor\GlbDisconnectedParts.Occluders.cs" Link="GlbDisconnectedParts.Occluders.cs" />
     <Compile Include="..\editor\GlbDisconnectedParts.Covered.cs" Link="GlbDisconnectedParts.Covered.cs" />
     <Compile Include="..\editor\GlbDisconnectedParts.Weld.cs" Link="GlbDisconnectedParts.Weld.cs" />
+    <Compile Include="..\editor\GlbDisconnectedParts.Unseen.cs" Link="GlbDisconnectedParts.Unseen.cs" />
     <!-- Pure editor decision kernels (extraction freshness, natural ordering) — same pattern. -->
     <Compile Include="..\editor\GlbDisconnectedParts.Explain.cs" Link="GlbDisconnectedParts.Explain.cs" />
     <Compile Include="..\editor\BlenderExecutable.cs" Link="BlenderExecutable.cs" />

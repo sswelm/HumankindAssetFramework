@@ -115,6 +115,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // they clearly agree the file stores mirrored parts already facing outward, undoes the glTF reversal that would turn
     // them inward (see GlbDisconnectedParts, step 3b). The fuse report and a warning say when it would help.
     [SerializeField] bool checkMirrored = false;
+    [SerializeField] bool leaveOutUnseen = false;   // the fuse's optional unseen-faces pass (GlbDisconnectedParts.Unseen.cs)
     bool analyzePending;   // slider moved: recount on the first Layout pass after the drag releases
     [SerializeField] Vector2 scroll;
     readonly List<Rect> rowRects = new List<Rect>();   // per shown row, measured at Repaint: the ↑/↓ keys keep the highlight in view by these, not by an assumed row height
@@ -728,6 +729,17 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 "part with the plain parts it is welded to and undoes the reversal only when they clearly agree the file is stored that way; " +
                 "mixed evidence changes nothing, and a file stored the standard way (the Teutonic) comes out byte-identical. Off by default. " +
                 "The fuse warns you when a group would need it."), checkMirrored);
+            // UNSEEN FACES (2026-11-27, Saleg's Revenge: "most of the guns bodies are still inside that are not visible")
+            leaveOutUnseen = EditorGUILayout.ToggleLeft(new GUIContent("Leave out faces no camera can see",
+                "After the fuse, every face that no camera of the game can see from EITHER side is left out: what lies inside the ship - " +
+                "gun bodies under the deck, the inner skin of the hull, the undersides below the hull. The cameras are the hidden twins': " +
+                "straight above and at 65, 40 and 15 degrees above the horizon. A face whose back shows stays, so the Lab's inside-out fix, " +
+                "Flip, TwoSided and double-sided output cannot open a hole, and two rings of faces around everything that shows stay too " +
+                "(rays miss what a slit or a lip shows). The Factory bakes to a triangle budget, so what goes here is detail " +
+                "the visible ship gets back.\n\nThe Vehicle Lab's roles for this output are read (its recipe and the lists of its last " +
+                "Generate): a part the Lab ignores hides nothing; a part that moves (wheels, turrets, guns, sails, flags, oars, rudders...), " +
+                "is placed, or is Flip or TwoSided hides nothing and loses nothing. Change a part to one of those afterwards and the Lab asks " +
+                "you to fuse again. Off by default. Saleg's Revenge: about half the faces the game would draw."), leaveOutUnseen);
             using (new EditorGUILayout.HorizontalScope())
             {
                 bool sidecarExists = File.Exists(FuseSidecarPath(srcFile) ?? "");
@@ -1763,8 +1775,34 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 foreach (var w in rr.Warnings) Debug.LogWarning("[Workshop] delete: " + w);
                 if (rr.Changed) { bytes = rr.Bytes; done++; lines.Add(rr.Details[0]); }
             }
+            // …and last, when asked, every face no camera sees from either side leaves the parts that stand still
+            // (GlbDisconnectedParts.Unseen.cs): after the fuse, so the windings it judges are the output's own
+            GlbDisconnectedParts.UnseenResult unseen = null;
+            if (leaveOutUnseen && done > 0)
+            {
+                EditorUtility.DisplayProgressBar("Model Workshop", "Leaving out the faces no camera can see…", 0.9f);
+                var lab = LabRecordsFor(outGlb, out string labNote);
+                unseen = GlbDisconnectedParts.LeaveOutUnseenFaces(bytes, (i, name) =>
+                {
+                    var mine = lab.Where(x => GlbDisconnectedParts.LabNameMatches(name, x.name)).ToList();
+                    return GlbDisconnectedParts.UnseenRoleOfLab(mine.Select(x => x.role), mine.Any(x => x.placed));
+                });
+                foreach (var w in unseen.Warnings) Debug.LogWarning("[Workshop] " + w);
+                if (unseen.Changed) bytes = unseen.Bytes;
+                lines.Add(unseen.Details[0] + " — " + labNote);
+            }
             if (done == 0) { status = "Nothing changed — no group produced a fused mesh and nothing was deleted (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
+            // the parts that hid faces, beside the output: the Vehicle Lab asks before it generates when one of them is no
+            // longer a still, drawn part (it is ignored, moves or is placed now, and what it hid may show as a hole)
+            try
+            {
+                string unseenSidecar = GlbDisconnectedParts.UnseenSidecarPath(outGlb);
+                if (unseen != null && unseen.Changed)
+                    File.WriteAllLines(unseenSidecar, new[] { GlbDisconnectedParts.UnseenSidecarHeader + "|" + bytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) }.Concat(unseen.Hiders.Select(n => "hid|" + n)));
+                else if (File.Exists(unseenSidecar)) File.Delete(unseenSidecar);   // this output left nothing out: an old list would ask about nothing
+            }
+            catch (Exception e) { Debug.LogWarning("[Workshop] could not write the unseen-faces list beside the output: " + e.Message); }
             // the groupings and the marks, next to the source: a later Probe of this file restores them. An empty write
             // CLEARS the file (Save groups' documented "clear"), so a delete-only run — no letters at all — must not
             // touch it: it would silently drop the groups saved earlier (self-review of PR #63).
@@ -1781,7 +1819,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
             }
             catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's fuse groupings sidecar: " + e.Message); }
             string reportPath = outGlb + ".fuse-report.txt";
-            try { File.WriteAllText(reportPath, WorkshopRules.FuseReport(srcFile, outGlb, weldPermille, report)); }
+            string unseenReport = unseen == null ? "" : "\n" + string.Join("\n", unseen.Details.Concat(unseen.Warnings)) + "\n";
+            try { File.WriteAllText(reportPath, WorkshopRules.FuseReport(srcFile, outGlb, weldPermille, report) + unseenReport); }
             catch (Exception e) { Debug.LogWarning("[Workshop] could not write the fuse report: " + e.Message); reportPath = "(not written: " + e.Message + ")"; }
             foreach (var g in report) foreach (var w in g.Warnings) Debug.LogWarning($"[Workshop] ⊕{g.Letter}: " + w);
             Debug.Log($"[Workshop] fuse report: {reportPath}");
@@ -1802,6 +1841,41 @@ public abstract class ModelWorkshopWindow : EditorWindow
     }
 
     // the parts marked for deletion, stripped from a file already written (the plane cut writes its own output)
+    // THE VEHICLE LAB'S RECORDS OF A FUSED OUTPUT (for the unseen-faces pass): the recipe named after it, when that recipe
+    // reads this very file (its roles, and whether a part is placed), and the role lists of the Lab's last Generate from it
+    // (named after the recipe's own output). The two can disagree - a recipe saved before the last role change - and the
+    // pass is then careful both ways (GlbDisconnectedParts.UnseenRoleOfLab). `note` says what was found, for the status.
+    static List<(string name, int role, bool placed)> LabRecordsFor(string fusedOutput, out string note)
+    {
+        var found = new List<(string name, int role, bool placed)>();
+        string projRoot = Directory.GetParent(Application.dataPath).FullName;
+        string labDir = Path.Combine(projRoot, "Assets/FactorySource/VehicleLab");
+        string recipePath = Path.Combine(labDir, "Recipes", Path.GetFileNameWithoutExtension(fusedOutput) + ".json");
+        if (!File.Exists(recipePath)) { note = "no Vehicle Lab recipe for this output yet: every part counted as standing still and drawn"; return found; }
+        try
+        {
+            var recipe = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(recipePath));
+            string reads = (string)recipe["srcFile"] ?? "";
+            if (!SamePath(reads, fusedOutput)) { note = $"the Vehicle Lab recipe {Path.GetFileName(recipePath)} reads another file: every part counted as standing still and drawn"; return found; }
+            bool Off(Newtonsoft.Json.Linq.JToken v, float neutral) => v != null && new[] { "x", "y", "z" }.Any(k => Math.Abs(((float?)v[k] ?? neutral) - neutral) > 1e-5f);
+            foreach (var p in (recipe["parts"] as Newtonsoft.Json.Linq.JArray ?? new Newtonsoft.Json.Linq.JArray()).OfType<Newtonsoft.Json.Linq.JObject>())
+                found.Add(((string)p["name"] ?? "", (int?)p["role"] ?? 4, Off(p["offset"], 0f) || Off(p["scale"], 1f)));
+            int fromRecipe = found.Count, fromLists = 0;
+            string labOut = (string)recipe["outGlb"];
+            if (!string.IsNullOrEmpty(labOut))
+                foreach (var kv in VehicleRigArgLine.RoleOfNamesFile)
+                {
+                    string list = Path.Combine(labDir, Path.GetFileNameWithoutExtension(labOut) + "_" + kv.Key + ".txt");
+                    if (!File.Exists(list)) continue;
+                    foreach (string n in File.ReadAllLines(list).Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith("#", StringComparison.Ordinal)))
+                    { found.Add((n, kv.Value, false)); fromLists++; }
+                }
+            note = $"the Vehicle Lab's roles read from {Path.GetFileName(recipePath)} ({fromRecipe} part(s)) and its last Generate's lists ({fromLists} name(s))";
+        }
+        catch (Exception e) { found.Clear(); note = "the Vehicle Lab recipe could not be read (" + e.Message + "): every part counted as standing still and drawn"; }
+        return found;
+    }
+
     string ApplyDeletionsTo(string glb)
     {
         var toDelete = new HashSet<int>(rows.Where(r => r.delete).Select(r => r.nodeIndex));

@@ -562,6 +562,27 @@ windows. **Deep dive:**
   the plain parts they touch and acts only on a clear verdict; with the box off, the status after a fuse leads with
   the groups whose mirrored parts are still reversed in the output and how many faces, and the Fuser's own preview will not show it,
   because it draws the source as stored),
+  tick **Leave out faces no camera can see** to drop what lies inside the model (0.5.7, off by default): after the fuse
+  and the deletions, every face that no camera of the game sees from **either** side is left out — gun bodies under the
+  deck, the inner skin of a hull, undersides below it. The cameras are the hidden twins' (straight above, and at 65, 40
+  and 15 degrees above the horizon, more directions and points for larger faces); a face stops a camera's view only
+  where it shows its front, as under back-face culling; glass and cut-outs hide nothing and are kept. A face whose
+  back shows stays, so the Lab's inside-out fix, Flip, TwoSided and double-sided output cannot turn a removed face
+  into a hole. Rays from a few points along a few directions miss what a camera sees through a slit or past a lip, so
+  two rings of faces around everything that shows stay as well (the rim). The Fuser reads the Vehicle Lab's records of the output — the recipe named after it, when it reads this
+  file, and the role lists of its last Generate: a part the Lab ignores hides nothing; a part that moves or changes
+  facing (wheels, turrets, guns, rotors, trails, muzzles, cradles, oars, sails, flags, rudders, chains, caterpillars,
+  Flip, TwoSided, Edgecase), a placed part, a skinned or morphing mesh hides nothing and loses nothing; where the
+  recipe and the lists disagree the pass takes the careful reading. With no recipe yet, every part counts as standing
+  still. The Factory bakes the unit to a triangle budget, so what goes here is detail the visible ship gets back:
+  on the Saleg's Revenge 1,217,786 of the 2,400,377 faces of the parts that stand still (51 %), in 43 s, and the
+  fused file from 97.6 to 64.6 MB. Rendered before and after from 96 directions the pass does not ask (640 x 640, back
+  faces culled), 258 of 2.83 million ship pixels changed, 7 of them to sky; the rest show a face about 2 % of the
+  ship's size behind the one left out — a pixel or two at the gun-port fittings. No sampled rule reaches zero: asking
+  every face from 161 directions still changed 102 pixels and took 11 minutes. The parts that hid faces are listed beside the
+  output (`<output>.unseen.txt`); when one of them is ignored, moving or placed in the Lab later, Generate names it
+  and asks before it runs (fuse again with the current roles). The pose is the file's: the water line is not
+  modelled, and a part the Lab moves without a role that says so is not known to move,
   leave **Fuse — groups at once** at **0** (auto: half the logical processors; measured on a 22-group ship, 8 at once is
   the sweet spot on 16 threads and more is no faster, since the largest group's weld slows as the others compete for
   memory bandwidth — lower it when the editor must stay responsive during a fuse or memory is short; the output never
@@ -654,7 +675,7 @@ windows. **Deep dive:**
   Backspace clear every mark. The Split checks and the deletion marks persist in `<source>.marks.txt` (S = split,
   X = delete, the fuse sidecar's format): **Save marks** / **Load marks** in the Cutter, Save/Load groups in the Fuser,
   and every Split, Plane cut and Fuse writes it; the first Probe of a file reads it. Both windows share it.
-  Triangles are preserved exactly, hidden twins apart (above: they are left out); the source parts keep their transforms and children and lose only their mesh;
+  Triangles are preserved exactly, hidden twins and (when ticked) unseen faces apart (above: they are left out); the source parts keep their transforms and children and lose only their mesh;
   the fused part is a new root node named `Fused_<letter>_<first row of the group>`. The output can never be the source file.
   The ⊕ letters persist beside the source as `<source>.glb.fuse.txt` (a `#fuse-groups v2` header, then one
   `letter|node index|name` line per marked part — the name last, so it may contain anything; written by every Fuse

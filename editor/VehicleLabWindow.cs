@@ -2477,6 +2477,27 @@ public class VehicleLabWindow : EditorWindow
         string prevFull = Path.Combine(projRoot, prevRel).Replace('\\', '/');
         sourceRefusal = VehicleLabSourceGuard.Refusal(srcFile, srcFile2, prevFull, "preview FBX");
         if (sourceRefusal != null) { status = sourceRefusal; return; }
+        // UNSEEN FACES (2026-11-27; GlbDisconnectedParts.Unseen.cs): a fuse that left out the faces no camera sees counted
+        // some parts as standing still and drawn, and left out what they hid. If one of them is now ignored, moving or
+        // placed, what it hid can show as a hole: ask before generating, and name them.
+        if (!headless)
+        {
+            string unseenList = GlbDisconnectedParts.UnseenSidecarPath(srcFile);
+            List<string> hiders = null;
+            try { if (File.Exists(unseenList) && File.Exists(srcFile)) hiders = GlbDisconnectedParts.ReadUnseenSidecar(File.ReadAllLines(unseenList), new FileInfo(srcFile).Length); }
+            catch (Exception e) { Debug.LogWarning("[VehicleLab] could not read " + unseenList + ": " + e.Message); }
+            var clash = GlbDisconnectedParts.UnseenConflicts(ActiveParts.Select(p => (p.name, (int)p.role, IsPlaced(p))), hiders);
+            if (clash.Count > 0)
+            {
+                string names = string.Join(", ", clash.Take(8)) + (clash.Count > 8 ? $" and {clash.Count - 8} more" : "");
+                Debug.LogWarning($"[VehicleLab] {clash.Count} part(s) hid faces when the fuse left out unseen faces and are now ignored, moving or placed: {names}");
+                if (!EditorUtility.DisplayDialog("Faces the fuse left out",
+                        $"This model was fused with \"Leave out faces no camera can see\", and these parts hid faces then: {names}.\n\n" +
+                        "They are now ignored, moving or placed, so what was behind them may show as a hole.\n\n" +
+                        "Fuse again in the Model Fuser (it reads the Lab's current roles), or generate anyway.", "Generate anyway", "Cancel"))
+                { status = "Cancelled — fuse again in the Model Fuser with the Lab's current roles (Leave out faces no camera can see), then Generate."; return; }
+            }
+        }
         // OVERWRITE GUARD: the output path is explicit and user-owned — an existing file (e.g. a HAND-MADE rig like
         // the original Ehrhardt_Spin.glb) is never clobbered without an explicit yes.
         if (!headless && File.Exists(outGlb) && !EditorUtility.DisplayDialog("Overwrite existing file?",
