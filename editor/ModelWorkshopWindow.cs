@@ -1780,21 +1780,44 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // …and last, when asked, every face no camera sees from either side leaves the parts that stand still
             // (GlbDisconnectedParts.Unseen.cs): after the fuse, so the windings it judges are the output's own
             GlbDisconnectedParts.UnseenResult unseen = null;
+            string unseenLine = null;   // leads the status (review round 3: after a deletion line of 40,902 characters it was not drawn) and goes into the report
             if (leaveOutUnseen && done > 0)
             {
                 EditorUtility.DisplayProgressBar("Model Workshop", "Leaving out the faces no camera can see…", 0.9f);
                 var lab = LabRecordsFor(outGlb, out string labNote, out string refusal);
+                // ...and the records of the file being fused, carried to the shells its groups became (review round 3: fusing
+                // a fused output again renames every shell - Fused_Q_Fused_Q_... - no recipe named the new file yet, and the
+                // ignored part, the sail and the boat all stood still on the name guess)
+                if (refusal == null && !SamePath(srcFile, outGlb))
+                {
+                    var fromSource = LabRecordsFor(srcFile, out string sourceNote, out string sourceRefusal);
+                    if (sourceRefusal != null) refusal = sourceRefusal;
+                    else if (fromSource.Count > 0)
+                    {
+                        bool ownNone = lab.Count == 0;
+                        var shellOf = new Dictionary<string, string>(StringComparer.Ordinal);
+                        if (results != null) for (int gi = 0; gi < groups.Count; gi++)
+                            if (results[gi].Changed && !string.IsNullOrEmpty(results[gi].FusedNodeName)) foreach (var r in groups[gi]) shellOf[r.node] = results[gi].FusedNodeName;
+                        foreach (var rec in fromSource)
+                        {
+                            lab.Add(rec);
+                            if (shellOf.TryGetValue(rec.name, out string shell)) lab.Add((shell, rec.role, rec.placed));
+                        }
+                        labNote = (ownNone ? "no Vehicle Lab recipe reads this output yet" : labNote) + "; the records of the file fused, carried through its groups: " + sourceNote;
+                    }
+                }
                 if (refusal != null)
                 {
-                    lines.Add("unseen faces: not looked for - " + refusal + ". Nothing was left out.");
-                    Debug.LogWarning("[Workshop] unseen faces: not looked for - " + refusal);
+                    unseenLine = "unseen faces: not looked for - " + refusal + ". Nothing was left out.";
+                    Debug.LogWarning("[Workshop] " + unseenLine);
                 }
                 else
                 {
-                    unseen = GlbDisconnectedParts.LeaveOutUnseenFaces(bytes, (i, name) => GlbDisconnectedParts.UnseenRoleFromLabRecords(name, lab, VehicleLabWindow.GuessRoleFromName));
+                    unseen = GlbDisconnectedParts.LeaveOutUnseenFaces(bytes, (i, name) => GlbDisconnectedParts.UnseenRoleFromLabRecords(name, lab, VehicleLabWindow.GuessRoleFromName),
+                        progress: p => !EditorUtility.DisplayCancelableProgressBar("Model Workshop", $"Leaving out the faces no camera can see… {p:P0} asked (Cancel leaves every face in)", 0.9f + 0.1f * (float)p));
                     foreach (var w in unseen.Warnings) Debug.LogWarning("[Workshop] " + w);
                     if (unseen.Changed) bytes = unseen.Bytes;
-                    lines.Add(unseen.Details[0] + " — " + labNote);
+                    unseenLine = unseen.Details[0] + " — " + labNote;
                 }
             }
             if (done == 0) { status = "Nothing changed — no group produced a fused mesh and nothing was deleted (see warnings in the console)."; return; }
@@ -1825,7 +1848,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
             }
             catch (Exception e) { Debug.LogWarning("[Workshop] could not write the output's fuse groupings sidecar: " + e.Message); }
             string reportPath = outGlb + ".fuse-report.txt";
-            string unseenReport = unseen == null ? "" : "\n" + string.Join("\n", unseen.Details.Concat(unseen.Warnings)) + "\n";
+            string unseenReport = unseen != null ? "\n" + string.Join("\n", new[] { unseenLine }.Concat(unseen.Details.Skip(1)).Concat(unseen.Warnings)) + "\n"
+                                : unseenLine != null ? "\n" + unseenLine + "\n" : "";   // a refusal too (review round 3)
             try { File.WriteAllText(reportPath, WorkshopRules.FuseReport(srcFile, outGlb, weldPermille, report) + unseenReport); }
             catch (Exception e) { Debug.LogWarning("[Workshop] could not write the fuse report: " + e.Message); reportPath = "(not written: " + e.Message + ")"; }
             foreach (var g in report) foreach (var w in g.Warnings) Debug.LogWarning($"[Workshop] ⊕{g.Letter}: " + w);
@@ -1840,7 +1864,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
             if (results != null) for (int gi = 0; gi < groups.Count; gi++)
                 if (results[gi].MirroredStillReversedFaces > 0) mirroredInward.Add((groups[gi].Key, results[gi].MirroredStillReversedParts, results[gi].MirroredStillReversedFaces));
             weldLead += WorkshopRules.MirroredCheckSummary(mirroredInward);
-            status = $"{weldLead}{verb} done ({done} step(s)):\n{string.Join("\n", lines)}\n{outGlb}\nReport (every group's islands, warnings and stitched-part numbers): {reportPath}\nNext: point Source GLB at this output and re-Probe to see each fused shell as one part, or open it in the Vehicle Lab.";
+            status = $"{weldLead}{(unseenLine != null ? unseenLine + "\n" : "")}{verb} done ({done} step(s)):\n{string.Join("\n", lines)}\n{outGlb}\nReport (every group's islands, warnings and stitched-part numbers): {reportPath}\nNext: point Source GLB at this output and re-Probe to see each fused shell as one part, or open it in the Vehicle Lab.";
         }
         catch (Exception e) { status = verb + " failed (source untouched): " + e.Message; Debug.LogException(e); }
         finally { EditorUtility.ClearProgressBar(); }
@@ -1874,7 +1898,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 bool first = SamePath((string)recipe["srcFile"] ?? "", fusedOutput), second = SamePath((string)recipe["srcFile2"] ?? "", fusedOutput);
                 if (!first && !second) continue;
                 recipes.Add(recipeName + (second && !first ? " (as its second model)" : ""));
-                if ((bool?)recipe["useSourceRig"] == true) { refusal = $"the Vehicle Lab recipe {recipeName} rigs this file on its own skeleton (the fast path): its roles name bones, not parts"; return found; }
+                // the Lab takes the fast path only with bone rows (VehicleLabWindow: useSourceRig && boneParts.Count > 0; review round 3)
+                if ((bool?)recipe["useSourceRig"] == true && recipe["boneParts"] is Newtonsoft.Json.Linq.JArray bones && bones.Count > 0) { refusal = $"the Vehicle Lab recipe {recipeName} rigs this file on its own skeleton (the fast path): its roles name bones, not parts"; return found; }
                 bool Turned(Newtonsoft.Json.Linq.JToken r) => r is Newtonsoft.Json.Linq.JObject o && new[] { "x", "y", "z" }.Any(k => Math.Abs((float?)o[k] ?? 0f) > 0.01f);
                 if (Turned(recipe["modelRot"]) || (second && Turned(recipe["model2Rot"])))
                 { refusal = $"the Vehicle Lab recipe {recipeName} turns this model (Orientation{(second ? " or the second model's Rotation" : "")}): the game's cameras would look at it from other directions"; return found; }
@@ -1901,9 +1926,10 @@ public abstract class ModelWorkshopWindow : EditorWindow
             catch (Exception e)
             {
                 // unreadable (or a value of the wrong kind): it may be this file's recipe, and counting its parts still could
-                // leave out what they move past. A recipe that does not mention the file is passed by.
+                // leave out what they move past. A recipe that does not mention the file's name is passed by; one that does
+                // may name a file of that name elsewhere, and says so.
                 if (text == null || text.IndexOf(Path.GetFileName(fusedOutput), StringComparison.OrdinalIgnoreCase) >= 0)
-                { refusal = $"the Vehicle Lab recipe {recipeName} {(text == null ? "cannot be read" : "names this file and cannot be read")} ({e.Message})"; return found; }
+                { refusal = $"the Vehicle Lab recipe {recipeName} {(text == null ? "cannot be read" : $"mentions a file named {Path.GetFileName(fusedOutput)} and cannot be read")} ({e.Message}): mend or move it"; return found; }
             }
         }
         note = recipes.Count == 0

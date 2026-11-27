@@ -52,6 +52,7 @@ public static partial class GlbDisconnectedParts
     {
         public byte[] Bytes;
         public bool Changed;
+        public bool Cancelled;   // the caller's progress callback said stop: nothing was left out
         public int FacesAsked, FacesLeftOut, VerticesLeftOut;
         public readonly Dictionary<int, int> LeftOutByNode = new Dictionary<int, int>();   // node index -> faces left out
         public readonly List<string> Hiders = new List<string>();    // the names of the nodes whose opaque faces made up the ray tree: every part that COULD hide a face, not only those that did (the Lab checks them)
@@ -78,8 +79,11 @@ public static partial class GlbDisconnectedParts
     static (float, float, float) Corner(double[] c, int o) => ((float)c[o], (float)c[o + 1], (float)c[o + 2]);
 
     /// <summary>Leave out every face no camera of the game sees from either side (see the head of this file).
-    /// <paramref name="roleOf"/> is asked once per node with a mesh (node index, node name).</summary>
-    public static UnseenResult LeaveOutUnseenFaces(byte[] source, Func<int, string, UnseenRole> roleOf, int maxParallel = -1, int rimRings = UnseenDefaultRimRings)
+    /// <paramref name="roleOf"/> is asked once per node with a mesh (node index, node name). <paramref name="progress"/>,
+    /// when given, is called on the CALLING thread about four times a second while the rays run, with the share of faces
+    /// asked; it returns false to cancel, and the pass then leaves every face in (Cancelled). The editor's Mono takes
+    /// about 100 s on a large ship (review round 3: the bar sat at 90 % with no way out).</summary>
+    public static UnseenResult LeaveOutUnseenFaces(byte[] source, Func<int, string, UnseenRole> roleOf, int maxParallel = -1, int rimRings = UnseenDefaultRimRings, Func<double, bool> progress = null)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
         if (roleOf == null) throw new ArgumentNullException(nameof(roleOf));
@@ -177,11 +181,35 @@ public static partial class GlbDisconnectedParts
         result.FacesAsked = work.Count;
         var seen = new bool[work.Count];
         var clock = System.Diagnostics.Stopwatch.StartNew();
-        Parallel.For(0, work.Count, new ParallelOptions { MaxDegreeOfParallelism = maxParallel }, i =>
+        int facesDone = 0;
+        using (var cancelRays = new CancellationTokenSource())
         {
-            var (s, f) = work[i];
-            seen[i] = UnseenFaceSeen(corners[s], 9 * f, tree, lift, small, large);
-        });
+            var options = new ParallelOptions { MaxDegreeOfParallelism = maxParallel, CancellationToken = cancelRays.Token };
+            void Rays() => Parallel.For(0, work.Count, options, i =>
+            {
+                var (s, f) = work[i];
+                seen[i] = UnseenFaceSeen(corners[s], 9 * f, tree, lift, small, large);
+                if (progress != null) Interlocked.Increment(ref facesDone);
+            });
+            if (progress == null) Rays();
+            else
+            {
+                // the rays on the pool, the caller's thread free to draw the bar (Unity's UI calls belong to it)
+                var running = Task.Run(Rays);
+                try
+                {
+                    do { if (!cancelRays.IsCancellationRequested && !progress(Volatile.Read(ref facesDone) / (double)Math.Max(1, work.Count))) cancelRays.Cancel(); }
+                    while (!running.Wait(250));
+                }
+                catch (AggregateException e) when (cancelRays.IsCancellationRequested && e.Flatten().InnerExceptions.All(x => x is OperationCanceledException))
+                {
+                    result.Cancelled = true;
+                    result.Details.Add(string.Format(CultureInfo.InvariantCulture, "unseen faces: cancelled after {0:N0} of {1:N0} face(s) - nothing was left out", Volatile.Read(ref facesDone), work.Count));
+                    return result;
+                }
+                catch { cancelRays.Cancel(); throw; }   // the callback itself threw: the rays stop rather than run on unseen
+            }
+        }
         result.RayMs = clock.ElapsedMilliseconds;
 
         // THE RIM: a face touching a face that shows stays (see UnseenDefaultRimRings)

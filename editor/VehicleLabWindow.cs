@@ -84,25 +84,21 @@ public class VehicleLabWindow : EditorWindow
         // initializers) keep old recipes neutral; carried across a re-Probe by name, exactly like the role.
         public Vector3 offset = Vector3.zero; public Vector3 scale = Vector3.one; }
     static bool IsPlaced(Part p) => p.offset.sqrMagnitude > 1e-10f || (p.scale - Vector3.one).sqrMagnitude > 1e-10f;
-    // THE ROLE A NEW PART IS GUESSED FROM ITS NAME (a Probe's part with no session role). One copy: the Model Fuser asks
-    // it too, for a part the Lab has no record of yet, when it decides what the unseen-faces pass may leave out.
-    internal static int GuessRoleFromName(string name)
+    // THE ROLE A NEW PART IS GUESSED FROM ITS NAME (a Probe's part with no session role): VehicleLabNameGuess.cs, which
+    // the Model Fuser asks too. Its numbers are this enum's; the check below logs an error on the first guess if they drift.
+    internal static int GuessRoleFromName(string name) { _ = NameGuessNumbersMatch; return VehicleLabNameGuess.RoleOf(name); }
+    static readonly bool NameGuessNumbersMatch = CheckNameGuessNumbers();
+    static bool CheckNameGuessNumbers()
     {
-        string low = (name ?? "").ToLowerInvariant();
-        return (int)(low.Contains("tail") && (low.Contains("rotor") || low.Contains("prop")) ? Role.TailRotor  // "tail rotor" before the generic rotor guess
-            : low.Contains("fantail") || low.Contains("fenestron") ? Role.TailRotor
-            : low.Contains("oar") ? Role.Oar   // before the generic "blade" -> Rotor guess: an oar blade contains "blade"
-            : low.Contains("sail") ? Role.Sail
-            : low.Contains("shroud") || low.Contains("ratline") ? Role.Shroud   // standing rigging, before the generic rope guess
-            : low.Contains("rigging") || low.Contains("rope") ? Role.Rigging
-            : low.Contains("window") || low.Contains("windshield") || low.Contains("windscreen") || low.Contains("glass") ? Role.Window   // glazing (2026-09-25)
-            : low.Contains("railing") || low.Contains("handrail") || low.Contains("stanchion") ? Role.Railing   // its own soup tier since 2026-11-12 (was Structure)
-            : low.Contains("chain") ? Role.Chain   // anchor chains, their own soup tier since 2026-11-25
-            : low.Contains("flag") || low.Contains("banner") || low.Contains("pennant") ? Role.Flag
-            : low.Contains("rudder") ? Role.Rudder
-            : low.Contains("rotor") || low.Contains("helix") || low.Contains("blade") || low.Contains("propeller") ? Role.Rotor
-            : low.Contains("wheel") || low.Contains("tyre") || low.Contains("tire") ? Role.Wheel
-            : low.Contains("turret") ? Role.Turret : Role.Default);
+        var pairs = new (int guess, Role role)[] {
+            (VehicleLabNameGuess.Wheel, Role.Wheel), (VehicleLabNameGuess.Turret, Role.Turret), (VehicleLabNameGuess.Default, Role.Default),
+            (VehicleLabNameGuess.Rotor, Role.Rotor), (VehicleLabNameGuess.TailRotor, Role.TailRotor), (VehicleLabNameGuess.Oar, Role.Oar),
+            (VehicleLabNameGuess.Sail, Role.Sail), (VehicleLabNameGuess.Rigging, Role.Rigging), (VehicleLabNameGuess.Flag, Role.Flag),
+            (VehicleLabNameGuess.Rudder, Role.Rudder), (VehicleLabNameGuess.Shroud, Role.Shroud), (VehicleLabNameGuess.Window, Role.Window),
+            (VehicleLabNameGuess.Railing, Role.Railing), (VehicleLabNameGuess.Chain, Role.Chain) };
+        foreach (var (guess, role) in pairs)
+            if (guess != (int)role) { Debug.LogError($"[VehicleLab] VehicleLabNameGuess.cs numbers {role} {guess}, the enum {(int)role}: the name guess would give the wrong role"); return false; }
+        return true;
     }
 
 

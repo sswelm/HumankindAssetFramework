@@ -13,7 +13,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   does not ask, 343 of 4.25 million ship pixels changed from 28 degrees up, nearly all to a face just behind; the top
   edge of a fully zoomed-in screen loses a little more. The Factory bakes to a triangle budget, so that budget now
   goes to faces that show. It reads the Vehicle Lab's saved roles for the output, also where the output is a recipe's
-  second model: ignored parts hide nothing; moving, placed, Flip and TwoSided parts hide nothing and lose nothing.
+  second model, and those of the file being fused, carried through its groups: ignored parts hide nothing; moving,
+  placed, Flip and TwoSided parts hide nothing and lose nothing. The progress bar has a Cancel (about 100 s on that
+  ship). The Lab's name guess now makes a "Propeller" a rotor (it was Rigging: "propeller" contains "rope").
   Generate in the Lab names any part that could hide faces and has since become ignored, moving or placed (or a model
   turned since), and asks before it runs. Off by default.
 - **Vehicle Lab: a probe of a fused file keeps the roles** (2026-11-25, user report, the Khelandion galley: "when I

@@ -495,8 +495,34 @@ public class GlbUnseenFacesTests
     {
         // a 256 x 256 grid of shared vertices on the hull's deck - 65,536 kept, and one triangle inside to lose: index
         // 65535 does not fit a 16-bit index (glTF reserves it)
-        Part hull = Hull();
-        byte[] glb = BuildGlb(null, (root, bin) =>
+        var r = Run(GridOnDeck());
+        Assert.Equal(1, r.LeftOutByNode[1]);
+        var (root2, _) = Json(r.Bytes);
+        var prim = PrimitiveOf(root2, "Grid");
+        Assert.Equal(65536, root2["accessors"][prim["attributes"].Value<int>("POSITION")].Value<int>("count"));
+        Assert.Equal(5125, root2["accessors"][prim.Value<int>("indices")].Value<int>("componentType"));
+    }
+
+    [Fact]
+    public void Cancel_leaves_every_face_in_and_a_bar_that_never_cancels_changes_nothing()
+    {
+        byte[] glb = GridOnDeck();
+        var plain = Run(glb);
+        int calls = 0;
+        var watched = GlbDisconnectedParts.LeaveOutUnseenFaces(glb, (i, n) => GlbDisconnectedParts.UnseenRole.Still, 1, 0, p => { calls++; Assert.InRange(p, 0, 1); return true; });
+        Assert.True(calls >= 1);   // asked at once, and every quarter second after
+        Assert.Equal(plain.Bytes, watched.Bytes);
+        var cancelled = GlbDisconnectedParts.LeaveOutUnseenFaces(glb, (i, n) => GlbDisconnectedParts.UnseenRole.Still, 1, 0, p => false);
+        Assert.True(cancelled.Cancelled);
+        Assert.False(cancelled.Changed);
+        Assert.Null(cancelled.Bytes);
+        Assert.StartsWith("unseen faces: cancelled after", cancelled.Details[0]);
+    }
+
+    // a 256 x 256 grid of shared vertices (32-bit indices) on a closed hull's deck, and one triangle inside the hull
+    static byte[] GridOnDeck()
+    {
+        return BuildGlb(null, (root, bin) =>
         {
             const int n = 256;
             while ((bin.Count & 3) != 0) bin.Add(0);
@@ -520,13 +546,7 @@ public class GlbUnseenFacesTests
             ((JArray)root["meshes"]).Add(new JObject { ["primitives"] = new JArray(new JObject { ["attributes"] = new JObject { ["POSITION"] = acc.Count - 2 }, ["indices"] = acc.Count - 1, ["material"] = 0 }) });
             ((JArray)root["nodes"]).Add(new JObject { ["name"] = "Grid", ["mesh"] = root["meshes"].Count() - 1 });
             ((JArray)root["scenes"][0]["nodes"]).Add(root["nodes"].Count() - 1);
-        }, hull);
-        var r = Run(glb);
-        Assert.Equal(1, r.LeftOutByNode[1]);
-        var (root2, _) = Json(r.Bytes);
-        var prim = PrimitiveOf(root2, "Grid");
-        Assert.Equal(65536, root2["accessors"][prim["attributes"].Value<int>("POSITION")].Value<int>("count"));
-        Assert.Equal(5125, root2["accessors"][prim.Value<int>("indices")].Value<int>("componentType"));
+        }, Hull());
     }
 
     [Fact]
@@ -602,6 +622,22 @@ public class GlbUnseenFacesTests
         Assert.Equal(GlbDisconnectedParts.UnseenRole.Moves, GlbDisconnectedParts.UnseenRoleFromLabRecords("Deck_CutA", records, Guess));     // a placed parent
         Assert.Equal(GlbDisconnectedParts.UnseenRole.Still, GlbDisconnectedParts.UnseenRoleFromLabRecords("Hull_2", records, Guess));        // a bare number is not ancestry
         Assert.Equal(GlbDisconnectedParts.UnseenRole.Still, GlbDisconnectedParts.UnseenRoleFromLabRecords("Hull", records, Guess));
+    }
+
+    [Theory]
+    [InlineData("Fused_P_Propeller", VehicleLabNameGuess.Rotor)]       // review round 3: "propeller" contains "rope" - it came out Rigging, a still role
+    [InlineData("Propeller_Part_002", VehicleLabNameGuess.Rotor)]
+    [InlineData("TailPropeller", VehicleLabNameGuess.TailRotor)]
+    [InlineData("Rope_Ladder", VehicleLabNameGuess.Rigging)]
+    [InlineData("Ratline_Rope", VehicleLabNameGuess.Shroud)]
+    [InlineData("OarBlade", VehicleLabNameGuess.Oar)]
+    [InlineData("Hull", VehicleLabNameGuess.Default)]
+    [InlineData(null, VehicleLabNameGuess.Default)]
+    public void The_Lab_guesses_a_role_from_a_name(string name, int role)
+    {
+        Assert.Equal(role, VehicleLabNameGuess.RoleOf(name));
+        Assert.Equal(role == VehicleLabNameGuess.Default || role == VehicleLabNameGuess.Rigging || role == VehicleLabNameGuess.Shroud ? GlbDisconnectedParts.UnseenRole.Still : GlbDisconnectedParts.UnseenRole.Moves,
+            GlbDisconnectedParts.UnseenRoleFromLabRecords(name, null, VehicleLabNameGuess.RoleOf));
     }
 
     [Fact]

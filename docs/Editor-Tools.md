@@ -574,21 +574,26 @@ windows. **Deep dive:**
   hole no more often than the front rule misses one (rendered with both sides drawn, the first cut showed no sky). Rays from a few points along a few directions miss what a camera sees through a slit or past a lip, so
   two rings of faces around everything that shows stay as well (the rim). The Fuser reads the Vehicle Lab's saved records of the output — every
   recipe that loads this file as its model or as its second model (under the names without the Lab's `B_`), whatever
-  the recipe is named, and the role lists that recipe's Generate wrote; a part with no record takes a marked role of
+  the recipe is named, and the role lists that recipe's Generate wrote — and the same records of the file being fused,
+  carried to the shells its groups became (fusing an output again renames every shell, `Fused_Q_Fused_Q_…`, before any
+  recipe names the new file); a part with no record takes a marked role of
   its parent name as the Lab's Probe does (`Gun_Part_003` takes `Gun`'s), else the role the Lab would guess from its
-  name (a "Propeller" is a rotor). It does not run, and says why,
-  when such a recipe cannot be read, rigs the model on its own skeleton (the fast path), or turns the model
+  name (a "Propeller" is a rotor). It does not run, and says why in the status and the fuse report,
+  when such a recipe cannot be read (one that mentions a file of the output's name and does not parse: mend or move
+  it), rigs the model on its own skeleton (the fast path, with bone rows), or turns the model
   (Orientation, or the second model's Rotation): a part the Lab ignores hides nothing; a part that moves or changes
   facing (wheels, turrets, guns, rotors, trails, muzzles, cradles, oars, sails, flags, rudders, chains, caterpillars,
   Flip, TwoSided, Edgecase), a placed part, a skinned or morphing mesh hides nothing and loses nothing; where the
   recipe and the lists disagree the pass takes the careful reading; a node no scene reaches is not drawn. The Factory bakes the unit to a triangle budget, so what goes here is detail the visible ship gets back:
   on the Saleg's Revenge 1,369,211 of the 2,400,377 faces of the parts that stand still (57 %), in about 100 s in the
-  editor (Unity's Mono; 43 s on .NET Framework, the progress bar waits at the end meanwhile), and the fused file from
+  editor (Unity's Mono; 43 s on .NET Framework; the bar shows the share of faces asked, and Cancel leaves every face
+  in), and the fused file from
   97.6 to 60.1 MB. Rendered before and after from 144 directions the pass does not ask (16 round at nine heights from
   10 to 85 degrees, 640 x 640, back faces culled, 4.25 million ship pixels): from 28 degrees up 343 pixels changed;
   at 20 degrees 163 and at 10 degrees 993 — the top of a fully zoomed-in screen — and 106 of all the changed pixels
   show sky. The rest show a face a little behind the one left out (median 4.5 % of the model's radius). No sampled
-  rule reaches zero. Every part that could hide a face (each still, drawn part with an opaque face) is listed beside the
+  rule reaches zero. The result line leads the status (its first line) and closes the fuse report. Fusing the
+  pruned output again leaves out next to nothing more (184 faces on that ship). Every part that could hide a face (each still, drawn part with an opaque face) is listed beside the
   output (`<output>.unseen.txt`); when one of them is ignored, moving or placed in the Lab later, or the model is
   turned, Generate says so and asks before it runs (save the recipe and fuse again). The pose is the file's: the water line is not
   modelled, and a part the Lab moves without a role that says so is not known to move,
