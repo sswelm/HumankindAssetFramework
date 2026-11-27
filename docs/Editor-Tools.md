@@ -568,7 +568,9 @@ windows. **Deep dive:**
   below the horizon fully zoomed in to 80 zoomed out (`DefaultCameraProfile` in the game's data), so the pass looks
   from straight above and at 65, 40 and 28 degrees (larger faces from more directions and more of their points). The
   camera has perspective, so the top edge of a fully zoomed-in screen looks along about 10 degrees; that edge is the
-  one place a removed face can show. A face stops a camera's view only
+  one place a removed face can show. **Lowest camera (°)** under the tick raises that 28 (15 to 85): on the Saleg's
+  Revenge 45 leaves out 63 % instead of 57 % and looks the same from 47 degrees up, at the price of about twice the
+  changed pixels at 28 to 40 degrees and five times as many, many of them sky, at the top of a fully zoomed-in screen. A face stops a camera's view only
   where it shows its front, as under back-face culling; glass and cut-outs hide nothing and are kept. A face whose
   back shows stays, so the Lab's inside-out fix, Flip, TwoSided and double-sided output turn a removed face into a
   hole no more often than the front rule misses one (rendered with both sides drawn, the first cut showed no sky). Rays from a few points along a few directions miss what a camera sees through a slit or past a lip, so
@@ -583,7 +585,11 @@ windows. **Deep dive:**
   it), rigs the model on its own skeleton (the fast path, with bone rows), or turns the model
   (Orientation, or the second model's Rotation): a part the Lab ignores hides nothing; a part that moves or changes
   facing (wheels, turrets, guns, rotors, trails, muzzles, cradles, oars, sails, flags, rudders, chains, caterpillars,
-  Flip, TwoSided, Edgecase), a placed part, a skinned or morphing mesh hides nothing and loses nothing; where the
+  Flip, TwoSided, Edgecase), a placed part, a skinned or morphing mesh hides nothing and loses nothing — except a gun
+  nothing moves: a Gun, Muzzle or Cradle part stands still when the recipe has no Turret part, no deploy raise and no
+  recoil, and the pack's model built from the Lab's output has no gun elevation and no turret bone (no pack entry yet:
+  it counts as moving; the Saleg's Revenge marks every cannon Gun for the Gun reduce dial, and counted still they lose
+  1,391,036 faces); where the
   recipe and the lists disagree the pass takes the careful reading; a node no scene reaches is not drawn. The Factory bakes the unit to a triangle budget, so what goes here is detail the visible ship gets back:
   on the Saleg's Revenge 1,369,211 of the 2,400,377 faces of the parts that stand still (57 %), in about 100 s in the
   editor (Unity's Mono; 43 s on .NET Framework; the bar shows the share of faces asked, and Cancel leaves every face

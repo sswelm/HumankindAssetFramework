@@ -14,7 +14,9 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   edge of a fully zoomed-in screen loses a little more. The Factory bakes to a triangle budget, so that budget now
   goes to faces that show. It reads the Vehicle Lab's saved roles for the output, also where the output is a recipe's
   second model, and those of the file being fused, carried through its groups: ignored parts hide nothing; moving,
-  placed, Flip and TwoSided parts hide nothing and lose nothing. The progress bar has a Cancel (about 100 s on that
+  placed, Flip and TwoSided parts hide nothing and lose nothing, but a gun nothing moves (no turret, recoil, deploy
+  raise, or gun elevation in the pack) stands still. **Lowest camera (°)** raises the 28-degree floor (45 leaves out
+  63 % on that ship, with small gaps when zoomed in fully). The progress bar has a Cancel (about 100 s on that
   ship). The Lab's name guess now makes a "Propeller" a rotor (it was Rigging: "propeller" contains "rope").
   Generate in the Lab names any part that could hide faces and has since become ignored, moving or placed (or a model
   turned since), and asks before it runs. Off by default.

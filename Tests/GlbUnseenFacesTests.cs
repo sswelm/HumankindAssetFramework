@@ -159,6 +159,22 @@ public class GlbUnseenFacesTests
     }
 
     [Fact]
+    public void The_lowest_camera_is_the_callers_to_set()
+    {
+        // user 2026-11-27: "could you make it configurable?" - a face seen only at 28 degrees goes when the lowest is 45;
+        // one seen only below 28 stays when it is 15
+        var (floor, roof) = Porch(0.6, 1.0);
+        var at45 = GlbDisconnectedParts.LeaveOutUnseenFaces(BuildGlb(null, floor, roof), (i, n) => GlbDisconnectedParts.UnseenRole.Still, -1, 0, lowestCamera: 45);
+        Assert.Empty(KeptTags(at45.Bytes, floor));
+        Assert.Contains("(45 degrees and up)", at45.Details[0]);
+        var (low, lowRoof) = Porch(1.0, 2.0);
+        var at15 = GlbDisconnectedParts.LeaveOutUnseenFaces(BuildGlb(null, low, lowRoof), (i, n) => GlbDisconnectedParts.UnseenRole.Still, -1, 0, lowestCamera: 15);
+        Assert.Equal(AllTags(low), KeptTags(at15.Bytes ?? BuildGlb(null, low, lowRoof), low));
+        foreach (double bad in new[] { 14.9, 85.1, double.NaN })
+            Assert.Throws<ArgumentOutOfRangeException>(() => GlbDisconnectedParts.LeaveOutUnseenFaces(BuildGlb(null, low, lowRoof), (i, n) => GlbDisconnectedParts.UnseenRole.Still, lowestCamera: bad));
+    }
+
+    [Fact]
     public void A_face_seen_only_at_28_degrees_near_its_corners_stays()
     {
         // seen at 28 degrees only from the points 0.95 of the way to its corners (0.6 / tan 28 = 1.13 reaches past an
@@ -638,6 +654,39 @@ public class GlbUnseenFacesTests
         Assert.Equal(role, VehicleLabNameGuess.RoleOf(name));
         Assert.Equal(role == VehicleLabNameGuess.Default || role == VehicleLabNameGuess.Rigging || role == VehicleLabNameGuess.Shroud ? GlbDisconnectedParts.UnseenRole.Still : GlbDisconnectedParts.UnseenRole.Moves,
             GlbDisconnectedParts.UnseenRoleFromLabRecords(name, null, VehicleLabNameGuess.RoleOf));
+    }
+
+    [Fact]
+    public void A_gun_nothing_moves_stands_still()
+    {
+        // the Saleg's Revenge: every cannon one Gun part, no turret, no recoil or deploy raise, gunElevMax 0 in the pack
+        var still = new List<(float, string)> { (0f, "") };
+        Assert.True(GlbDisconnectedParts.LabGunStands(new[] { 0, 7, 4 }, 0f, 0f, still));
+        Assert.False(GlbDisconnectedParts.LabGunStands(new[] { 2, 7 }, 0f, 0f, still));                                   // it rides a turret
+        Assert.False(GlbDisconnectedParts.LabGunStands(new[] { 7 }, 10f, 0f, still));                                     // raised on deploy
+        Assert.False(GlbDisconnectedParts.LabGunStands(new[] { 7 }, 0f, 0.2f, still));                                    // recoils
+        Assert.False(GlbDisconnectedParts.LabGunStands(new[] { 7 }, 0f, 0f, new List<(float, string)> { (0f, ""), (15f, "") }));   // a pack model elevates it
+        Assert.False(GlbDisconnectedParts.LabGunStands(new[] { 7 }, 0f, 0f, new List<(float, string)> { (0f, "Turret") }));        // the game aims a turret bone
+        Assert.False(GlbDisconnectedParts.LabGunStands(new[] { 7 }, 0f, 0f, new List<(float, string)>()));               // not in the pack: unknown, so it moves
+        Assert.Equal(4, GlbDisconnectedParts.UnseenLabRole(7, true));
+        Assert.Equal(4, GlbDisconnectedParts.UnseenLabRole(11, true));
+        Assert.Equal(4, GlbDisconnectedParts.UnseenLabRole(12, true));
+        Assert.Equal(7, GlbDisconnectedParts.UnseenLabRole(7, false));
+        Assert.Equal(2, GlbDisconnectedParts.UnseenLabRole(2, true));   // a turret itself turns
+        Assert.Equal(GlbDisconnectedParts.UnseenRole.Still, GlbDisconnectedParts.UnseenRoleOfLab(new[] { GlbDisconnectedParts.UnseenLabRole(7, true), 4 }, false));
+    }
+
+    [Fact]
+    public void The_pack_names_the_guns_settings_of_the_Labs_output()
+    {
+        string pack = "{\"models\":[{\"modelFile\":\"D:/3DModels/Ship/ship_Spin.glb\",\"gunElevMax\":0.0,\"turretBone\":\"\"}," +
+                      "{\"modelFile\":\"D:/3DModels/Tank/tank_Spin.glb\",\"gunElevMax\":12.5,\"turretBone\":\"Turret\"}]}";
+        bool Same(string a, string b) => string.Equals(a.Replace('\\', '/'), b.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(new[] { (0f, "") }, GlbDisconnectedParts.PackGunSettings(pack, "d:\\3DModels\\Ship\\ship_Spin.glb", Same));
+        Assert.Equal(new[] { (12.5f, "Turret") }, GlbDisconnectedParts.PackGunSettings(pack, "D:/3DModels/Tank/tank_Spin.glb", Same));
+        Assert.Empty(GlbDisconnectedParts.PackGunSettings(pack, "D:/elsewhere.glb", Same));
+        Assert.Empty(GlbDisconnectedParts.PackGunSettings("{ not json", "D:/3DModels/Ship/ship_Spin.glb", Same));
+        Assert.Empty(GlbDisconnectedParts.PackGunSettings("{\"models\":[{\"modelFile\":\"D:/3DModels/Ship/ship_Spin.glb\",\"gunElevMax\":\"high\"}]}", "D:/3DModels/Ship/ship_Spin.glb", Same));
     }
 
     [Fact]

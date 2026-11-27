@@ -83,10 +83,13 @@ public static partial class GlbDisconnectedParts
     /// when given, is called on the CALLING thread about four times a second while the rays run, with the share of faces
     /// asked; it returns false to cancel, and the pass then leaves every face in (Cancelled). The editor's Mono takes
     /// about 100 s on a large ship (review round 3: the bar sat at 90 % with no way out).</summary>
-    public static UnseenResult LeaveOutUnseenFaces(byte[] source, Func<int, string, UnseenRole> roleOf, int maxParallel = -1, int rimRings = UnseenDefaultRimRings, Func<double, bool> progress = null)
+    public static UnseenResult LeaveOutUnseenFaces(byte[] source, Func<int, string, UnseenRole> roleOf, int maxParallel = -1, int rimRings = UnseenDefaultRimRings, Func<double, bool> progress = null, double lowestCamera = UnseenLowestCamera)
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
         if (roleOf == null) throw new ArgumentNullException(nameof(roleOf));
+        if (!(lowestCamera >= UnseenLowestCameraMin && lowestCamera <= UnseenLowestCameraMax))
+            throw new ArgumentOutOfRangeException(nameof(lowestCamera), lowestCamera, $"the lowest camera is {UnseenLowestCameraMin}..{UnseenLowestCameraMax} degrees above the horizon");
+        double[][] viewSets = UnseenViewSets(lowestCamera);
         var result = new UnseenResult();
         Document document = Parse(source);
         JObject root = document.Root;
@@ -188,7 +191,7 @@ public static partial class GlbDisconnectedParts
             void Rays() => Parallel.For(0, work.Count, options, i =>
             {
                 var (s, f) = work[i];
-                seen[i] = UnseenFaceSeen(corners[s], 9 * f, tree, lift, small, large);
+                seen[i] = UnseenFaceSeen(corners[s], 9 * f, tree, lift, small, large, viewSets);
                 if (progress != null) Interlocked.Increment(ref facesDone);
             });
             if (progress == null) Rays();
@@ -249,7 +252,7 @@ public static partial class GlbDisconnectedParts
         string kept = string.Format(CultureInfo.InvariantCulture, "{0} part(s) move, {1} are not drawn, {2} share a mesh, {3} could not be read: kept whole", moving, notDrawn, shared, unread);
         if (dropOf.Count == 0)
         {
-            result.Details.Add(string.Format(CultureInfo.InvariantCulture, "unseen faces: none - every one of {0:N0} face(s) is seen by some camera from one side or the other; {1}; rays {2} ms", work.Count, kept, result.RayMs));
+            result.Details.Add(string.Format(CultureInfo.InvariantCulture, "unseen faces: none - every one of {0:N0} face(s) is seen by some camera ({3:0.#} degrees and up) from one side or the other; {1}; rays {2} ms", work.Count, kept, result.RayMs, lowestCamera));
             return result;
         }
 
@@ -335,7 +338,7 @@ public static partial class GlbDisconnectedParts
         result.Details.Add(string.Format(CultureInfo.InvariantCulture,
             "unseen faces: {0:N0} of {1:N0} face(s) no camera of the game ({9:0.#} degrees and up) sees from either side - left out (by part: {2}){3}; {4:N0} vertices fewer; {5:N0} kept beside faces that show (the rim); {6} part(s) could hide them; {7}; rays {8} ms",
             result.FacesLeftOut, work.Count, byPart, result.NodesEmptied.Count > 0 ? "; " + result.NodesEmptied.Count + " part(s) lost every face and their mesh" : "",
-            result.VerticesLeftOut, result.RimKept, result.Hiders.Count, kept, result.RayMs, UnseenLowestCamera));
+            result.VerticesLeftOut, result.RimKept, result.Hiders.Count, kept, result.RayMs, lowestCamera));
         result.Details.AddRange(writeResult.Details);
         return result;
     }
@@ -378,6 +381,44 @@ public static partial class GlbDisconnectedParts
         return UnseenRoleOfLab(mine.Select(x => x.role), mine.Any(x => x.placed));
     }
     const int LabDefaultRole = 4;
+
+    // A GUN NOTHING MOVES STANDS STILL (2026-11-27, the Saleg's Revenge: every cannon of the ship is one part marked Gun
+    // - for the Gun reduce dial - and the pass kept all 1.6 million of its faces; counted still, it leaves out 1,391,036).
+    // A Gun part (and its Muzzle and Cradle) moves when something moves it: a Turret part it rides, the recipe's deploy
+    // raise or recoil, or, in the game, the pack's gun elevation or a turret bone. With none of those it stands still.
+    // The pack is the only place the game's settings live, so with no pack entry for the Lab's output the gun is taken
+    // to move.
+    static readonly HashSet<int> LabGunRoles = new HashSet<int> { 7 /*Gun*/, 11 /*Muzzle*/, 12 /*Cradle*/ };
+    const int LabTurretRole = 2;
+
+    /// <summary>True when a recipe's guns cannot move: no Turret part among <paramref name="recipeRoles"/>, no deploy
+    /// raise, no recoil, and at least one pack model built from the Lab's output with no gun elevation and no turret bone.</summary>
+    public static bool LabGunStands(IEnumerable<int> recipeRoles, float deployRaiseDeg, float recoilDist, IList<(float gunElevMax, string turretBone)> packModels)
+    {
+        if ((recipeRoles ?? Enumerable.Empty<int>()).Contains(LabTurretRole)) return false;
+        if (Math.Abs(deployRaiseDeg) > 1e-4f || recoilDist > 1e-6f) return false;
+        if (packModels == null || packModels.Count == 0) return false;
+        return packModels.All(m => m.gunElevMax == 0f && string.IsNullOrEmpty(m.turretBone));
+    }
+
+    /// <summary>The role the pass reads for a Lab role: a Gun, Muzzle or Cradle counts as Default when the gun stands.</summary>
+    public static int UnseenLabRole(int labRole, bool gunStands) => gunStands && LabGunRoles.Contains(labRole) ? LabDefaultRole : labRole;
+
+    /// <summary>The pack's models built from <paramref name="labOutput"/> (pack.json text), with their gun settings;
+    /// empty when the text cannot be read. <paramref name="samePath"/> compares two paths.</summary>
+    public static List<(float gunElevMax, string turretBone)> PackGunSettings(string packJson, string labOutput, Func<string, string, bool> samePath)
+    {
+        var found = new List<(float, string)>();
+        if (string.IsNullOrEmpty(packJson) || string.IsNullOrEmpty(labOutput)) return found;
+        try
+        {
+            foreach (JObject m in (JObject.Parse(packJson)["models"] as JArray ?? new JArray()).OfType<JObject>())
+                if (samePath((string)m["modelFile"] ?? "", labOutput))
+                    found.Add(((float?)m["gunElevMax"] ?? 0f, (string)m["turretBone"] ?? ""));
+        }
+        catch (Exception e) when (e is Newtonsoft.Json.JsonException || e is FormatException || e is InvalidCastException || e is ArgumentException) { found.Clear(); }
+        return found;
+    }
 
     /// <summary>The Lab names a fused shell "Fused_&lt;letter&gt;_&lt;group or first part&gt;", and a fuse after a re-split can name
     /// the same group's shell after another first part. So a Lab name matches a node by name, or - for a fused shell - by
@@ -442,13 +483,22 @@ public static partial class GlbDisconnectedParts
     // straight above, then 65, 40 and 28 (a large face also 52.5), as many ways round as there. The camera is a
     // perspective one (MainCamera, 35 degrees high), so the top edge of a fully zoomed-in screen looks along about 10
     // degrees: there, and only there, a face this leaves out can show (the drill under UnseenDefaultRimRings).
-    public const double UnseenLowestCamera = 28.0;
-    static readonly double[] UnseenViews = BuildCoveredViews(new[] { 65.0, 40.0, UnseenLowestCamera }, 8, true);
-    static readonly double[] UnseenViewsMedium = BuildCoveredViews(new[] { 65.0, 40.0, UnseenLowestCamera }, 16, false);
-    static readonly double[] UnseenViewsLarge = BuildCoveredViews(new[] { 65.0, 52.5, 40.0, UnseenLowestCamera }, 32, false);
+    // THE LOWEST CAMERA IS THE USER'S TO RAISE (2026-11-27, user: "perhaps that 45 degree option is more interesting,
+    // could you make it configurable?"): the rings above it stay, the lowest becomes the one asked for. Measured on the
+    // Saleg's Revenge (144 render directions the pass does not ask): 28 leaves out 57 %, 45 leaves out 63 % and shows
+    // small see-through gaps - many of them sky - when the camera is zoomed in (5,505 changed pixels at 10 and 20
+    // degrees, 257 at 28), and from 47 degrees up looks the same as 28.
+    public const double UnseenLowestCamera = 28.0, UnseenLowestCameraMin = 15.0, UnseenLowestCameraMax = 85.0;
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<double, double[][]> unseenViewSets = new System.Collections.Concurrent.ConcurrentDictionary<double, double[][]>();
+    // small, medium and large faces' directions for a lowest ring of `lowest` degrees
+    static double[][] UnseenViewSets(double lowest) => unseenViewSets.GetOrAdd(lowest, f =>
+    {
+        double[] Rings(params double[] above) => above.Where(r => r > f + 1e-9).Concat(new[] { f }).ToArray();
+        return new[] { BuildCoveredViews(Rings(65.0, 40.0), 8, true), BuildCoveredViews(Rings(65.0, 40.0), 16, false), BuildCoveredViews(Rings(65.0, 52.5, 40.0), 32, false) };
+    });
 
     // a face is seen when a camera sees its front, or its back, from one of its sample points (the hidden twins' tiers)
-    static bool UnseenFaceSeen(double[] c, int o, TriBvh tree, double lift, double small, double large)
+    static bool UnseenFaceSeen(double[] c, int o, TriBvh tree, double lift, double small, double large, double[][] viewSets)
     {
         double ax = c[o + 3] - c[o], ay = c[o + 4] - c[o + 1], az = c[o + 5] - c[o + 2];
         double bx = c[o + 6] - c[o], by = c[o + 7] - c[o + 1], bz = c[o + 8] - c[o + 2];
@@ -464,7 +514,7 @@ public static partial class GlbDisconnectedParts
             longest2 = Math.Max(longest2, ex * ex + ey * ey + ez * ez);
         }
         int[] points = longest2 < small * small ? RayPointsSmall : longest2 < large * large ? RayPointsMedium : RayPointsLarge;
-        double[] views = ReferenceEquals(points, RayPointsLarge) ? UnseenViewsLarge : ReferenceEquals(points, RayPointsMedium) ? UnseenViewsMedium : UnseenViews;
+        double[] views = ReferenceEquals(points, RayPointsLarge) ? viewSets[2] : ReferenceEquals(points, RayPointsMedium) ? viewSets[1] : viewSets[0];
         double cx = (c[o] + c[o + 3] + c[o + 6]) / 3.0, cy = (c[o + 1] + c[o + 4] + c[o + 7]) / 3.0, cz = (c[o + 2] + c[o + 5] + c[o + 8]) / 3.0;
         for (int d = 0; d < views.Length; d += 3)
         {

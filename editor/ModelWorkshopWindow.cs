@@ -116,6 +116,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // them inward (see GlbDisconnectedParts, step 3b). The fuse report and a warning say when it would help.
     [SerializeField] bool checkMirrored = false;
     [SerializeField] bool leaveOutUnseen = false;   // the fuse's optional unseen-faces pass (GlbDisconnectedParts.Unseen.cs)
+    [SerializeField] float unseenLowestCamera = (float)GlbDisconnectedParts.UnseenLowestCamera;   // its lowest camera, degrees above the horizon (user 2026-11-27: "make it configurable")
     bool analyzePending;   // slider moved: recount on the first Layout pass after the drag releases
     [SerializeField] Vector2 scroll;
     readonly List<Rect> rowRects = new List<Rect>();   // per shown row, measured at Repaint: the ↑/↓ keys keep the highlight in view by these, not by an assumed row height
@@ -741,7 +742,16 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 "its second model, and the role lists that recipe's Generate wrote; a part with no record takes a marked role of its parent name, " +
                 "else the Lab's guess from its name): a part the Lab ignores hides nothing; a part that moves (wheels, turrets, guns, sails, flags, oars, rudders...), " +
                 "is placed, or is Flip or TwoSided hides nothing and loses nothing. Change a part to one of those afterwards, or turn the model, " +
-                "and the Lab asks you to fuse again. Off by default. Saleg's Revenge: 57 % of the faces the game would draw, about 100 s."), leaveOutUnseen);
+                "and the Lab asks you to fuse again. A gun nothing moves (no turret, recoil, deploy raise or gun elevation in the pack) stands still. " +
+                "Off by default. Saleg's Revenge: 57 % of the faces the game would draw, about 100 s."), leaveOutUnseen);
+            using (new EditorGUI.DisabledScope(!leaveOutUnseen))
+                unseenLowestCamera = EditorGUILayout.Slider(new GUIContent("    Lowest camera (°)",
+                    "The lowest a camera looks down from, in degrees above the horizon: a face only a lower camera could see is left out. " +
+                    "The game tilts its camera from 28 (fully zoomed in) to 80 (zoomed out), 28 is the default. Higher leaves out more and " +
+                    "risks small see-through gaps when the player zooms in: on the Saleg's Revenge 28 left out 57 % and 45 left out 63 %, " +
+                    "looking the same from 47 degrees up, with about twice the changed pixels at 28 to 40 degrees and five times as many, " +
+                    "many of them sky, at the top edge of a fully zoomed-in screen."),
+                    unseenLowestCamera, (float)GlbDisconnectedParts.UnseenLowestCameraMin, (float)GlbDisconnectedParts.UnseenLowestCameraMax);
             using (new EditorGUILayout.HorizontalScope())
             {
                 bool sidecarExists = File.Exists(FuseSidecarPath(srcFile) ?? "");
@@ -1814,7 +1824,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 else
                 {
                     unseen = GlbDisconnectedParts.LeaveOutUnseenFaces(bytes, (i, name) => GlbDisconnectedParts.UnseenRoleFromLabRecords(name, lab, VehicleLabWindow.GuessRoleFromName),
-                        progress: p => !EditorUtility.DisplayCancelableProgressBar("Model Workshop", $"Leaving out the faces no camera can see… {p:P0} asked (Cancel leaves every face in)", 0.9f + 0.1f * (float)p));
+                        progress: p => !EditorUtility.DisplayCancelableProgressBar("Model Workshop", $"Leaving out the faces no camera can see… {p:P0} asked (Cancel leaves every face in)", 0.9f + 0.1f * (float)p),
+                        lowestCamera: Mathf.Clamp(unseenLowestCamera, (float)GlbDisconnectedParts.UnseenLowestCameraMin, (float)GlbDisconnectedParts.UnseenLowestCameraMax));
                     foreach (var w in unseen.Warnings) Debug.LogWarning("[Workshop] " + w);
                     if (unseen.Changed) bytes = unseen.Bytes;
                     unseenLine = unseen.Details[0] + " — " + labNote;
@@ -1888,6 +1899,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
         string labDir = Path.Combine(projRoot, "Assets/FactorySource/VehicleLab");
         string recipesDir = Path.Combine(labDir, "Recipes");
         var recipes = new List<string>(); int fromLists = 0;
+        var gunsStill = new List<string>(); string packText = null;   // the pack (the game's gun settings), read once
         foreach (string path in Directory.Exists(recipesDir) ? Directory.GetFiles(recipesDir, "*.json") : new string[0])
         {
             string recipeName = Path.GetFileName(path), text = null;
@@ -1910,18 +1922,28 @@ public abstract class ModelWorkshopWindow : EditorWindow
                     if (first) yield return labName;
                     if (second && GlbDisconnectedParts.LabSecondModelName(labName) is string s) yield return s;
                 }
+                var mine = new List<(string name, int role, bool placed)>(); int mineFromLists = 0;
                 foreach (var p in (recipe["parts"] as Newtonsoft.Json.Linq.JArray ?? new Newtonsoft.Json.Linq.JArray()).OfType<Newtonsoft.Json.Linq.JObject>())
                     foreach (string n in Own((string)p["name"] ?? ""))
-                        found.Add((n, (int?)p["role"] ?? 4, Off(p["offset"], 0f) || Off(p["scale"], 1f)));
+                        mine.Add((n, (int?)p["role"] ?? 4, Off(p["offset"], 0f) || Off(p["scale"], 1f)));
                 string labOut = (string)recipe["outGlb"];
-                if (string.IsNullOrEmpty(labOut)) continue;
-                foreach (var kv in VehicleRigArgLine.RoleOfNamesFile)
-                {
-                    string list = Path.Combine(labDir, Path.GetFileNameWithoutExtension(labOut) + "_" + kv.Key + ".txt");
-                    if (!File.Exists(list)) continue;
-                    foreach (string l in File.ReadAllLines(list).Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith("#", StringComparison.Ordinal)))
-                        foreach (string n in Own(l)) { found.Add((n, kv.Value, false)); fromLists++; }
-                }
+                if (!string.IsNullOrEmpty(labOut))
+                    foreach (var kv in VehicleRigArgLine.RoleOfNamesFile)
+                    {
+                        string list = Path.Combine(labDir, Path.GetFileNameWithoutExtension(labOut) + "_" + kv.Key + ".txt");
+                        if (!File.Exists(list)) continue;
+                        foreach (string l in File.ReadAllLines(list).Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith("#", StringComparison.Ordinal)))
+                            foreach (string n in Own(l)) { mine.Add((n, kv.Value, false)); mineFromLists++; }
+                    }
+                // a gun nothing moves stands still (GlbDisconnectedParts.LabGunStands): no turret, no deploy raise or recoil
+                // here, and in the pack no gun elevation or turret bone on the model built from this recipe's output
+                if (packText == null) { packText = ""; try { if (File.Exists(ModelRegistry.SourcePath)) packText = File.ReadAllText(ModelRegistry.SourcePath); } catch (Exception e) { Debug.LogWarning("[Workshop] unseen faces: could not read the pack for the guns' settings (guns count as moving): " + e.Message); } }
+                bool gunStands = mine.Any(x => GlbDisconnectedParts.UnseenLabRole(x.role, true) != x.role)
+                    && GlbDisconnectedParts.LabGunStands(mine.Select(x => x.role), (float?)recipe["gunDeployElev"] ?? 0f, (float?)recipe["recoilDist"] ?? 0f,
+                        GlbDisconnectedParts.PackGunSettings(packText, labOut, SamePath));
+                if (gunStands) gunsStill.Add(recipeName);
+                found.AddRange(mine.Select(x => (x.name, GlbDisconnectedParts.UnseenLabRole(x.role, gunStands), x.placed)));
+                fromLists += mineFromLists;
             }
             catch (Exception e)
             {
@@ -1934,7 +1956,8 @@ public abstract class ModelWorkshopWindow : EditorWindow
         }
         note = recipes.Count == 0
             ? "no Vehicle Lab recipe reads this output yet: each part takes the role the Lab would guess from its name"
-            : $"the Vehicle Lab's roles read from {string.Join(", ", recipes)} ({found.Count - fromLists} part(s)) and the role lists of their Generate ({fromLists} name(s)); a part with no record takes a marked role of its parent name, else the Lab's guess from its name";
+            : $"the Vehicle Lab's roles read from {string.Join(", ", recipes)} ({found.Count - fromLists} part(s)) and the role lists of their Generate ({fromLists} name(s)); a part with no record takes a marked role of its parent name, else the Lab's guess from its name"
+              + (gunsStill.Count > 0 ? $"; the guns of {string.Join(", ", gunsStill)} stand still (no turret, recoil, deploy raise or gun elevation)" : "");
         return found;
     }
 

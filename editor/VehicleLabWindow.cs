@@ -2659,7 +2659,15 @@ public class VehicleLabWindow : EditorWindow
             }
             List<string> hiders = HidersOf(srcFile), hiders2 = HidersOf(srcFile2);
             var problems = new List<string>();
-            var clash = GlbDisconnectedParts.UnseenConflicts(ActiveParts.Select(p => (p.name, (int)p.role, IsPlaced(p))), hiders, hiders2);
+            // a gun nothing moves stood still at the fuse, and still does (GlbDisconnectedParts.LabGunStands): no warning for it
+            bool gunStands = false;
+            if ((hiders?.Count > 0 || hiders2?.Count > 0) && ActiveParts.Any(p => GlbDisconnectedParts.UnseenLabRole((int)p.role, true) != (int)p.role))
+            {
+                string packText = "";
+                try { if (File.Exists(ModelRegistry.SourcePath)) packText = File.ReadAllText(ModelRegistry.SourcePath); } catch (Exception e) { Debug.LogWarning("[VehicleLab] could not read the pack for the guns' settings: " + e.Message); }
+                gunStands = GlbDisconnectedParts.LabGunStands(ActiveParts.Select(p => (int)p.role), gunDeployElev, recoilDist, GlbDisconnectedParts.PackGunSettings(packText, outGlb, WorkshopRules.SamePath));
+            }
+            var clash = GlbDisconnectedParts.UnseenConflicts(ActiveParts.Select(p => (p.name, GlbDisconnectedParts.UnseenLabRole((int)p.role, gunStands), IsPlaced(p))), hiders, hiders2);
             if (clash.Count > 0)
                 problems.Add("These parts could hide faces then and are now ignored, moving or placed: " + string.Join(", ", clash.Take(8)) + (clash.Count > 8 ? $" and {clash.Count - 8} more" : "") + ".");
             // the fuse refuses a model the Lab turns (its cameras would not be the game's): a turn set after the fuse is as wrong
