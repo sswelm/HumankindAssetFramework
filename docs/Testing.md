@@ -3552,6 +3552,42 @@ view and Show all must expose every row, preserve roles and generation arguments
 recipe clean. All 18 checks pass; the original PR failed eight, including restoration of the saved vertex filter after
 the reset and the fixed +/-999 bounds. This checks the window's reset methods, not interactive arrow-key routing.
 
+**Vehicle Lab Generate after the source changed (2026-11-27):** `bash tools/vehiclelab_stale_probe_unity_drill.sh` runs
+the real window in a temporary Unity project on a copy of a real fused model
+(`HAF_STALE_PROBE_MODEL`, default the Skarv; SKIP when it is missing). The model's glTF names play the "before" and
+"after" files of a re-fuse: `Fused_P_Material2_11` is probed and marked Wheel, then the source becomes the file in which
+it is `Fused_P_Material2_11_Part_001`. The drill checks the following.
+- an unchanged source generates without a re-probe;
+- the rewritten source re-probes, generates and moves the Wheel;
+- a marking renamed out of every group stops Generate. A stop must leave the session exactly as it was: nothing
+  written, the same parts list, the same probe record, every marking where it was. A second press stops again, and with
+  the file back both markings generate;
+- the Raw model pointed at another file stops, and pointed back it generates unprobed;
+- two marked members of one fused group fused into one row stop, naming both, and a manual Probe gives that row neither
+  role;
+- an unmarked part renamed to `…propeller…` stops, naming the role the probe would guess;
+- a recipe-loaded session is not re-probed when its source is touched, and a re-Probe turns the check back on;
+- a `logMessageReceived` hook rewrites the file before the first read is committed or during the second read for
+  migrated placements. Generate stops and keeps the last accepted rows. With a stable source both placement reads
+  succeed and Generate keeps the role and offset;
+- a nested split child carries the nearer of two marked ancestors. Generate stops and names the farther marking
+  when it would have no surviving part;
+- a rigged source: the generator's skinned fixture (`fx_b_skinned`), its clip removed and its blended vertices given to
+  one joint, so that the probe runs in-process and lists the bones. A bone the probe guesses as Turret and the user
+  cleared to Default stays cleared when the file is merely touched, and Generate runs. A lost mesh marking on the fast
+  path stops Generate.
+
+Set `HAF_STALE_PROBE_BLENDER` to a Blender executable to run the optional OBJ scenario. It verifies that a refused
+probe preserves the imported preview FBX byte for byte and keeps the preview instance. A subsequent manual Probe
+publishes the replacement and cleans the staged files.
+
+With `HAF_EDITOR_ROOT` pointed at the pre-fix `editor/`, the first scenario that changes the source fails
+with the user's `VEHICLE ERROR: part 'Fused_P_Material2_11' not found`. Pointed at the PR's first commit (607a21b8),
+29 of the first 46 fail: its stop had already replaced the session, its second press generated without the dropped
+marking, and it generated the shared row and the guessed role. Pointed at the second (931040a0), five fail: the
+review's second round (the rewrite between the two reads, the touched rigged source, the fast path's mesh marking).
+The record's rules are unit cases in `Tests/VehicleLabRulesTests.cs`. The probe record is a `[SerializeField]` string.
+
 **Definition lists after a database edit (2026-11-24):** `bash tools/definition_caches_unity_drill.sh` runs the real
 list readers of the Model Factory, the Resize Lab, the Sound window and the District Factory in a temporary Unity
 project, against stand-in definition databases (the windows find a definition by its type name). It adds a pawn

@@ -520,6 +520,16 @@ public class VehicleLabWindow : EditorWindow
     float fullRadius;   // whole-model radius — far-plane margin must NOT shrink to a focused part's bounds
     Vector2 orbit = new Vector2(140f, -18f); float zoom = 1.5f;
     bool reprobingForMigration;   // guards the one automatic re-Probe after a fused-group rename migration (see Probe)
+    // The source files the parts list was probed from (VehicleLabRules.SourceStamp); "" = not probed this session (a loaded
+    // recipe, a new model), which Generate leaves alone. Serialized so a recompile keeps the check ("" is also what Unity
+    // turns a null string into on reload, so "" is the one "none" value).
+    [SerializeField] string probedSourceStamp = "";
+    // Generate's automatic re-Probe: set around its Probe call, which then swaps only a result that needs no review and
+    // otherwise leaves the session alone and lists why here (see Probe, before the swap)
+    bool autoReprobe;
+    List<string> autoReprobeBlockers = new List<string>();
+    int probeSwaps;   // counts the probes that replaced the session: tells a failed re-probe from a source that changed again
+    string migrationOuterStamp = "";   // the file the first run read, for the migration's second probe (it may redraw only that file)
     [SerializeField] Vector2 previewPan;   // camera-plane pan (middle/right-drag), in dist units — ported from the Factory preview
     // part focus/highlight: clicking a row zooms onto that part and tints it — the "which shard is the wheel?" x-ray
     string selectedPart = "";
@@ -1651,6 +1661,34 @@ public class VehicleLabWindow : EditorWindow
         }
     }
 
+    // Stage the FBX beside its final path so relative texture references keep the same base directory.
+    // The dot prefix keeps the candidate and its placement file out of Unity's asset import.
+    sealed class ProbePreviewStage : IDisposable
+    {
+        public string BaseName { get; } = ".haf-probe-" + Guid.NewGuid().ToString("N");
+        public string Fbx { get; }
+        readonly string placements;
+
+        public ProbePreviewStage(string directory)
+        {
+            Fbx = Path.Combine(directory, BaseName + ".fbx").Replace('\\', '/');
+            placements = Path.Combine(directory, BaseName + "_parttx.txt");
+        }
+
+        public void Publish(string destination)
+        {
+            if (File.Exists(destination)) File.Replace(Fbx, destination, null);
+            else File.Move(Fbx, destination);
+        }
+
+        public void Dispose()
+        {
+            foreach (string file in new[] { Fbx, placements })
+                try { File.Delete(file); }
+                catch (Exception e) { Debug.LogWarning("[VehicleLab] could not clean staged probe file '" + file + "': " + e.Message); }
+        }
+    }
+
     void Probe()
     {
         // A typed or recipe-loaded .max that was never converted: no probe (ours or Blender's) can open one, and the
@@ -1663,6 +1701,8 @@ public class VehicleLabWindow : EditorWindow
                 : "A 3ds Max file must be converted first: press 'Convert .max' under the " + (first ? "Raw model" : "Second model (in 'Second model — merge another source')") + " field, then Probe parts.";
             return;
         }
+        // taken BEFORE the read: a file rewritten while the probe runs must read as changed at the next Generate
+        string stampAtRead = CurrentSourceStamp();
         // Re-probing MERGES, never wipes: roles already assigned (by hand or a loaded recipe) are re-applied by
         // part name. This is also how a minimal recipe expands for review — Load recipe, then Probe to surface
         // every unmarked part around the kept markings.
@@ -1672,10 +1712,16 @@ public class VehicleLabWindow : EditorWindow
         foreach (var p0 in parts) if (IsPlaced(p0)) keptPlace[p0.name] = (p0.offset, p0.scale);
         var keptBones = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var b0 in boneParts) if (b0.role != Role.Default) keptBones[b0.name] = (int)b0.role;
+        // every bone the session listed, Default included - as sessionRoles is for mesh rows: a bone the user cleared from its name
+        // guess (an auto "Turret" set back to Default) keeps that Default on a re-probe instead of being guessed again (PR #326
+        // review round 2: with the guess back, a merely touched rigged source stopped every Generate)
+        var sessionBones = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var b0 in boneParts) sessionBones[b0.name] = (int)b0.role;
         bool hadBones = boneParts.Count > 0;
         // every part the session listed, Default included: a name not in here is NEW to the session (see RecoverFreshRoles below)
         var sessionRoles = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var p0 in parts) sessionRoles[p0.name] = (int)p0.role;
+        var roleOriginByPart = new Dictionary<Part, string>();
         var fresh = new List<Part>();
         // The session is NOT touched until a probe has actually succeeded (external review P1: the old
         // clear-first flow meant a failed probe — a typo'd second-model path, a crashed Blender — erased
@@ -1701,10 +1747,11 @@ public class VehicleLabWindow : EditorWindow
                 inProcess = false;
             }
         }
+        using var stagedPreview = inProcess ? null : new ProbePreviewStage(Path.GetDirectoryName(prevFull));
         if (inProcess) rowLines = nativeRows;
         else
         {
-            if (!RunBlender($"probe \"{srcFile}\" \"{prevFull}\"{Merge2Arg()}{BrightArg()}{ProbeRotArg()}{PartTxArg(projRoot, prevDir, Path.GetFileNameWithoutExtension(srcFile))}", out string stdout)) return;   // failed run: session intact, error already in status/Console
+            if (!RunBlender($"probe \"{srcFile}\" \"{stagedPreview.Fbx}\"{Merge2Arg()}{BrightArg()}{ProbeRotArg()}{PartTxArg(projRoot, prevDir, stagedPreview.BaseName)}", out string stdout)) return;
             rowLines = stdout.Split('\n');
         }
         void DropBuilt() { if (builtPreview != null) DestroyImmediate(builtPreview); if (builtObjects != null) foreach (var o in builtObjects) if (o != null) DestroyImmediate(o); builtPreview = null; builtObjects = null; }
@@ -1731,13 +1778,13 @@ public class VehicleLabWindow : EditorWindow
                 bone = row.Bone,
                 flip = row.Flip,
             };
-            var low = p.name.ToLowerInvariant();
             bool rigBone = row.Kind == "RIGBONE";
             if (!rigBone && keptPlace.TryGetValue(p.name, out var kp)) { p.offset = kp.off; p.scale = kp.scl; }
             // Preserve explicit defaults and inherit marked roles for split children before guessing from the name.
-            int? sessionRole = VehicleLabRules.ProbeSessionRole(p.name, rigBone ? keptBones : sessionRoles, (int)Role.Default);
+            int? sessionRole = VehicleLabRules.ProbeSessionRole(p.name, rigBone ? sessionBones : sessionRoles, (int)Role.Default, out string roleSource);
             p.role = sessionRole.HasValue ? (Role)sessionRole.Value
                    : (Role)GuessRoleFromName(p.name);
+            if (roleSource != null && p.role != Role.Default) roleOriginByPart.Add(p, roleSource);
             if (!rigBone && !sessionRole.HasValue) fresh.Add(p);
             (rigBone ? newBoneParts : newParts).Add(p);
         }
@@ -1758,18 +1805,45 @@ public class VehicleLabWindow : EditorWindow
         // name is gone and exactly ONE fresh row carries the same Fused_<group>_ prefix, the role and the placement
         // move to it, and the status says so. Anything less certain than "exactly one" stays a manual re-mark.
         var migrated = new List<string>();
+        var migratedPlacements = new List<string>();
+        var collided = new List<string>();   // rows claimed by two or more old markings: none carried (named in the status)
         {
             var newNames = new HashSet<string>(newParts.Select(x => x.name));
             string GroupOf(string n) { var m = System.Text.RegularExpressions.Regex.Match(n ?? "", @"^Fused_([^_]+)_"); return m.Success ? m.Groups[1].Value : null; }
+            // a target claimed by TWO old names (two marked members of one group fused into one row) takes neither: the second
+            // overwrote the first's role, and both counted as carried (PR review 2026-11-27, a Wheel and a Turret -> Turret)
+            var single = new List<(string old, Part t)>();
             foreach (string old in kept.Keys.Concat(keptPlace.Keys).Distinct().ToList())
             {
                 if (newNames.Contains(old)) continue;
                 string g = GroupOf(old); if (g == null) continue;
                 var cands = newParts.Where(x => GroupOf(x.name) == g && !sessionRoles.ContainsKey(x.name) && !keptPlace.ContainsKey(x.name)).ToList();
-                if (cands.Count != 1) continue;
-                var t = cands[0]; var what = new List<string>();
-                if (kept.TryGetValue(old, out var r0)) { t.role = r0; what.Add("role " + r0); fresh.Remove(t); }
-                if (keptPlace.TryGetValue(old, out var pl)) { t.offset = pl.off; t.scale = pl.scl; what.Add("placement"); }
+                if (cands.Count == 1) single.Add((old, cands[0]));
+            }
+            foreach (var claim in single.GroupBy(c => c.t).Where(gr => gr.Count() > 1))
+            {
+                string one = $"{claim.Key.name} ({string.Join(", ", claim.Select(c => c.old))})";
+                collided.Add(one);
+                Debug.LogWarning("[VehicleLab] probe: " + claim.Count() + " marked parts of one fused group are now the one part " + one +
+                                 " - their markings are not carried over by group; check that row by hand.");
+            }
+            foreach (var (old, t) in single.GroupBy(c => c.t).Where(gr => gr.Count() == 1).Select(gr => gr.First()))
+            {
+                var what = new List<string>();
+                if (kept.TryGetValue(old, out var r0))
+                {
+                    t.role = r0;
+                    roleOriginByPart[t] = old;
+                    what.Add("role " + r0);
+                    fresh.Remove(t);
+                }
+                if (keptPlace.TryGetValue(old, out var pl))
+                {
+                    t.offset = pl.off;
+                    t.scale = pl.scl;
+                    migratedPlacements.Add(old);
+                    what.Add("placement");
+                }
                 migrated.Add($"{old} → {t.name} ({string.Join(" + ", what)})");
             }
             if (migrated.Count > 0) Debug.Log("[VehicleLab] fused group(s) renamed by the Fuser — markings carried over by group: " + string.Join("; ", migrated));
@@ -1820,8 +1894,55 @@ public class VehicleLabWindow : EditorWindow
                     (undecided.Count > 0 ? "\n  undecided (members disagree): " + undecidedText : ""));
             }
         }
+        // GENERATE'S AUTOMATIC RE-PROBE decides here, BEFORE anything of the session is replaced (PR review 2026-11-27: the
+        // first version swapped first, so a stop had already dropped the markings it named, and a second press generated
+        // without them). It goes on only when the new rows are the session's own: every marking of the list Generate uses
+        // lands, no new row takes a role nobody set (a name guess - "propeller" contains "rope" - or a recovered one), and
+        // the fast path does not switch. Anything else is the user's call: the session stays as it was and Generate stops.
+        // BOTH lists are judged, whichever path generates (review round 2: on the fast path, mesh markings that did not land
+        // were swapped away unnamed - the output was right, the session was no longer the user's).
+        if (autoReprobe)
+        {
+            var blockers = new List<string>();
+            bool fastBefore = FastPath, fastAfter = newBoneParts.Count > 0 && (useSourceRig || !hadBones);
+            if (fastBefore != fastAfter)
+                blockers.Add(fastAfter ? "the file now has a skeleton, so the source-skeleton fast path would switch on" : "the file no longer has the skeleton the fast path rigs");
+            IEnumerable<string> RoleSources(IEnumerable<Part> list) => list.Where(roleOriginByPart.ContainsKey).Select(p => roleOriginByPart[p]);
+            var lost = VehicleLabRules.MarksNotCarried(kept.Select(kv => new KeyValuePair<string, string>(kv.Key, kv.Value.ToString())), keptPlace.Keys,
+                                                       RoleSources(newParts), newParts.Select(x => x.name), migratedPlacements);
+            lost.AddRange(VehicleLabRules.MarksNotCarried(keptBones.Select(kv => new KeyValuePair<string, string>(kv.Key, "bone " + (Role)kv.Value)), null,
+                                                          RoleSources(newBoneParts), null, null));
+            bool HasUnassignedRole(Part p) => p.role != Role.Default && !roleOriginByPart.ContainsKey(p);
+            var unset = newParts.Where(HasUnassignedRole).Select(p => p.name + " (" + p.role + ")")
+                             .Concat(newBoneParts.Where(HasUnassignedRole).Select(b => "bone " + b.name + " (" + b.role + ")")).ToList();
+            if (lost.Count > 0) blockers.Add(lost.Count + " marking(s) would not carry over: " + string.Join("; ", lost));
+            if (unset.Count > 0) blockers.Add(unset.Count + " part(s) new to the session would take a role nobody set: " + string.Join("; ", unset));
+            autoReprobeBlockers = blockers;
+            if (blockers.Count > 0) { DropBuilt(); return; }   // the session, its stamp and its preview untouched
+        }
+        // Each candidate must still describe the source at the time of publication. The placement redraw may
+        // only use the source accepted by the first probe.
+        if (stampAtRead != CurrentSourceStamp() || (reprobingForMigration && stampAtRead != migrationOuterStamp))
+        {
+            DropBuilt();
+            status = "The source changed again while it was being probed. The last accepted rows and preview are still shown. Probe again.";
+            Debug.LogWarning("[VehicleLab] " + status);
+            return;
+        }
+        if (stagedPreview != null)
+        {
+            try { stagedPreview.Publish(prevFull); }
+            catch (Exception e)
+            {
+                status = "Probe could not publish its preview: " + e.Message;
+                Debug.LogWarning("[VehicleLab] " + status);
+                return;
+            }
+        }
         parts.Clear(); parts.AddRange(newParts);
         boneParts.Clear(); boneParts.AddRange(newBoneParts);
+        probedSourceStamp = stampAtRead;   // the parts list now describes these files (Generate re-probes when they change)
+        probeSwaps++;
         DestroyPreview();
         if (boneParts.Count > 0 && !hadBones) useSourceRig = true;   // first detection: default to the fast path
         if (builtPreview != null) AttachPreview(builtPreview, new List<AnimationClip>(), builtObjects);   // the C# probe's parts: a static turntable for part inspection
@@ -1839,21 +1960,25 @@ public class VehicleLabWindow : EditorWindow
               $"Probed {parts.Count} part(s); {parts.Count(x => x.role == Role.Wheel)} wheel(s), {parts.Count(x => x.role == Role.Turret)} turret(s)" +
               (kept.Count > 0 ? $" ({parts.Count(x => kept.ContainsKey(x.name) && x.role == kept[x.name])} of {kept.Count} earlier markings kept)" : " (auto-guessed)") +
               (migrated.Count > 0 ? $" · {migrated.Count} renamed fused group(s) carried over: {string.Join("; ", migrated)}" : "") +
+              (collided.Count > 0 ? $" · {collided.Count} part(s) that several marked members of one fused group became - not carried over by group, check by hand: {string.Join("; ", collided)}" : "") +
               recoveredNote +
               ". Click a row to see WHICH part it is (zoom + yellow highlight), assign roles, then Generate rig.";
         // THE PREVIEW WAS EXPORTED BEFORE THE MIGRATION (PR #74 review P2). Blender ran with the placement list
         // written from the OLD names: it warned "no such part", exported unplaced geometry, and only then did the
         // C# above move the placement to the renamed row — so the list showed the migrated value while the preview
-        // showed the part unmoved until the next Probe. A rename is rare and a probe is seconds, so when anything
-        // migrated, Probe runs once more with the now-correct names. The guard makes it exactly once: the second
-        // run finds every kept name present, migrates nothing, and stops here.
-        if (migrated.Count > 0 && !reprobingForMigration)
+        // showed the part unmoved until the next Probe. Once a placement migrates, Probe runs once more with
+        // the now-correct names. Role-only migrations leave the preview geometry as it is.
+        if (migratedPlacements.Count > 0 && !reprobingForMigration)
         {
+            migrationOuterStamp = stampAtRead;
             reprobingForMigration = true;
+            int swapsBefore = probeSwaps;
             try { Probe(); }
             finally { reprobingForMigration = false; }
             // the re-probe finds every name in the session, so it recovers nothing: the first run's note is the one to keep
-            status = $"Re-probed once so the preview shows the {migrated.Count} migrated placement(s).  " + status + recoveredNote;
+            status = probeSwaps > swapsBefore
+                ? $"Re-probed once so the preview shows the {migratedPlacements.Count} migrated placement(s).  " + status + recoveredNote
+                : "The preview redraw did not finish. The rows are from the first read. Probe again.  " + status;
         }
     }
 
@@ -2055,7 +2180,7 @@ public class VehicleLabWindow : EditorWindow
     {
         generateRoute = "";
         srcFile = ""; outGlb = ""; lastOutGlb = ""; loadedRecipe = ""; recipeReadThisSession = false; savedRecipeJson = "";
-        parts.Clear(); boneParts.Clear(); useSourceRig = false;
+        parts.Clear(); boneParts.Clear(); useSourceRig = false; probedSourceStamp = ""; autoReprobeBlockers.Clear();
         frames = 15; degrees = -360f; axisChoice = 0;
         treadAdvCells = 3; treadCellsPerLink = 4f; tracksStatic = false; treadMode = 0; wheelCentre = 0;
         rockDegrees = 0f; rockFrames = 120; rockAxisChoice = 0; rockHeading = 0f; rockPitchDeg = 2.4f; rockRollCycles = 1; rockPitchCycles = 1; rockPitchPhase = 90f; waveEnabled = false; foldSpin = true; foldWave = false; foldOrient = false; foldParts = true; foldOars = false; foldReduce = false; foldTrails = false; modelRot = Vector3.zero;
@@ -2326,6 +2451,8 @@ public class VehicleLabWindow : EditorWindow
             parts = r.parts;
             boneParts = r.boneParts ?? new List<Part>();   // pre-fast-path recipes have no bone list
             useSourceRig = r.useSourceRig && boneParts.Count > 0;
+            // the parts now come from the recipe, not from a probe: Generate runs them as saved (the recipe's own contract)
+            probedSourceStamp = ""; autoReprobeBlockers.Clear();
             // Start with every view filter open, AFTER restoring recipe fields: the legacy saved minVerts must not
             // re-hide small parts. Reset before the clean-state snapshot so a fresh load has no unsaved changes.
             ShowAllParts();
@@ -2445,6 +2572,43 @@ public class VehicleLabWindow : EditorWindow
         {
             status = "A 3ds Max file must be converted first: press 'Convert .max' under the " + (MaxModel.IsMax(srcFile) ? "Raw model" : "Second model") + " field, Probe parts, then Generate.";
             return;
+        }
+        // STALE PROBE (VehicleLabRules.ProbeStaleReason): the parts list names what Probe read; a source rewritten since (a
+        // re-fuse renames fused groups) made Generate stop on "part '…' not found". Re-probe first - it keeps every marking by
+        // name, carries renamed fused groups and split children - and take its rows only when they need no review (Probe
+        // decides that before its swap: every marking lands, no new row takes a role nobody set, the fast path stays as it
+        // is). Otherwise the session is left exactly as it was and Generate stops. BEFORE the refusals below: they judge the
+        // roles, and those are the re-probed ones.
+        string reprobeNote = null;
+        string stale = VehicleLabRules.ProbeStaleReason(probedSourceStamp, CurrentSourceStamp());
+        if (stale != null)
+        {
+            Debug.Log("[VehicleLab] Generate: " + stale + ". Re-probing first so the marked parts match the file.");
+            int swapsBefore = probeSwaps; autoReprobeBlockers = new List<string>();
+            autoReprobe = true;
+            try { Probe(); }
+            finally { autoReprobe = false; }
+            if (autoReprobeBlockers.Count > 0)
+            {
+                status = "Generate stopped: " + stale + ". The last accepted parts and markings are still shown. Re-probing would change them - " +
+                         string.Join("; and ", autoReprobeBlockers) + ". Press Probe parts to take the new file's parts and check those rows, " +
+                         "or point the field back at the file you probed.";
+                Debug.LogWarning("[VehicleLab] " + status);
+                return;
+            }
+            if (probeSwaps == swapsBefore)
+            {   // the probe failed or found nothing: its status says why, the session is intact, nothing was generated
+                status = "Generate stopped: " + stale + ", and the automatic re-Probe did not finish.\n" + status;
+                Debug.LogWarning("[VehicleLab] " + status);
+                return;
+            }
+            if (VehicleLabRules.ProbeStaleReason(probedSourceStamp, CurrentSourceStamp()) != null)
+            {
+                status = "Generate stopped: the source changed again while it was being re-probed. Press Generate again.";
+                Debug.LogWarning("[VehicleLab] " + status);
+                return;
+            }
+            reprobeNote = "Re-probed first: " + stale + "; every marking carried over.";
         }
         string twoSidedRefusal = VehicleLabRules.TwoSidedFastPathRefusal(FastPath, ActiveParts.Any(p => p.role == Role.TwoSided));
         if (twoSidedRefusal != null) { status = twoSidedRefusal; return; }
@@ -2748,6 +2912,7 @@ public class VehicleLabWindow : EditorWindow
         string backend = lastGenerateRoute == "csharp" ? BlenderVehicleRigInProcess.CSharpBackendName(HafNativeKernels.Available) + " (" + HafNativeKernels.Status + ")" : lastGenerateRoute == "csharp-fallback" ? "Blender (C# fallback: " + lastGenerateFallback + ")" : "Blender";
         status = $"DONE → {lastOutGlb}\nBackend: {backend}\n{bones}\n{hybrid}\n{done}\n{muzzle}\n\nNext: Factory ▸ Browse this GLB, Size as usual; " + bakeRecipe;
         if (previewProblem != null) status += "\nPreview unavailable: " + previewProblem;
+        if (reprobeNote != null) status += "\n" + reprobeNote;
         if (!headless) EditorGUIUtility.systemCopyBuffer = lastOutGlb;   // ready to paste into the Factory's Browse field
     }
 
@@ -2913,6 +3078,26 @@ public class VehicleLabWindow : EditorWindow
     // The preview against Unity's import of the Blender preview FBX is a Bake Tests row (VehicleProbePreviewGateTest).
     static bool IsGltf(string p) => HafModelLoader.CanRead(p);   // .glb/.gltf, and .fbx through the native reader (6e)
     bool CanProbeInProcess => IsGltf(srcFile) && (string.IsNullOrWhiteSpace(srcFile2) || IsGltf(srcFile2));
+
+    /// <summary>The source files as they are on disk now, in the shape Probe records (VehicleLabRules.SourceStamp): the Raw
+    /// model, and the Second model when one is set. Labels are the fields' names in the window.</summary>
+    string CurrentSourceStamp()
+    {
+        VehicleLabRules.SourceFileState Stat(string label, string path)
+        {
+            var s = new VehicleLabRules.SourceFileState { Label = label, Path = (path ?? "").Trim() };
+            try
+            {
+                var fi = new FileInfo(s.Path);
+                if (s.Path.Length > 0 && fi.Exists) { s.Exists = true; s.WriteTicksUtc = fi.LastWriteTimeUtc.Ticks; s.Length = fi.Length; }
+            }
+            catch (Exception) { }   // a malformed path reads as missing: the probe then names the real problem
+            return s;
+        }
+        var files = new List<VehicleLabRules.SourceFileState> { Stat("Raw model", srcFile) };
+        if (!string.IsNullOrWhiteSpace(srcFile2)) files.Add(Stat("Second model", srcFile2));
+        return VehicleLabRules.SourceStamp(files);
+    }
 
     /// <summary>The probe's input from this window's state: the source read, the second model read from the merge2 text, the placed
     /// parts as parttx lines, the Orientation as proberot text - the SAME characters the Blender command line gets, parsed as the
