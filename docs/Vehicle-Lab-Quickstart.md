@@ -155,6 +155,15 @@ A part the session already listed keeps the role it has, Default included, and *
 So after a probe that came back undecided, **Reload** the recipe before probing again. Not covered: a second model's
 fuse report (only the Raw model's is read), and source bones on the source-skeleton fast path.
 
+**The source changed after Probe.** Probe records the Raw model (and the Second model, when one is set) it read: its
+path, write time and size. When you press **Generate** and either file differs (re-fused, re-saved or re-pointed),
+the Lab re-probes first, with the carry-overs above, then generates. The DONE status ends with
+"Re-probed first: …". When a marking has nowhere to land (its part is gone, it was not renamed within its fused group,
+and no split child inherits it), Generate stops before writing anything. The status names each such marking with its
+role (or "placement"). Check the parts list, re-mark what needs it, and press Generate again: the parts list now
+matches the file, so that press generates. A session whose parts came from **Load recipe** has no probe record, and
+Generate runs those parts as saved, as before. Probe once to turn the check on.
+
 ## 4. Tune and generate
 
 For ordinary wheels, leave **Axle axis = Auto**, **Spin frames = 15**, and start with one full turn. If the wheels roll

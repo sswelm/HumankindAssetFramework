@@ -971,6 +971,76 @@ public static class VehicleLabRules
         return null;
     }
 
+    // STALE PROBE (2026-11-26, the Skarv): the Model Fuser rewrote the Raw model after the last Probe, renaming
+    // Fused_P_Material2_11 to Fused_P_Material2_11_Part_001, and Generate stopped with "VEHICLE ERROR: part
+    // 'Fused_P_Material2_11' not found". A re-Probe carried the Wheel over at once. Probe now records the files it
+    // read; Generate compares that record with the disk and re-probes first when they differ.
+
+    /// <summary>One source file as Probe read it. <c>Label</c> is the field's name in the window ("Raw model").</summary>
+    public sealed class SourceFileState { public string Label; public string Path; public bool Exists; public long WriteTicksUtc; public long Length; }
+
+    /// <summary>The record of the source files a probe read, one line per file: label, path, then write time and size
+    /// (or "missing"). Compare two with <see cref="ProbeStaleReason"/>.</summary>
+    public static string SourceStamp(IEnumerable<SourceFileState> files)
+        => string.Join("\n", (files ?? Enumerable.Empty<SourceFileState>()).Where(f => f != null).Select(f =>
+               f.Label + "\t" + (f.Path ?? "").Trim() + "\t" + (f.Exists ? f.WriteTicksUtc.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\t" + f.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) : "missing")));
+
+    /// <summary>Why the parts list no longer describes the source files, or null when it does. An empty
+    /// <paramref name="probedStamp"/> means "not probed this session" (a loaded recipe, a new model): null, since there is
+    /// no probe to be stale.</summary>
+    public static string ProbeStaleReason(string probedStamp, string currentStamp)
+    {
+        if (string.IsNullOrEmpty(probedStamp) || probedStamp == currentStamp) return null;
+        Dictionary<string, string[]> Parse(string s)
+        {
+            var d = new Dictionary<string, string[]>(StringComparer.Ordinal);
+            foreach (string line in (s ?? "").Split('\n'))
+            {
+                var f = line.Split('\t');
+                if (f.Length >= 3 && f[0].Length > 0) d[f[0]] = f;
+            }
+            return d;
+        }
+        string SamePath(string p) => (p ?? "").Trim().Replace('\\', '/');
+        string When(string ticks) => long.TryParse(ticks, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out long t) && t > 0
+            ? new DateTime(t, DateTimeKind.Utc).ToLocalTime().ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) : "?";
+        var was = Parse(probedStamp); var now = Parse(currentStamp);
+        var why = new List<string>();
+        foreach (string label in was.Keys.Concat(now.Keys).Distinct())
+        {
+            was.TryGetValue(label, out var a); now.TryGetValue(label, out var b);
+            if (a == null) { why.Add("a " + label + " was added"); continue; }
+            if (b == null) { why.Add("the " + label + " was removed"); continue; }
+            if (!string.Equals(SamePath(a[1]), SamePath(b[1]), StringComparison.OrdinalIgnoreCase)) { why.Add("the " + label + " now names another file"); continue; }
+            if (b[2] == "missing") { why.Add("the " + label + " is no longer on disk"); continue; }
+            if (a[2] == "missing") { why.Add("the " + label + " appeared on disk"); continue; }
+            if (a.Length < 4 || b.Length < 4 || a[2] != b[2] || a[3] != b[3])
+                why.Add("the " + label + " was rewritten at " + When(b[2]) + " (the parts list is from the " + When(a[2]) + " file)");
+        }
+        // a change that only reorders lines or trims a path is no change
+        return why.Count == 0 ? null : "the source changed since Probe: " + string.Join("; ", why);
+    }
+
+    /// <summary>The markings a re-Probe could not land, as "name (Wheel)" / "name (placement)" / "name (Wheel + placement)",
+    /// sorted. A kept role lands when its name is still a part, when it moved to a renamed fused group
+    /// (<paramref name="migratedFrom"/>), or when a split child inherits it (<see cref="ProbeSessionRole"/>: a part whose
+    /// <see cref="ParentNames"/> include it). A kept placement lands by exact name or by migration only: placements are
+    /// not inherited.</summary>
+    public static List<string> MarksNotCarried(IEnumerable<KeyValuePair<string, string>> keptRoles, IEnumerable<string> keptPlacements,
+                                               IEnumerable<string> newNames, IEnumerable<string> migratedFrom)
+    {
+        var now = new HashSet<string>(newNames ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
+        var moved = new HashSet<string>(migratedFrom ?? Enumerable.Empty<string>(), StringComparer.Ordinal);
+        var parents = new HashSet<string>(now.SelectMany(ParentNames), StringComparer.Ordinal);
+        var lost = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
+        void Lose(string name, string what) { if (!lost.TryGetValue(name, out var l)) lost[name] = l = new List<string>(); if (!l.Contains(what)) l.Add(what); }
+        foreach (var kv in keptRoles ?? Enumerable.Empty<KeyValuePair<string, string>>())
+            if (!string.IsNullOrEmpty(kv.Key) && !now.Contains(kv.Key) && !moved.Contains(kv.Key) && !parents.Contains(kv.Key)) Lose(kv.Key, kv.Value);
+        foreach (string n in keptPlacements ?? Enumerable.Empty<string>())
+            if (!string.IsNullOrEmpty(n) && !now.Contains(n) && !moved.Contains(n)) Lose(n, "placement");
+        return lost.Select(kv => kv.Key + " (" + string.Join(" + ", kv.Value) + ")").ToList();
+    }
+
     /// <summary>Recover role lists written before the generated GLB. A newer list indicates another attempt
     /// or a different output with the same basename. A name claimed by different roles is left undecided.
     /// Older versions wrote Default only when its dial was active. A Default list predating the other lists

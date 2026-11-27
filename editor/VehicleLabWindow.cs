@@ -499,6 +499,12 @@ public class VehicleLabWindow : EditorWindow
     float fullRadius;   // whole-model radius — far-plane margin must NOT shrink to a focused part's bounds
     Vector2 orbit = new Vector2(140f, -18f); float zoom = 1.5f;
     bool reprobingForMigration;   // guards the one automatic re-Probe after a fused-group rename migration (see Probe)
+    // The source files the parts list was probed from (VehicleLabRules.SourceStamp); "" = not probed this session (a loaded
+    // recipe, a new model), which Generate leaves alone. Serialized so a recompile keeps the check ("" is also what Unity
+    // turns a null string into on reload, so "" is the one "none" value).
+    [SerializeField] string probedSourceStamp = "";
+    // what the last outer Probe could not land (VehicleLabRules.MarksNotCarried); read by Generate's automatic re-Probe
+    List<string> probeMarksNotCarried = new List<string>();
     [SerializeField] Vector2 previewPan;   // camera-plane pan (middle/right-drag), in dist units — ported from the Factory preview
     // part focus/highlight: clicking a row zooms onto that part and tints it — the "which shard is the wheel?" x-ray
     string selectedPart = "";
@@ -1642,6 +1648,8 @@ public class VehicleLabWindow : EditorWindow
                 : "A 3ds Max file must be converted first: press 'Convert .max' under the " + (first ? "Raw model" : "Second model (in 'Second model — merge another source')") + " field, then Probe parts.";
             return;
         }
+        // taken BEFORE the read: a file rewritten while the probe runs must read as changed at the next Generate
+        string stampAtRead = CurrentSourceStamp();
         // Re-probing MERGES, never wipes: roles already assigned (by hand or a loaded recipe) are re-applied by
         // part name. This is also how a minimal recipe expands for review — Load recipe, then Probe to surface
         // every unmarked part around the kept markings.
@@ -1750,6 +1758,7 @@ public class VehicleLabWindow : EditorWindow
         // name is gone and exactly ONE fresh row carries the same Fused_<group>_ prefix, the role and the placement
         // move to it, and the status says so. Anything less certain than "exactly one" stays a manual re-mark.
         var migrated = new List<string>();
+        var migratedFrom = new List<string>();
         {
             var newNames = new HashSet<string>(newParts.Select(x => x.name));
             string GroupOf(string n) { var m = System.Text.RegularExpressions.Regex.Match(n ?? "", @"^Fused_([^_]+)_"); return m.Success ? m.Groups[1].Value : null; }
@@ -1763,6 +1772,7 @@ public class VehicleLabWindow : EditorWindow
                 if (kept.TryGetValue(old, out var r0)) { t.role = r0; what.Add("role " + r0); fresh.Remove(t); }
                 if (keptPlace.TryGetValue(old, out var pl)) { t.offset = pl.off; t.scale = pl.scl; what.Add("placement"); }
                 migrated.Add($"{old} → {t.name} ({string.Join(" + ", what)})");
+                migratedFrom.Add(old);
             }
             if (migrated.Count > 0) Debug.Log("[VehicleLab] fused group(s) renamed by the Fuser — markings carried over by group: " + string.Join("; ", migrated));
         }
@@ -1812,8 +1822,18 @@ public class VehicleLabWindow : EditorWindow
                     (undecided.Count > 0 ? "\n  undecided (members disagree): " + undecidedText : ""));
             }
         }
+        // The markings this probe could not land (mesh rows and source bones). The migration's own re-Probe below finds every
+        // name present and would report none, so only the outer run writes the list Generate reads.
+        if (!reprobingForMigration)
+        {
+            probeMarksNotCarried = VehicleLabRules.MarksNotCarried(kept.Select(kv => new KeyValuePair<string, string>(kv.Key, kv.Value.ToString())), keptPlace.Keys,
+                                                                   newParts.Select(x => x.name), migratedFrom);
+            probeMarksNotCarried.AddRange(VehicleLabRules.MarksNotCarried(keptBones.Select(kv => new KeyValuePair<string, string>(kv.Key, "bone " + (Role)kv.Value)), null,
+                                                                          newBoneParts.Select(x => x.name), null));
+        }
         parts.Clear(); parts.AddRange(newParts);
         boneParts.Clear(); boneParts.AddRange(newBoneParts);
+        probedSourceStamp = stampAtRead;   // the parts list now describes these files (Generate re-probes when they change)
         DestroyPreview();
         if (boneParts.Count > 0 && !hadBones) useSourceRig = true;   // first detection: default to the fast path
         if (builtPreview != null) AttachPreview(builtPreview, new List<AnimationClip>(), builtObjects);   // the C# probe's parts: a static turntable for part inspection
@@ -2047,7 +2067,7 @@ public class VehicleLabWindow : EditorWindow
     {
         generateRoute = "";
         srcFile = ""; outGlb = ""; lastOutGlb = ""; loadedRecipe = ""; recipeReadThisSession = false; savedRecipeJson = "";
-        parts.Clear(); boneParts.Clear(); useSourceRig = false;
+        parts.Clear(); boneParts.Clear(); useSourceRig = false; probedSourceStamp = ""; probeMarksNotCarried.Clear();
         frames = 15; degrees = -360f; axisChoice = 0;
         treadAdvCells = 3; treadCellsPerLink = 4f; tracksStatic = false; treadMode = 0; wheelCentre = 0;
         rockDegrees = 0f; rockFrames = 120; rockAxisChoice = 0; rockHeading = 0f; rockPitchDeg = 2.4f; rockRollCycles = 1; rockPitchCycles = 1; rockPitchPhase = 90f; waveEnabled = false; foldSpin = true; foldWave = false; foldOrient = false; foldParts = true; foldOars = false; foldReduce = false; foldTrails = false; modelRot = Vector3.zero;
@@ -2318,6 +2338,8 @@ public class VehicleLabWindow : EditorWindow
             parts = r.parts;
             boneParts = r.boneParts ?? new List<Part>();   // pre-fast-path recipes have no bone list
             useSourceRig = r.useSourceRig && boneParts.Count > 0;
+            // the parts now come from the recipe, not from a probe: Generate runs them as saved (the recipe's own contract)
+            probedSourceStamp = ""; probeMarksNotCarried.Clear();
             // Start with every view filter open, AFTER restoring recipe fields: the legacy saved minVerts must not
             // re-hide small parts. Reset before the clean-state snapshot so a fresh load has no unsaved changes.
             ShowAllParts();
@@ -2437,6 +2459,31 @@ public class VehicleLabWindow : EditorWindow
         {
             status = "A 3ds Max file must be converted first: press 'Convert .max' under the " + (MaxModel.IsMax(srcFile) ? "Raw model" : "Second model") + " field, Probe parts, then Generate.";
             return;
+        }
+        // STALE PROBE (VehicleLabRules.ProbeStaleReason): the parts list names what Probe read; a source rewritten since (a
+        // re-fuse renames fused groups) made Generate stop on "part '…' not found". Re-probe first - it keeps every marking by
+        // name, carries renamed fused groups and split children - and generate only when every marking landed. BEFORE the
+        // refusals below: they judge the roles, and those are the re-probed ones.
+        string reprobeNote = null;
+        string stale = VehicleLabRules.ProbeStaleReason(probedSourceStamp, CurrentSourceStamp());
+        if (stale != null)
+        {
+            Debug.Log("[VehicleLab] Generate: " + stale + ". Re-probing first so the marked parts match the file.");
+            Probe();
+            if (VehicleLabRules.ProbeStaleReason(probedSourceStamp, CurrentSourceStamp()) != null)
+            {   // the probe failed or found nothing: its status says why, and nothing was generated
+                status = "Generate stopped: " + stale + ", and the automatic re-Probe did not finish.\n" + status;
+                Debug.LogWarning("[VehicleLab] " + status);
+                return;
+            }
+            if (probeMarksNotCarried.Count > 0)
+            {
+                status = "Generate stopped: " + stale + ". The parts were re-probed, but " + probeMarksNotCarried.Count + " marking(s) did not carry over to a part of the new file: " +
+                         string.Join("; ", probeMarksNotCarried) + ". Check the parts list (mark them again where needed), then Generate again.";
+                Debug.LogWarning("[VehicleLab] " + status);
+                return;
+            }
+            reprobeNote = "Re-probed first: " + stale + "; every marking carried over.";
         }
         string twoSidedRefusal = VehicleLabRules.TwoSidedFastPathRefusal(FastPath, ActiveParts.Any(p => p.role == Role.TwoSided));
         if (twoSidedRefusal != null) { status = twoSidedRefusal; return; }
@@ -2716,6 +2763,7 @@ public class VehicleLabWindow : EditorWindow
         string backend = lastGenerateRoute == "csharp" ? BlenderVehicleRigInProcess.CSharpBackendName(HafNativeKernels.Available) + " (" + HafNativeKernels.Status + ")" : lastGenerateRoute == "csharp-fallback" ? "Blender (C# fallback: " + lastGenerateFallback + ")" : "Blender";
         status = $"DONE → {lastOutGlb}\nBackend: {backend}\n{bones}\n{hybrid}\n{done}\n{muzzle}\n\nNext: Factory ▸ Browse this GLB, Size as usual; " + bakeRecipe;
         if (previewProblem != null) status += "\nPreview unavailable: " + previewProblem;
+        if (reprobeNote != null) status += "\n" + reprobeNote;
         if (!headless) EditorGUIUtility.systemCopyBuffer = lastOutGlb;   // ready to paste into the Factory's Browse field
     }
 
@@ -2881,6 +2929,26 @@ public class VehicleLabWindow : EditorWindow
     // The preview against Unity's import of the Blender preview FBX is a Bake Tests row (VehicleProbePreviewGateTest).
     static bool IsGltf(string p) => HafModelLoader.CanRead(p);   // .glb/.gltf, and .fbx through the native reader (6e)
     bool CanProbeInProcess => IsGltf(srcFile) && (string.IsNullOrWhiteSpace(srcFile2) || IsGltf(srcFile2));
+
+    /// <summary>The source files as they are on disk now, in the shape Probe records (VehicleLabRules.SourceStamp): the Raw
+    /// model, and the Second model when one is set. Labels are the fields' names in the window.</summary>
+    string CurrentSourceStamp()
+    {
+        VehicleLabRules.SourceFileState Stat(string label, string path)
+        {
+            var s = new VehicleLabRules.SourceFileState { Label = label, Path = (path ?? "").Trim() };
+            try
+            {
+                var fi = new FileInfo(s.Path);
+                if (s.Path.Length > 0 && fi.Exists) { s.Exists = true; s.WriteTicksUtc = fi.LastWriteTimeUtc.Ticks; s.Length = fi.Length; }
+            }
+            catch (Exception) { }   // a malformed path reads as missing: the probe then names the real problem
+            return s;
+        }
+        var files = new List<VehicleLabRules.SourceFileState> { Stat("Raw model", srcFile) };
+        if (!string.IsNullOrWhiteSpace(srcFile2)) files.Add(Stat("Second model", srcFile2));
+        return VehicleLabRules.SourceStamp(files);
+    }
 
     /// <summary>The probe's input from this window's state: the source read, the second model read from the merge2 text, the placed
     /// parts as parttx lines, the Orientation as proberot text - the SAME characters the Blender command line gets, parsed as the

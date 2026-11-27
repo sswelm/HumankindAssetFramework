@@ -449,5 +449,68 @@ namespace HumankindAssetFramework.Tests
                 got3.Select(r => (r.Name, r.Role, r.From)).ToArray());
             Assert.Empty(und3);
         }
+
+        static VehicleLabRules.SourceFileState Src(string label, string path, long ticks, long len, bool exists = true)
+            => new VehicleLabRules.SourceFileState { Label = label, Path = path, Exists = exists, WriteTicksUtc = ticks, Length = len };
+
+        [Fact]
+        public void An_unprobed_session_or_an_unchanged_source_is_not_stale()
+        {
+            string stamp = VehicleLabRules.SourceStamp(new[] { Src("Raw model", "D:/3DModels/T/skarv_fused.glb", 638_999_000_000_000_000, 1876228) });
+            Assert.Null(VehicleLabRules.ProbeStaleReason("", stamp));     // a loaded recipe / new model: nothing was probed
+            Assert.Null(VehicleLabRules.ProbeStaleReason(null, stamp));
+            Assert.Null(VehicleLabRules.ProbeStaleReason(stamp, stamp));
+            // the same file spelled with the other slash and case is the same file
+            string respelled = VehicleLabRules.SourceStamp(new[] { Src("Raw model", "d:\\3dmodels\\T\\SKARV_fused.glb ", 638_999_000_000_000_000, 1876228) });
+            Assert.Null(VehicleLabRules.ProbeStaleReason(stamp, respelled));
+        }
+
+        [Fact]
+        public void A_rewritten_renamed_added_or_removed_source_is_stale_and_says_which()
+        {
+            var raw = Src("Raw model", "D:/m/a.glb", 638_999_000_000_000_000, 100);
+            string probed = VehicleLabRules.SourceStamp(new[] { raw });
+            // the Skarv: the Fuser rewrote the Raw model (a new write time; the size may or may not move)
+            string rewritten = VehicleLabRules.SourceStamp(new[] { Src("Raw model", "D:/m/a.glb", 639_000_000_000_000_000, 100) });
+            Assert.Contains("the Raw model was rewritten at", VehicleLabRules.ProbeStaleReason(probed, rewritten));
+            string resized = VehicleLabRules.SourceStamp(new[] { Src("Raw model", "D:/m/a.glb", 638_999_000_000_000_000, 101) });
+            Assert.Contains("the Raw model was rewritten", VehicleLabRules.ProbeStaleReason(probed, resized));
+            Assert.Contains("the Raw model now names another file",
+                VehicleLabRules.ProbeStaleReason(probed, VehicleLabRules.SourceStamp(new[] { Src("Raw model", "D:/m/b.glb", 638_999_000_000_000_000, 100) })));
+            Assert.Contains("the Raw model is no longer on disk",
+                VehicleLabRules.ProbeStaleReason(probed, VehicleLabRules.SourceStamp(new[] { Src("Raw model", "D:/m/a.glb", 0, 0, exists: false) })));
+            string withSecond = VehicleLabRules.SourceStamp(new[] { raw, Src("Second model", "D:/m/s.glb", 638_999_000_000_000_000, 5) });
+            Assert.Equal("the source changed since Probe: a Second model was added", VehicleLabRules.ProbeStaleReason(probed, withSecond));
+            Assert.Equal("the source changed since Probe: the Second model was removed", VehicleLabRules.ProbeStaleReason(withSecond, probed));
+        }
+
+        [Fact]
+        public void A_marking_carries_by_name_by_split_child_or_by_renamed_group_and_the_rest_is_named()
+        {
+            var roles = new Dictionary<string, string>
+            {
+                ["Fused_P_Material2_11"] = "Wheel",      // the Skarv: re-fused as Fused_P_Material2_11_Part_001, a split child inherits it
+                ["Fused_Y_Object_1722"] = "Turret",      // a renamed fused group: Probe migrated it
+                ["Hull"] = "Body",                       // still a part
+                ["Fused_Q_Gone"] = "Rotor",              // nothing on the new file
+            };
+            var placed = new[] { "Fused_P_Material2_11", "Fused_Y_Object_1722", "Mast" };
+            var now = new[] { "Fused_P_Material2_11_Part_001", "Fused_Y_Object_1740", "Hull" };
+            var lost = VehicleLabRules.MarksNotCarried(roles, placed, now, new[] { "Fused_Y_Object_1722" });
+            // a placement is not inherited by a split child (Probe restores it by exact name only), so the Skarv's would be named
+            Assert.Equal(new[] { "Fused_P_Material2_11 (placement)", "Fused_Q_Gone (Rotor)", "Mast (placement)" }, lost);
+            // the Skarv as it was: a Wheel and no placement - everything lands
+            Assert.Empty(VehicleLabRules.MarksNotCarried(new Dictionary<string, string> { ["Fused_P_Material2_11"] = "Wheel" }, null, now, null));
+            Assert.Equal(new[] { "X (Wheel + placement)" },
+                VehicleLabRules.MarksNotCarried(new Dictionary<string, string> { ["X"] = "Wheel" }, new[] { "X" }, new string[0], null));
+        }
+
+        [Fact]
+        public void The_stamp_is_one_tab_separated_line_per_file_and_a_missing_file_says_so()
+        {
+            Assert.Equal("Raw model\tD:/m/a.glb\t5\t7\nSecond model\tD:/m/s.glb\tmissing",
+                VehicleLabRules.SourceStamp(new[] { Src("Raw model", " D:/m/a.glb ", 5, 7), Src("Second model", "D:/m/s.glb", 9, 9, exists: false) }));
+            Assert.Equal("", VehicleLabRules.SourceStamp(null));
+        }
     }
 }
