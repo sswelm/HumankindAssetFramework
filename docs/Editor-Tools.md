@@ -564,26 +564,33 @@ windows. **Deep dive:**
   because it draws the source as stored),
   tick **Leave out faces no camera can see** to drop what lies inside the model (0.5.7, off by default): after the fuse
   and the deletions, every face that no camera of the game sees from **either** side is left out — gun bodies under the
-  deck, the inner skin of a hull, undersides below it. The cameras are the hidden twins' (straight above, and at 65, 40
-  and 15 degrees above the horizon, more directions and points for larger faces); a face stops a camera's view only
+  deck, the inner skin of a hull, undersides below it. The cameras are the game's: its camera tilts from 28 degrees
+  below the horizon fully zoomed in to 80 zoomed out (`DefaultCameraProfile` in the game's data), so the pass looks
+  from straight above and at 65, 40 and 28 degrees (larger faces from more directions and more of their points). The
+  camera has perspective, so the top edge of a fully zoomed-in screen looks along about 10 degrees; that edge is the
+  one place a removed face can show. A face stops a camera's view only
   where it shows its front, as under back-face culling; glass and cut-outs hide nothing and are kept. A face whose
-  back shows stays, so the Lab's inside-out fix, Flip, TwoSided and double-sided output cannot turn a removed face
-  into a hole. Rays from a few points along a few directions miss what a camera sees through a slit or past a lip, so
-  two rings of faces around everything that shows stay as well (the rim). The Fuser reads the Vehicle Lab's records of the output — every
-  recipe whose source is this file, whatever it is named, and the role lists of its last Generate; a part with no
-  record takes the role the Lab would guess from its name (a "Propeller" is a rotor). It does not run, and says why,
+  back shows stays, so the Lab's inside-out fix, Flip, TwoSided and double-sided output turn a removed face into a
+  hole no more often than the front rule misses one (rendered with both sides drawn, the first cut showed no sky). Rays from a few points along a few directions miss what a camera sees through a slit or past a lip, so
+  two rings of faces around everything that shows stay as well (the rim). The Fuser reads the Vehicle Lab's saved records of the output — every
+  recipe that loads this file as its model or as its second model (under the names without the Lab's `B_`), whatever
+  the recipe is named, and the role lists that recipe's Generate wrote; a part with no record takes a marked role of
+  its parent name as the Lab's Probe does (`Gun_Part_003` takes `Gun`'s), else the role the Lab would guess from its
+  name (a "Propeller" is a rotor). It does not run, and says why,
   when such a recipe cannot be read, rigs the model on its own skeleton (the fast path), or turns the model
-  (Orientation): a part the Lab ignores hides nothing; a part that moves or changes
+  (Orientation, or the second model's Rotation): a part the Lab ignores hides nothing; a part that moves or changes
   facing (wheels, turrets, guns, rotors, trails, muzzles, cradles, oars, sails, flags, rudders, chains, caterpillars,
   Flip, TwoSided, Edgecase), a placed part, a skinned or morphing mesh hides nothing and loses nothing; where the
   recipe and the lists disagree the pass takes the careful reading; a node no scene reaches is not drawn. The Factory bakes the unit to a triangle budget, so what goes here is detail the visible ship gets back:
-  on the Saleg's Revenge 1,217,786 of the 2,400,377 faces of the parts that stand still (51 %), in 43 s, and the
-  fused file from 97.6 to 64.6 MB. Rendered before and after from 96 directions the pass does not ask (640 x 640, back
-  faces culled), 258 of 2.83 million ship pixels changed, 7 of them to sky; the rest show a face about 2 % of the
-  ship's size behind the one left out — a pixel or two at the gun-port fittings. No sampled rule reaches zero: asking
-  every face from 161 directions still changed 102 pixels and took 11 minutes. The parts that hid faces are listed beside the
-  output (`<output>.unseen.txt`); when one of them is ignored, moving or placed in the Lab later, Generate names it
-  and asks before it runs (fuse again with the current roles). The pose is the file's: the water line is not
+  on the Saleg's Revenge 1,369,211 of the 2,400,377 faces of the parts that stand still (57 %), in about 100 s in the
+  editor (Unity's Mono; 43 s on .NET Framework, the progress bar waits at the end meanwhile), and the fused file from
+  97.6 to 60.1 MB. Rendered before and after from 144 directions the pass does not ask (16 round at nine heights from
+  10 to 85 degrees, 640 x 640, back faces culled, 4.25 million ship pixels): from 28 degrees up 343 pixels changed;
+  at 20 degrees 163 and at 10 degrees 993 — the top of a fully zoomed-in screen — and 106 of all the changed pixels
+  show sky. The rest show a face a little behind the one left out (median 4.5 % of the model's radius). No sampled
+  rule reaches zero. Every part that could hide a face (each still, drawn part with an opaque face) is listed beside the
+  output (`<output>.unseen.txt`); when one of them is ignored, moving or placed in the Lab later, or the model is
+  turned, Generate says so and asks before it runs (save the recipe and fuse again). The pose is the file's: the water line is not
   modelled, and a part the Lab moves without a role that says so is not known to move,
   leave **Fuse — groups at once** at **0** (auto: half the logical processors; measured on a 22-group ship, 8 at once is
   the sweet spot on 16 threads and more is no faster, since the largest group's weld slows as the others compete for

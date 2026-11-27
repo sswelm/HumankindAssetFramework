@@ -7,12 +7,15 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 - **Model Fuser: Leave out faces no camera can see** (2026-11-27, user, the Saleg's Revenge: "most of the guns bodies
   are still inside that are not visible"). An optional pass after the fuse leaves out every face that no camera of the
-  game sees from either side, keeping two rings around what shows: on the Saleg's Revenge 51 % of the faces of the
-  parts that stand still (gun bodies, inner hull skins, undersides), in 43 s. Rendered from 96 directions the pass
-  does not ask, 258 of 2.83 million ship pixels changed, nearly all to a face just behind. The Factory bakes to a
-  triangle budget, so that budget now goes to faces that show. It reads the Vehicle Lab's roles for the output: ignored parts hide nothing; moving, placed, Flip and TwoSided
-  parts hide nothing and lose nothing. Generate in the Lab names any part that hid faces and has since become
-  ignored, moving or placed, and asks before it runs. Off by default.
+  game sees from either side, keeping two rings around what shows. The cameras are the game's own: its camera tilts
+  from 28 degrees fully zoomed in to 80 zoomed out. On the Saleg's Revenge it leaves out 57 % of the faces of the parts
+  that stand still (gun bodies, inner hull skins, undersides) in about 100 s. Rendered from 144 directions the pass
+  does not ask, 343 of 4.25 million ship pixels changed from 28 degrees up, nearly all to a face just behind; the top
+  edge of a fully zoomed-in screen loses a little more. The Factory bakes to a triangle budget, so that budget now
+  goes to faces that show. It reads the Vehicle Lab's saved roles for the output, also where the output is a recipe's
+  second model: ignored parts hide nothing; moving, placed, Flip and TwoSided parts hide nothing and lose nothing.
+  Generate in the Lab names any part that could hide faces and has since become ignored, moving or placed (or a model
+  turned since), and asks before it runs. Off by default.
 - **Vehicle Lab: a probe of a fused file keeps the roles** (2026-11-25, user report, the Khelandion galley: "when I
   probe I lose everything again"). Roles are kept by part name, and a fuse renames every part it groups: the galley's
   recipe named 149 parts, the fused file has 15, and all 15 came back Default, oars and sail included. A part new to

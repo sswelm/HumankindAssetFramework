@@ -5,8 +5,8 @@ using System.Text;
 using Newtonsoft.Json.Linq;
 using Xunit;
 
-// The fuse's optional unseen-faces pass (GlbDisconnectedParts.Unseen.cs): every face no camera above the horizon sees
-// from either side is left out of the parts that stand still and are drawn.
+// The fuse's optional unseen-faces pass (GlbDisconnectedParts.Unseen.cs): every face no camera of the game (28 degrees
+// above the horizon and up) sees from either side is left out of the parts that stand still and are drawn.
 public class GlbUnseenFacesTests
 {
     // ---- fixtures: faces by tag, written as one node per part ----
@@ -134,6 +134,38 @@ public class GlbUnseenFacesTests
         // the hull's bottom faces down: no camera above the horizon sees its front, and its back looks into the closed hull
         Assert.Equal(new[] { "hull:east", "hull:north", "hull:south", "hull:top", "hull:west" }, KeptTags(r.Bytes, hull));
         Assert.Equal(12 + 2, r.FacesLeftOut);
+        Assert.Equal(new[] { "Hull", "Gun" }, r.Hiders);   // what could hide: the Lab asks about these before it generates
+    }
+
+    // ---- where the game's camera looks from (review round 2) ----
+
+    // a floor (front up) under a roof `h` above it that overhangs it by `overhang` on every side: a camera sees the floor
+    // only from below atan(h / overhang) or so, past the roof's edge
+    static (Part floor, Part roof) Porch(double h, double overhang) => (
+        new Part { Name = "Floor", Faces = new Soup().Quad("floor", V(0, 0, 0), V(0, 0, 2), V(2, 0, 2), V(2, 0, 0)) },
+        new Part { Name = "Roof", Faces = new Soup().Quad("roof", V(-overhang, h, -overhang), V(-overhang, h, 2 + overhang), V(2 + overhang, h, 2 + overhang), V(2 + overhang, h, -overhang)) });
+
+    [Fact]
+    public void A_face_only_a_camera_below_28_degrees_could_see_goes()
+    {
+        // under the roof up to atan(1 / 2.03) = 26 degrees: the game's camera tilts no lower than 28 (its data's
+        // DefaultCameraProfile); the hidden twins' 15-degree ring would have seen it
+        var (floor, roof) = Porch(1.0, 2.0);
+        var r = Run(BuildGlb(null, floor, roof));
+        Assert.Empty(KeptTags(r.Bytes, floor));
+        Assert.Equal(AllTags(roof), KeptTags(r.Bytes, roof));
+        Assert.Equal(28.0, GlbDisconnectedParts.UnseenLowestCamera);
+        Assert.Contains("(28 degrees and up)", r.Details[0]);
+    }
+
+    [Fact]
+    public void A_face_seen_only_at_28_degrees_near_its_corners_stays()
+    {
+        // seen at 28 degrees only from the points 0.95 of the way to its corners (0.6 / tan 28 = 1.13 reaches past an
+        // overhang of 1 from there, not from the points at 0.7), and at a slant: facing 0.47 - a camera that steep counts
+        var (floor, roof) = Porch(0.6, 1.0);
+        var r = Run(BuildGlb(null, floor, roof));
+        Assert.Equal(AllTags(floor), KeptTags(r.Bytes ?? BuildGlb(null, floor, roof), floor));
     }
 
     [Fact]
@@ -252,6 +284,87 @@ public class GlbUnseenFacesTests
         Assert.Contains("2 kept beside faces that show (the rim)", rim.Details[0]);
     }
 
+    [Fact]
+    public void The_rim_works_on_every_part_not_only_the_first()
+    {
+        // the gun is the first node asked: the hull's rim is found past its faces (review round 2: with the node cursor
+        // lost, the rim kept nothing past the first part - on the real ship as many holes as no rim at all)
+        Part hull = Hull(), gun = Gun();
+        var rim = GlbDisconnectedParts.LeaveOutUnseenFaces(BuildGlb(null, gun, hull), (i, n) => GlbDisconnectedParts.UnseenRole.Still);
+        Assert.Equal(AllTags(hull), KeptTags(rim.Bytes, hull));
+        Assert.Empty(KeptTags(rim.Bytes, gun));
+    }
+
+    [Fact]
+    public void The_rim_is_two_rings_deep()
+    {
+        // the hull's bottom in three strips across: the outer two touch the sides' corners (ring 1), the middle one only
+        // the outer strips (ring 2)
+        var soup = new Soup().Box("hull", V(0, 0, 0), V(20, 10, 40), false, "bottom");
+        soup.Quad("bottom:front", V(0, 0, 0), V(20, 0, 0), V(20, 0, 10), V(0, 0, 10));
+        soup.Quad("bottom:middle", V(0, 0, 10), V(20, 0, 10), V(20, 0, 30), V(0, 0, 30));
+        soup.Quad("bottom:back", V(0, 0, 30), V(20, 0, 30), V(20, 0, 40), V(0, 0, 40));
+        var hull = new Part { Name = "Hull", Faces = soup };
+        byte[] glb = BuildGlb(null, hull);
+        Assert.DoesNotContain("bottom:middle", KeptTags(Run(glb, rimRings: 1).Bytes, hull));
+        Assert.Contains("bottom:front", KeptTags(Run(glb, rimRings: 1).Bytes, hull));
+        var byDefault = GlbDisconnectedParts.LeaveOutUnseenFaces(glb, (i, n) => GlbDisconnectedParts.UnseenRole.Still);
+        Assert.False(byDefault.Changed);   // two rings: every strip stays
+        Assert.Equal(2, GlbDisconnectedParts.UnseenDefaultRimRings);
+    }
+
+    [Fact]
+    public void A_skinned_or_morphing_part_hides_nothing_and_loses_nothing()
+    {
+        Part hull = Hull(), gun = Gun();
+        byte[] skinned = BuildGlb(null, (root, bin) => { root["nodes"][1]["skin"] = 0; root["skins"] = new JArray(new JObject { ["joints"] = new JArray(1) }); }, hull, gun);
+        Assert.Equal(AllTags(gun), KeptTags(Run(skinned).Bytes, gun));
+        byte[] morphing = BuildGlb(null, (root, bin) =>
+        {
+            var prim = PrimitiveOf(root, "Gun");
+            prim["targets"] = new JArray(new JObject { ["POSITION"] = prim["attributes"]["POSITION"] });
+        }, hull, gun);
+        var r = Run(morphing);
+        Assert.Equal(AllTags(gun), KeptTags(r.Bytes, gun));
+        Assert.DoesNotContain("Gun", r.Hiders);
+    }
+
+    [Fact]
+    public void A_glass_part_inside_an_opaque_hull_keeps_every_face()
+    {
+        var materials = new JArray(new JObject { ["name"] = "steel" }, new JObject { ["name"] = "glass", ["alphaMode"] = "BLEND" });
+        Part hull = Hull(), gun = Gun(); gun.Material = 1;
+        var r = Run(BuildGlb(materials, hull, gun));
+        Assert.Equal(AllTags(gun), KeptTags(r.Bytes, gun));   // the hull still loses its bottom
+        Assert.DoesNotContain("Gun", r.Hiders);
+    }
+
+    [Fact]
+    public void A_shared_mesh_is_named_among_what_could_hide()
+    {
+        Part hull = Hull(), gun = Gun(), twin = new Part { Name = "GunTwin", Faces = Gun().Faces, SharesPrevious = true };
+        var r = Run(BuildGlb(null, hull, gun, twin));
+        Assert.Equal(new[] { "Hull", "Gun", "GunTwin" }, r.Hiders);
+    }
+
+    [Fact]
+    public void A_child_is_judged_where_its_parents_put_it()
+    {
+        // the hull is turned a quarter round and moved off; the gun hangs under it with no transform of its own. Read
+        // without the parents (or not reached from the scene), the gun would stand 100 units from the hull, in plain view.
+        Part hull = Hull(), gun = Gun();
+        double s = Math.Sqrt(0.5);
+        byte[] glb = BuildGlb(null, (root, bin) =>
+        {
+            root["scenes"][0]["nodes"] = new JArray(0);
+            root["nodes"][0]["children"] = new JArray(1);
+            root["nodes"][0]["translation"] = new JArray(100.0, 0, 0);
+            root["nodes"][0]["rotation"] = new JArray(0.0, s, 0, s);
+        }, hull, gun);
+        var r = Run(glb);
+        Assert.Contains(1, r.NodesEmptied);
+    }
+
     // ---- the written file (review of the first cut) ----
 
     static (JObject root, int binAt) Json(byte[] glb) { int n = BitConverter.ToInt32(glb, 12); return (JObject.Parse(Encoding.UTF8.GetString(glb, 20, n)), 20 + n + 8); }
@@ -318,6 +431,105 @@ public class GlbUnseenFacesTests
     }
 
     [Fact]
+    public void An_accessor_byte_offset_is_read()
+    {
+        // the gun's positions 8 bytes into their view (an interleaved or packed file does this)
+        Part hull = Hull(false, null, 0, "top"), gun = Gun();
+        byte[] glb = BuildGlb(null, (root, bin) =>
+        {
+            var prim = PrimitiveOf(root, "Gun"); var c = gun.Faces.Corners; int verts = c.Count / 3;
+            while ((bin.Count & 3) != 0) bin.Add(0);
+            int off = bin.Count;
+            for (int b = 0; b < 8; b++) bin.Add(0xEE);
+            foreach (double d in c) bin.AddRange(BitConverter.GetBytes((float)d));
+            ((JArray)root["bufferViews"]).Add(new JObject { ["buffer"] = 0, ["byteOffset"] = off, ["byteLength"] = 8 + 12 * verts, ["target"] = 34962 });
+            var old = (JObject)root["accessors"][prim["attributes"].Value<int>("POSITION")];
+            ((JArray)root["accessors"]).Add(new JObject { ["bufferView"] = root["bufferViews"].Count() - 1, ["byteOffset"] = 8, ["componentType"] = 5126, ["count"] = verts, ["type"] = "VEC3", ["min"] = old["min"], ["max"] = old["max"] });
+            prim["attributes"]["POSITION"] = root["accessors"].Count() - 1;
+        }, hull, gun);
+        var r = Run(glb);
+        Assert.Equal(new[] { "gun:east", "gun:north", "gun:south", "gun:top", "gun:west" }, KeptTags(r.Bytes, gun));
+    }
+
+    [Fact]
+    public void Position_bounds_are_the_kept_vertices_own_to_the_bit()
+    {
+        // a triangle above the hull whose FIRST vertex alone holds the largest y and z, and one hidden inside it
+        var flag = new Part
+        {
+            Name = "Flag",
+            Faces = new Soup().Tri("flag", V(1.5, 12.25, 3.75), V(0.5, 11.5, 2.25), V(2.5, 11.75, 2.5)).Tri("inside", V(5, 3, 15), V(6, 3, 15), V(5, 3, 16)),
+        };
+        var r = Run(BuildGlb(null, Hull(), flag));
+        Assert.Equal(new[] { "flag" }, KeptTags(r.Bytes, flag));
+        var (root, _) = Json(r.Bytes);
+        var pos = (JObject)root["accessors"][PrimitiveOf(root, "Flag")["attributes"].Value<int>("POSITION")];
+        Assert.Equal(new[] { 0.5, 11.5, 2.25 }, pos["min"].Select(t => (double)t));
+        Assert.Equal(new[] { 2.5, 12.25, 3.75 }, pos["max"].Select(t => (double)t));
+    }
+
+    [Fact]
+    public void A_primitive_that_loses_every_face_leaves_its_mesh()
+    {
+        // the gun's mesh has a second primitive: a block inside the closed gun, which no camera sees
+        Part hull = Hull(false, null, 0, "top"), gun = Gun();
+        var inner = new Part { Name = "Inner", Faces = new Soup().Box("inner", V(7, 3, 15), V(13, 5, 25)) };
+        byte[] glb = BuildGlb(null, (root, bin) =>
+        {
+            var gunMesh = (JArray)root["meshes"][root["nodes"][1].Value<int>("mesh")]["primitives"];
+            gunMesh.Add(root["meshes"][root["nodes"][2].Value<int>("mesh")]["primitives"][0].DeepClone());
+            ((JObject)root["nodes"][2]).Remove("mesh");
+        }, hull, gun, inner);
+        var r = Run(glb);
+        var (root2, _) = Json(r.Bytes);
+        Assert.Single((JArray)root2["meshes"][root2["nodes"][1].Value<int>("mesh")]["primitives"]);
+        var both = new Part { Name = "Gun", Faces = new Soup() };
+        both.Faces.Corners.AddRange(gun.Faces.Corners); both.Faces.Tags.AddRange(gun.Faces.Tags);
+        both.Faces.Corners.AddRange(inner.Faces.Corners); both.Faces.Tags.AddRange(inner.Faces.Tags);
+        Assert.DoesNotContain(KeptTags(r.Bytes, both), t => t.StartsWith("inner", StringComparison.Ordinal));
+        Assert.Equal(12 + 2, r.LeftOutByNode[1]);   // the block, and the gun's bottom
+    }
+
+    [Fact]
+    public void Kept_vertices_past_65535_take_32_bit_indices()
+    {
+        // a 256 x 256 grid of shared vertices on the hull's deck - 65,536 kept, and one triangle inside to lose: index
+        // 65535 does not fit a 16-bit index (glTF reserves it)
+        Part hull = Hull();
+        byte[] glb = BuildGlb(null, (root, bin) =>
+        {
+            const int n = 256;
+            while ((bin.Count & 3) != 0) bin.Add(0);
+            int pOff = bin.Count;
+            for (int i = 0; i < n; i++) for (int j = 0; j < n; j++) { bin.AddRange(BitConverter.GetBytes((float)(j * 0.05))); bin.AddRange(BitConverter.GetBytes(10.5f)); bin.AddRange(BitConverter.GetBytes((float)(i * 0.05))); }
+            foreach (var p in new[] { V(5, 3, 15), V(6, 3, 15), V(5, 3, 16) }) foreach (double d in p) bin.AddRange(BitConverter.GetBytes((float)d));
+            int verts = n * n + 3;
+            int iOff = bin.Count; var idx = new List<uint>();
+            for (int i = 0; i + 1 < n; i++) for (int j = 0; j + 1 < n; j++)
+            {
+                uint a = (uint)(i * n + j), b = a + 1, c = a + n, d = c + 1;
+                idx.AddRange(new[] { a, c, b, b, c, d });   // front up
+            }
+            idx.AddRange(new uint[] { (uint)(n * n), (uint)(n * n + 1), (uint)(n * n + 2) });
+            foreach (uint u in idx) bin.AddRange(BitConverter.GetBytes(u));
+            var views = (JArray)root["bufferViews"]; var acc = (JArray)root["accessors"];
+            views.Add(new JObject { ["buffer"] = 0, ["byteOffset"] = pOff, ["byteLength"] = 12 * verts, ["target"] = 34962 });
+            acc.Add(new JObject { ["bufferView"] = views.Count - 1, ["componentType"] = 5126, ["count"] = verts, ["type"] = "VEC3", ["min"] = new JArray(0.0, 3, 0), ["max"] = new JArray(12.75, 10.5, 16) });
+            views.Add(new JObject { ["buffer"] = 0, ["byteOffset"] = iOff, ["byteLength"] = 4 * idx.Count, ["target"] = 34963 });
+            acc.Add(new JObject { ["bufferView"] = views.Count - 1, ["componentType"] = 5125, ["count"] = idx.Count, ["type"] = "SCALAR" });
+            ((JArray)root["meshes"]).Add(new JObject { ["primitives"] = new JArray(new JObject { ["attributes"] = new JObject { ["POSITION"] = acc.Count - 2 }, ["indices"] = acc.Count - 1, ["material"] = 0 }) });
+            ((JArray)root["nodes"]).Add(new JObject { ["name"] = "Grid", ["mesh"] = root["meshes"].Count() - 1 });
+            ((JArray)root["scenes"][0]["nodes"]).Add(root["nodes"].Count() - 1);
+        }, hull);
+        var r = Run(glb);
+        Assert.Equal(1, r.LeftOutByNode[1]);
+        var (root2, _) = Json(r.Bytes);
+        var prim = PrimitiveOf(root2, "Grid");
+        Assert.Equal(65536, root2["accessors"][prim["attributes"].Value<int>("POSITION")].Value<int>("count"));
+        Assert.Equal(5125, root2["accessors"][prim.Value<int>("indices")].Value<int>("componentType"));
+    }
+
+    [Fact]
     public void A_part_that_loses_every_face_loses_its_mesh_and_the_mesh_stays_valid()
     {
         // an extension the compaction does not know: it is refused, and the mesh no node uses any more stays in the file -
@@ -365,6 +577,43 @@ public class GlbUnseenFacesTests
     public void Lab_roles_map_to_what_hides_and_what_is_asked(int[] roles, bool placed, GlbDisconnectedParts.UnseenRole expected)
     {
         Assert.Equal(expected, GlbDisconnectedParts.UnseenRoleOfLab(roles, placed));
+    }
+
+    [Fact]
+    public void Every_Lab_role_has_its_place()
+    {
+        // all 27 (VehicleLabWindow.Role): what the game draws standing still, what it does not draw, and what moves
+        var still = new[] { 0 /*Body*/, 4 /*Default*/, 15 /*Rigging*/, 16 /*Structure*/, 19 /*Preserve*/, 21 /*Detail*/, 22 /*Shroud*/, 23 /*Window*/, 24 /*Railing*/ };
+        for (int role = 0; role <= 26; role++)
+        {
+            var expected = role == 3 ? GlbDisconnectedParts.UnseenRole.NotDrawn : still.Contains(role) ? GlbDisconnectedParts.UnseenRole.Still : GlbDisconnectedParts.UnseenRole.Moves;
+            Assert.True(expected == GlbDisconnectedParts.UnseenRoleOfLab(new[] { role }, false), "role " + role);
+        }
+    }
+
+    [Fact]
+    public void A_part_with_no_record_takes_a_marked_role_of_its_parent_as_the_Lab_does()
+    {
+        var records = new List<(string name, int role, bool placed)> { ("Gun", 7, false), ("Hull", 4, false), ("Deck", 0, true) };
+        int Guess(string n) => n.Contains("sail") ? 14 : 4;
+        Assert.Equal(GlbDisconnectedParts.UnseenRole.Moves, GlbDisconnectedParts.UnseenRoleFromLabRecords("Gun_Part_003", records, Guess));   // Gun's role
+        Assert.Equal(GlbDisconnectedParts.UnseenRole.Still, GlbDisconnectedParts.UnseenRoleFromLabRecords("Hull_Part_001", records, Guess));  // Default is not inherited: the guess, Default
+        Assert.Equal(GlbDisconnectedParts.UnseenRole.Moves, GlbDisconnectedParts.UnseenRoleFromLabRecords("Hull_Part_001_sail", records, Guess)); // no parent by the Cutter's tails: the guess
+        Assert.Equal(GlbDisconnectedParts.UnseenRole.Moves, GlbDisconnectedParts.UnseenRoleFromLabRecords("Deck_CutA", records, Guess));     // a placed parent
+        Assert.Equal(GlbDisconnectedParts.UnseenRole.Still, GlbDisconnectedParts.UnseenRoleFromLabRecords("Hull_2", records, Guess));        // a bare number is not ancestry
+        Assert.Equal(GlbDisconnectedParts.UnseenRole.Still, GlbDisconnectedParts.UnseenRoleFromLabRecords("Hull", records, Guess));
+    }
+
+    [Fact]
+    public void The_Lab_checks_its_second_model_against_the_second_list()
+    {
+        // the Lab names the second model's parts with "B_"; the list beside that model names them as the model does
+        var parts = new[] { ("B_Fused_A_Object_9", 1, false), ("Fused_A_Hull", 1, false), ("B_Deck", 4, false) };
+        Assert.Equal(new[] { "B_Fused_A_Object_9" }, GlbDisconnectedParts.UnseenConflicts(parts, null, new[] { "Fused_A_Object_9", "Deck" }));
+        Assert.Equal(new[] { "Fused_A_Hull" }, GlbDisconnectedParts.UnseenConflicts(parts, new[] { "Fused_A_Hull" }, null));
+        Assert.Equal("Fused_A_Object_9", GlbDisconnectedParts.LabSecondModelName("B_Fused_A_Object_9"));
+        Assert.Null(GlbDisconnectedParts.LabSecondModelName("Fused_A_Hull"));
+        Assert.Null(GlbDisconnectedParts.LabSecondModelName("B_"));
     }
 
     [Fact]

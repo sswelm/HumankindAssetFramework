@@ -3,17 +3,17 @@
 //
 // A ship modelled for close-ups carries its insides: gun bodies under the deck, the inner skin of the hull, frames and
 // decks no one looks into. Measured on the Saleg's Revenge after a careful cut (C:/tmp/haf-build/hidden): of the faces
-// the game would draw, 73 % showed their front to no camera above the horizon, and most of them were joined to faces
-// that do show. The Factory bakes the unit to a fixed triangle budget, so every one of those faces took detail from a
-// face that shows. A split cannot take them (they are joined to what shows), and the Vehicle Lab's visibility probe
-// judges a whole part. With the rule below and its rim, the pass leaves out 51 % of that ship's still faces in 43 s
-// (the drill under UnseenDefaultRimRings).
+// the game would draw, 73 % showed their front to no camera above the horizon (53 % neither side), and most of them
+// were joined to faces that do show. The Factory bakes the unit to a fixed triangle budget, so every one of those faces
+// took detail from a face that shows. A split cannot take them (they are joined to what shows), and the Vehicle Lab's
+// visibility probe judges a whole part. With the rule below and its rim, the pass leaves out 57 % of that ship's still
+// faces, in 100 s on the editor's Mono (43 s on .NET Framework) - the drill under UnseenDefaultRimRings.
 //
 // So the fuse, when asked, leaves out every face that no camera of the game can see from EITHER side:
 //
-//   * THE CAMERAS ARE THE HIDDEN TWINS' (GlbDisconnectedParts.Covered.cs): straight above, and rings at 65, 40 and 15
-//     degrees above the horizon; a larger face is asked from more directions and from more of its points, on the same
-//     tiers (a 256th and 8 x a 256th of the model). Y is up.
+//   * THE CAMERAS ARE THE GAME'S (UnseenLowestCamera): straight above, and rings at 65, 40 and 28 degrees above the
+//     horizon (a large face also 52.5); a larger face is asked from more directions and from more of its points, on the
+//     hidden twins' tiers (GlbDisconnectedParts.Covered.cs: a 256th and 8 x a 256th of the model). Y is up.
 //   * EITHER SIDE: a face stays when a camera sees its FRONT or its BACK. What the Lab does after the fuse can turn a
 //     face round - its inside-out fix, a Flip part, a TwoSided part, the recipe's double-sided option - and a face
 //     whose back shows would then be a hole. Left out is only what no camera sees from either side: what lies INSIDE.
@@ -54,7 +54,7 @@ public static partial class GlbDisconnectedParts
         public bool Changed;
         public int FacesAsked, FacesLeftOut, VerticesLeftOut;
         public readonly Dictionary<int, int> LeftOutByNode = new Dictionary<int, int>();   // node index -> faces left out
-        public readonly List<string> Hiders = new List<string>();    // the names of the nodes whose opaque faces made up the ray tree (the Lab checks them)
+        public readonly List<string> Hiders = new List<string>();    // the names of the nodes whose opaque faces made up the ray tree: every part that COULD hide a face, not only those that did (the Lab checks them)
         public readonly List<int> NodesEmptied = new List<int>();    // nodes that lost every face, and so their mesh
         public readonly List<string> Details = new List<string>();
         public readonly List<string> Warnings = new List<string>();
@@ -62,22 +62,22 @@ public static partial class GlbDisconnectedParts
         public long RayMs;
     }
 
-    // THE RIM (drill 2026-11-27, Saleg's Revenge, C:/tmp/haf-build/unseendrill): rays from a few points along a few
-    // directions miss what a camera sees through a slit or past a lip. Rendered before and after from 96 directions the
-    // rule does not ask (640 x 640 each, back faces culled), the first cut changed 601 of 2.83 million ship pixels, 210 of
-    // them showing sky - and a face seen past a lip touches the face it is seen beside. So each ring keeps the faces left
-    // out that share a corner with a face that stays. Measured, all on that ship:
-    //     rings 0: 76 % of the asked faces left out, 601 pixels changed, 210 sky        43 s
-    //     rings 1: 59 %, 303 pixels, 23 sky                                              43 s
-    //     rings 2: 51 %, 258 pixels, 7 sky (the default)                                 43 s
-    //   asking every face as a MEDIUM one with one ring: 54 %, 256 pixels, 23 sky, 126 s; as a LARGE one: 42 %, 102
-    //   pixels, 9 sky, 674 s. No sampled rule reaches zero; what remains shows a face about 2 % of the model's size
-    //   behind the one left out, in 0.01 % of the pixels.
+    // THE RIM (drill 2026-11-27, Saleg's Revenge, C:/tmp/haf-build/unseenfinal): rays from a few points along a few
+    // directions miss what a camera sees through a slit or past a lip, and a face seen past a lip touches the face it is
+    // seen beside. So each ring keeps the faces left out that share a corner position with a face of the same part that
+    // stays. Rendered before and after from 144 directions the rule does not ask (16 round at 10, 20, 28, 33, 40, 47,
+    // 58, 72 and 85 degrees; 640 x 640 each, back faces culled, 4.25 million ship pixels), measured on that ship:
+    //     rings 0: 80 % of the asked faces left out; pixels changed 16,608, 14,195 of them sky; 28 degrees and up 842
+    //     rings 1: 65 %; 4,425, 1,474 sky; 28 degrees and up 377
+    //     rings 2: 57 %; 1,499, 106 sky; 28 degrees and up 343, the rest at 10 (993) and 20 (163) - the top edge of a
+    //              fully zoomed-in screen, below the game's lowest tilt (the default)
+    //   No sampled rule reaches zero; a changed pixel mostly shows a face a little behind the one left out (median 4.5 %
+    //   of the model's radius, half its bounding diagonal).
     public const int UnseenDefaultRimRings = 2;
 
     static (float, float, float) Corner(double[] c, int o) => ((float)c[o], (float)c[o + 1], (float)c[o + 2]);
 
-    /// <summary>Leave out every face no camera above the horizon sees from either side (see the head of this file).
+    /// <summary>Leave out every face no camera of the game sees from either side (see the head of this file).
     /// <paramref name="roleOf"/> is asked once per node with a mesh (node index, node name).</summary>
     public static UnseenResult LeaveOutUnseenFaces(byte[] source, Func<int, string, UnseenRole> roleOf, int maxParallel = -1, int rimRings = UnseenDefaultRimRings)
     {
@@ -193,7 +193,8 @@ public static partial class GlbDisconnectedParts
             {
                 int n = stops[s].Length, first = at;
                 if (!asked[s]) continue;
-                // this node's asked faces run work[first .. first + asked count): faces by corner position
+                // this node's asked faces run work[first .. first + asked count): the corner positions of the ones seen so far
+            // (by a camera, or kept by an earlier ring); a face of the SAME part touching one of them stays
                 var shown = new HashSet<(float, float, float)>();
                 int count = 0;
                 for (int i = first; i < work.Count && work[i].s == s; i++, count++)
@@ -304,9 +305,9 @@ public static partial class GlbDisconnectedParts
         string byPart = string.Join(", ", result.LeftOutByNode.OrderByDescending(k => k.Value).Take(6)
             .Select(k => ((string)nodes[k.Key]["name"] ?? ("node " + k.Key)) + " " + k.Value.ToString("N0", CultureInfo.InvariantCulture)));
         result.Details.Add(string.Format(CultureInfo.InvariantCulture,
-            "unseen faces: {0:N0} of {1:N0} face(s) no camera above the horizon sees from either side - left out (by part: {2}){3}; {4:N0} vertices fewer; {5:N0} kept beside faces that show (the rim); {6} part(s) hid them; {7}; rays {8} ms",
+            "unseen faces: {0:N0} of {1:N0} face(s) no camera of the game ({9:0.#} degrees and up) sees from either side - left out (by part: {2}){3}; {4:N0} vertices fewer; {5:N0} kept beside faces that show (the rim); {6} part(s) could hide them; {7}; rays {8} ms",
             result.FacesLeftOut, work.Count, byPart, result.NodesEmptied.Count > 0 ? "; " + result.NodesEmptied.Count + " part(s) lost every face and their mesh" : "",
-            result.VerticesLeftOut, result.RimKept, geos.Count, kept, result.RayMs));
+            result.VerticesLeftOut, result.RimKept, result.Hiders.Count, kept, result.RayMs, UnseenLowestCamera));
         result.Details.AddRange(writeResult.Details);
         return result;
     }
@@ -331,6 +332,25 @@ public static partial class GlbDisconnectedParts
         return UnseenRole.Moves;
     }
 
+    /// <summary>How the pass treats the node <paramref name="nodeName"/> from the Lab's records of the file (name, role,
+    /// placed): by its own records (<see cref="LabNameMatches"/>); with none, as the Lab's Probe does
+    /// (VehicleLabRules.ProbeSessionRole), by a MARKED role kept under a parent name - a split child Gun_Part_003 takes
+    /// Gun's (review of the first cut: it took the name guess, Default, and stood still); with none of those either, by
+    /// the role the Lab would guess from its name (<paramref name="guessRole"/>).</summary>
+    public static UnseenRole UnseenRoleFromLabRecords(string nodeName, IList<(string name, int role, bool placed)> records, Func<string, int> guessRole)
+    {
+        var mine = (records ?? new List<(string, int, bool)>()).Where(x => LabNameMatches(nodeName, x.name)).ToList();
+        if (mine.Count == 0 && records != null)
+            foreach (string parent in VehicleLabRules.ParentNames(nodeName))
+            {
+                mine = records.Where(x => string.Equals(x.name, parent, StringComparison.Ordinal) && x.role != LabDefaultRole).ToList();
+                if (mine.Count > 0) break;
+            }
+        if (mine.Count == 0) return UnseenRoleOfLab(new[] { guessRole != null ? guessRole(nodeName) : LabDefaultRole }, false);
+        return UnseenRoleOfLab(mine.Select(x => x.role), mine.Any(x => x.placed));
+    }
+    const int LabDefaultRole = 4;
+
     /// <summary>The Lab names a fused shell "Fused_&lt;letter&gt;_&lt;group or first part&gt;", and a fuse after a re-split can name
     /// the same group's shell after another first part. So a Lab name matches a node by name, or - for a fused shell - by
     /// its group letter.</summary>
@@ -341,9 +361,10 @@ public static partial class GlbDisconnectedParts
         return a != null && a == b;
     }
 
-    // THE LIST BESIDE THE OUTPUT: the parts that hid faces when the pass ran, under a header holding the output's length
-    // (a file written over without the pass, or by anything else, no longer matches and the list is not read). The Lab
-    // reads it before it generates: a part that hid faces and is now ignored, moving or placed may leave a hole.
+    // THE LIST BESIDE THE OUTPUT: every part that could hide a face when the pass ran (a still, drawn part with an opaque
+    // face - which of them stopped which ray is not kept, so the list errs towards asking), under a header holding the
+    // output's length (a file written over without the pass, or by anything else, no longer matches and the list is not
+    // read). The Lab reads it before it generates: such a part that is now ignored, moving or placed may leave a hole.
     public const string UnseenSidecarHeader = "#unseen-faces v1";
     public static string UnseenSidecarPath(string glb) => string.IsNullOrEmpty(glb) ? null : glb + ".unseen.txt";
 
@@ -355,16 +376,30 @@ public static partial class GlbDisconnectedParts
         return all.Skip(1).Where(l => l.StartsWith("hid|", StringComparison.Ordinal)).Select(l => l.Substring(4)).ToList();
     }
 
-    /// <summary>The Lab's parts (name, role, placed) that hid faces at the fuse and are no longer still, drawn parts.</summary>
-    public static List<string> UnseenConflicts(IEnumerable<(string name, int role, bool placed)> labParts, IList<string> hiders)
+    /// <summary>The Lab's parts (name, role, placed) that could hide faces at the fuse and are no longer still, drawn parts.
+    /// <paramref name="hiders"/> is the list beside the Lab's model, <paramref name="hidersOfSecond"/> the one beside its
+    /// second model, whose parts the Lab names with <see cref="LabSecondModelPrefix"/> (review of the first cut: they never
+    /// matched). A "B_" name is checked against both lists - a first model may name a part so - which can only ask more.</summary>
+    public static List<string> UnseenConflicts(IEnumerable<(string name, int role, bool placed)> labParts, IList<string> hiders, IList<string> hidersOfSecond = null)
     {
         var found = new List<string>();
-        if (hiders == null || hiders.Count == 0) return found;
+        if ((hiders == null || hiders.Count == 0) && (hidersOfSecond == null || hidersOfSecond.Count == 0)) return found;
         foreach (var p in labParts ?? Enumerable.Empty<(string, int, bool)>())
-            if (UnseenRoleOfLab(new[] { p.role }, p.placed) != UnseenRole.Still && hiders.Any(h => LabNameMatches(p.name, h)))
+        {
+            if (UnseenRoleOfLab(new[] { p.role }, p.placed) == UnseenRole.Still) continue;
+            string second = LabSecondModelName(p.name);
+            if ((hiders != null && hiders.Any(h => LabNameMatches(p.name, h))) || (second != null && hidersOfSecond != null && hidersOfSecond.Any(h => LabNameMatches(second, h))))
                 found.Add(p.name);
+        }
         return found;
     }
+
+    /// <summary>The prefix the Vehicle Lab gives the parts of its second model (vehicle_rig.py merges it into the scene so).</summary>
+    public const string LabSecondModelPrefix = "B_";
+
+    /// <summary>The second model's own name for a Lab part, or null when the Lab name is not a second-model one.</summary>
+    public static string LabSecondModelName(string labName)
+        => labName != null && labName.Length > LabSecondModelPrefix.Length && labName.StartsWith(LabSecondModelPrefix, StringComparison.Ordinal) ? labName.Substring(LabSecondModelPrefix.Length) : null;
 
     static string FusedShellLetter(string name)
     {
@@ -372,6 +407,17 @@ public static partial class GlbDisconnectedParts
         int end = name.IndexOf('_', 6);
         return end > 6 ? name.Substring(6, end - 6) : null;
     }
+
+    // WHERE THE GAME'S CAMERA LOOKS FROM (read from the game's data, 2026-11-27: Mercury.Data.Shared's DefaultCameraProfile,
+    // MercuryCameraMoverProfile.CameraAngle, is 28 degrees below the horizon fully zoomed in and 80 zoomed out; the close-up
+    // profiles start at 28 too). So the cameras are the hidden twins' with their lowest ring at 28 degrees instead of 15:
+    // straight above, then 65, 40 and 28 (a large face also 52.5), as many ways round as there. The camera is a
+    // perspective one (MainCamera, 35 degrees high), so the top edge of a fully zoomed-in screen looks along about 10
+    // degrees: there, and only there, a face this leaves out can show (the drill under UnseenDefaultRimRings).
+    public const double UnseenLowestCamera = 28.0;
+    static readonly double[] UnseenViews = BuildCoveredViews(new[] { 65.0, 40.0, UnseenLowestCamera }, 8, true);
+    static readonly double[] UnseenViewsMedium = BuildCoveredViews(new[] { 65.0, 40.0, UnseenLowestCamera }, 16, false);
+    static readonly double[] UnseenViewsLarge = BuildCoveredViews(new[] { 65.0, 52.5, 40.0, UnseenLowestCamera }, 32, false);
 
     // a face is seen when a camera sees its front, or its back, from one of its sample points (the hidden twins' tiers)
     static bool UnseenFaceSeen(double[] c, int o, TriBvh tree, double lift, double small, double large)
@@ -390,7 +436,7 @@ public static partial class GlbDisconnectedParts
             longest2 = Math.Max(longest2, ex * ex + ey * ey + ez * ez);
         }
         int[] points = longest2 < small * small ? RayPointsSmall : longest2 < large * large ? RayPointsMedium : RayPointsLarge;
-        double[] views = ReferenceEquals(points, RayPointsLarge) ? CoveredViewsLarge : ReferenceEquals(points, RayPointsMedium) ? CoveredViewsMedium : CoveredViews;
+        double[] views = ReferenceEquals(points, RayPointsLarge) ? UnseenViewsLarge : ReferenceEquals(points, RayPointsMedium) ? UnseenViewsMedium : UnseenViews;
         double cx = (c[o] + c[o + 3] + c[o + 6]) / 3.0, cy = (c[o + 1] + c[o + 4] + c[o + 7]) / 3.0, cz = (c[o + 2] + c[o + 5] + c[o + 8]) / 3.0;
         for (int d = 0; d < views.Length; d += 3)
         {

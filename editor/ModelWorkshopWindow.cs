@@ -732,14 +732,16 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // UNSEEN FACES (2026-11-27, Saleg's Revenge: "most of the guns bodies are still inside that are not visible")
             leaveOutUnseen = EditorGUILayout.ToggleLeft(new GUIContent("Leave out faces no camera can see",
                 "After the fuse, every face that no camera of the game can see from EITHER side is left out: what lies inside the ship - " +
-                "gun bodies under the deck, the inner skin of the hull, the undersides below the hull. The cameras are the hidden twins': " +
-                "straight above and at 65, 40 and 15 degrees above the horizon. A face whose back shows stays, so the Lab's inside-out fix, " +
-                "Flip, TwoSided and double-sided output cannot open a hole, and two rings of faces around everything that shows stay too " +
+                "gun bodies under the deck, the inner skin of the hull, the undersides below the hull. The cameras are the game's: its camera " +
+                "tilts from 28 degrees below the horizon (fully zoomed in) to 80, so the pass looks from straight above and at 65, 40 and 28 degrees " +
+                "(larger faces from more directions). A face whose back shows stays, so the Lab's inside-out fix, Flip, TwoSided and " +
+                "double-sided output do not turn a removed face into a hole, and two rings of faces around everything that shows stay too " +
                 "(rays miss what a slit or a lip shows). The Factory bakes to a triangle budget, so what goes here is detail " +
-                "the visible ship gets back.\n\nThe Vehicle Lab's roles for this output are read (every recipe whose source it is, and the lists " +
-                "of its last Generate; a part with no record takes the Lab's guess from its name): a part the Lab ignores hides nothing; a part that moves (wheels, turrets, guns, sails, flags, oars, rudders...), " +
-                "is placed, or is Flip or TwoSided hides nothing and loses nothing. Change a part to one of those afterwards and the Lab asks " +
-                "you to fuse again. Off by default. Saleg's Revenge: about half the faces the game would draw."), leaveOutUnseen);
+                "the visible ship gets back.\n\nThe Vehicle Lab's saved roles for this output are read (every recipe that loads it, as its model or " +
+                "its second model, and the role lists that recipe's Generate wrote; a part with no record takes a marked role of its parent name, " +
+                "else the Lab's guess from its name): a part the Lab ignores hides nothing; a part that moves (wheels, turrets, guns, sails, flags, oars, rudders...), " +
+                "is placed, or is Flip or TwoSided hides nothing and loses nothing. Change a part to one of those afterwards, or turn the model, " +
+                "and the Lab asks you to fuse again. Off by default. Saleg's Revenge: 57 % of the faces the game would draw, about 100 s."), leaveOutUnseen);
             using (new EditorGUILayout.HorizontalScope())
             {
                 bool sidecarExists = File.Exists(FuseSidecarPath(srcFile) ?? "");
@@ -1789,12 +1791,7 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 }
                 else
                 {
-                    unseen = GlbDisconnectedParts.LeaveOutUnseenFaces(bytes, (i, name) =>
-                    {
-                        var mine = lab.Where(x => GlbDisconnectedParts.LabNameMatches(name, x.name)).ToList();
-                        if (mine.Count == 0) return GlbDisconnectedParts.UnseenRoleOfLab(new[] { VehicleLabWindow.GuessRoleFromName(name) }, false);
-                        return GlbDisconnectedParts.UnseenRoleOfLab(mine.Select(x => x.role), mine.Any(x => x.placed));
-                    });
+                    unseen = GlbDisconnectedParts.LeaveOutUnseenFaces(bytes, (i, name) => GlbDisconnectedParts.UnseenRoleFromLabRecords(name, lab, VehicleLabWindow.GuessRoleFromName));
                     foreach (var w in unseen.Warnings) Debug.LogWarning("[Workshop] " + w);
                     if (unseen.Changed) bytes = unseen.Bytes;
                     lines.Add(unseen.Details[0] + " — " + labNote);
@@ -1852,50 +1849,66 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // THE VEHICLE LAB'S RECORDS OF A FUSED OUTPUT (for the unseen-faces pass): EVERY recipe whose source is this file (a
     // recipe is named after the session it was saved from, not after its source: the Khelandion's khelandion_2.json reads
     // khelandion_2_split_fused.glb - review of the first cut), each with its roles and whether a part is placed, and the
-    // role lists of each recipe's last Generate. They can disagree - a recipe saved before the last role change - and the
-    // pass is then careful both ways (GlbDisconnectedParts.UnseenRoleOfLab). A part with no record takes the role the
-    // Lab would guess from its name (VehicleLabWindow.GuessRoleFromName). `refusal` is set when the records cannot be
-    // trusted - a recipe that cannot be read, a fast-path (bone) recipe, a model the Lab turns - and the pass does not run.
+    // role lists that recipe's Generate wrote under its output's name. They can disagree - a recipe saved before the last role
+    // change - and the pass is then careful both ways (GlbDisconnectedParts.UnseenRoleOfLab). A recipe that merges this
+    // file as its SECOND model counts too, under the names without the Lab's "B_" (review of the first cut: sms_wespe.json
+    // reads ship_ff_split_fused.glb so, its paddle wheel a Wheel). A part with no record takes a marked role of a parent
+    // name, else the Lab's guess from its name (GlbDisconnectedParts.UnseenRoleFromLabRecords). `refusal` is set when the
+    // records cannot be trusted - a recipe that cannot be read, a fast-path (bone) recipe, a model the Lab turns - and the
+    // pass does not run.
     static List<(string name, int role, bool placed)> LabRecordsFor(string fusedOutput, out string note, out string refusal)
     {
         var found = new List<(string name, int role, bool placed)>();
-        refusal = null;
+        refusal = null; note = "";
         string projRoot = Directory.GetParent(Application.dataPath).FullName;
         string labDir = Path.Combine(projRoot, "Assets/FactorySource/VehicleLab");
         string recipesDir = Path.Combine(labDir, "Recipes");
         var recipes = new List<string>(); int fromLists = 0;
         foreach (string path in Directory.Exists(recipesDir) ? Directory.GetFiles(recipesDir, "*.json") : new string[0])
         {
-            Newtonsoft.Json.Linq.JObject recipe;
-            try { recipe = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(path)); }
+            string recipeName = Path.GetFileName(path), text = null;
+            try
+            {
+                text = File.ReadAllText(path);
+                var recipe = Newtonsoft.Json.Linq.JObject.Parse(text);
+                bool first = SamePath((string)recipe["srcFile"] ?? "", fusedOutput), second = SamePath((string)recipe["srcFile2"] ?? "", fusedOutput);
+                if (!first && !second) continue;
+                recipes.Add(recipeName + (second && !first ? " (as its second model)" : ""));
+                if ((bool?)recipe["useSourceRig"] == true) { refusal = $"the Vehicle Lab recipe {recipeName} rigs this file on its own skeleton (the fast path): its roles name bones, not parts"; return found; }
+                bool Turned(Newtonsoft.Json.Linq.JToken r) => r is Newtonsoft.Json.Linq.JObject o && new[] { "x", "y", "z" }.Any(k => Math.Abs((float?)o[k] ?? 0f) > 0.01f);
+                if (Turned(recipe["modelRot"]) || (second && Turned(recipe["model2Rot"])))
+                { refusal = $"the Vehicle Lab recipe {recipeName} turns this model (Orientation{(second ? " or the second model's Rotation" : "")}): the game's cameras would look at it from other directions"; return found; }
+                bool Off(Newtonsoft.Json.Linq.JToken v, float neutral) => v is Newtonsoft.Json.Linq.JObject o && new[] { "x", "y", "z" }.Any(k => Math.Abs(((float?)o[k] ?? neutral) - neutral) > 1e-5f);
+                // a name as this file has it: the first model's as the Lab lists it, the second model's without its "B_"
+                IEnumerable<string> Own(string labName)
+                {
+                    if (first) yield return labName;
+                    if (second && GlbDisconnectedParts.LabSecondModelName(labName) is string s) yield return s;
+                }
+                foreach (var p in (recipe["parts"] as Newtonsoft.Json.Linq.JArray ?? new Newtonsoft.Json.Linq.JArray()).OfType<Newtonsoft.Json.Linq.JObject>())
+                    foreach (string n in Own((string)p["name"] ?? ""))
+                        found.Add((n, (int?)p["role"] ?? 4, Off(p["offset"], 0f) || Off(p["scale"], 1f)));
+                string labOut = (string)recipe["outGlb"];
+                if (string.IsNullOrEmpty(labOut)) continue;
+                foreach (var kv in VehicleRigArgLine.RoleOfNamesFile)
+                {
+                    string list = Path.Combine(labDir, Path.GetFileNameWithoutExtension(labOut) + "_" + kv.Key + ".txt");
+                    if (!File.Exists(list)) continue;
+                    foreach (string l in File.ReadAllLines(list).Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith("#", StringComparison.Ordinal)))
+                        foreach (string n in Own(l)) { found.Add((n, kv.Value, false)); fromLists++; }
+                }
+            }
             catch (Exception e)
             {
-                // unreadable: it may be this file's recipe, and counting its parts still could leave out what they move past
-                if (File.ReadAllText(path).IndexOf(Path.GetFileName(fusedOutput), StringComparison.OrdinalIgnoreCase) >= 0)
-                { refusal = $"the Vehicle Lab recipe {Path.GetFileName(path)} names this file and cannot be read ({e.Message})"; note = ""; return found; }
-                continue;
-            }
-            if (!SamePath((string)recipe["srcFile"] ?? "", fusedOutput)) continue;
-            recipes.Add(Path.GetFileName(path));
-            if ((bool?)recipe["useSourceRig"] == true) { refusal = $"the Vehicle Lab recipe {Path.GetFileName(path)} rigs this file on its own skeleton (the fast path): its roles name bones, not parts"; note = ""; return found; }
-            if (recipe["modelRot"] is Newtonsoft.Json.Linq.JObject rot && new[] { "x", "y", "z" }.Any(k => Math.Abs((float?)rot[k] ?? 0f) > 0.01f))
-            { refusal = $"the Vehicle Lab recipe {Path.GetFileName(path)} turns this model (Orientation): the cameras' 'above the horizon' would not be the game's"; note = ""; return found; }
-            bool Off(Newtonsoft.Json.Linq.JToken v, float neutral) => v != null && new[] { "x", "y", "z" }.Any(k => Math.Abs(((float?)v[k] ?? neutral) - neutral) > 1e-5f);
-            foreach (var p in (recipe["parts"] as Newtonsoft.Json.Linq.JArray ?? new Newtonsoft.Json.Linq.JArray()).OfType<Newtonsoft.Json.Linq.JObject>())
-                found.Add(((string)p["name"] ?? "", (int?)p["role"] ?? 4, Off(p["offset"], 0f) || Off(p["scale"], 1f)));
-            string labOut = (string)recipe["outGlb"];
-            if (string.IsNullOrEmpty(labOut)) continue;
-            foreach (var kv in VehicleRigArgLine.RoleOfNamesFile)
-            {
-                string list = Path.Combine(labDir, Path.GetFileNameWithoutExtension(labOut) + "_" + kv.Key + ".txt");
-                if (!File.Exists(list)) continue;
-                foreach (string n in File.ReadAllLines(list).Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith("#", StringComparison.Ordinal)))
-                { found.Add((n, kv.Value, false)); fromLists++; }
+                // unreadable (or a value of the wrong kind): it may be this file's recipe, and counting its parts still could
+                // leave out what they move past. A recipe that does not mention the file is passed by.
+                if (text == null || text.IndexOf(Path.GetFileName(fusedOutput), StringComparison.OrdinalIgnoreCase) >= 0)
+                { refusal = $"the Vehicle Lab recipe {recipeName} {(text == null ? "cannot be read" : "names this file and cannot be read")} ({e.Message})"; return found; }
             }
         }
         note = recipes.Count == 0
             ? "no Vehicle Lab recipe reads this output yet: each part takes the role the Lab would guess from its name"
-            : $"the Vehicle Lab's roles read from {string.Join(", ", recipes)} ({found.Count - fromLists} part(s)) and the last Generate's lists ({fromLists} name(s)); a part with no record takes the Lab's guess from its name";
+            : $"the Vehicle Lab's roles read from {string.Join(", ", recipes)} ({found.Count - fromLists} part(s)) and the role lists of their Generate ({fromLists} name(s)); a part with no record takes a marked role of its parent name, else the Lab's guess from its name";
         return found;
     }
 
