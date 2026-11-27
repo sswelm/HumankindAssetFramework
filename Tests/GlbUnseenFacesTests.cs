@@ -227,6 +227,21 @@ public class GlbUnseenFacesTests
     }
 
     [Fact]
+    public void A_part_not_opted_in_hides_and_keeps_every_face()
+    {
+        // user 2026-11-27: "an opt in per group ... it will not try to mess with other groups" - the hull is not opted in:
+        // it still hides the gun, and keeps its own bottom, which no camera sees
+        Part hull = Hull(), gun = Gun();
+        var r = Run(BuildGlb(null, hull, gun), n => n == "Hull" ? GlbDisconnectedParts.UnseenRole.Kept : GlbDisconnectedParts.UnseenRole.Still);
+        Assert.Empty(KeptTags(r.Bytes, gun));
+        Assert.Equal(AllTags(hull), KeptTags(r.Bytes, hull));
+        Assert.Contains("Hull", r.Hiders);
+        Assert.Contains("1 not opted in: kept whole", r.Details[0]);
+        var none = Run(BuildGlb(null, hull, gun), n => GlbDisconnectedParts.UnseenRole.Kept);
+        Assert.False(none.Changed);
+    }
+
+    [Fact]
     public void Glass_hides_nothing_and_is_never_left_out()
     {
         var materials = new JArray(new JObject { ["name"] = "glass", ["alphaMode"] = "BLEND" }, new JObject { ["name"] = "steel" });

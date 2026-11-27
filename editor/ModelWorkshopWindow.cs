@@ -115,7 +115,23 @@ public abstract class ModelWorkshopWindow : EditorWindow
     // they clearly agree the file stores mirrored parts already facing outward, undoes the glTF reversal that would turn
     // them inward (see GlbDisconnectedParts, step 3b). The fuse report and a warning say when it would help.
     [SerializeField] bool checkMirrored = false;
-    [SerializeField] bool leaveOutUnseen = false;   // the fuse's optional unseen-faces pass (GlbDisconnectedParts.Unseen.cs)
+    [SerializeField] List<string> unseenGroups = new List<string>();   // the fuse groups opted in to the unseen-faces pass (GlbDisconnectedParts.Unseen.cs), by letter
+    List<string> UnseenGroupsInUse() => unseenGroups.Where(l => rows.Any(r => r.fuse == l)).Distinct().OrderBy(l => l).ToList();
+    // the unseen-faces tick's text (the group's tick and the summary in the fuse options)
+    const string UnseenTooltip =
+        "After the fuse, every face of this group's shell that no camera of the game can see from EITHER side is left out: what lies inside " +
+        "the ship - gun bodies under the deck, the inner skin of the hull. Every other part still hides what is behind it and keeps all " +
+        "its faces. The cameras are the game's: its camera tilts from 28 degrees below the horizon (fully zoomed in) to 80, so the pass " +
+        "looks from straight above and down to the Lowest camera (larger faces from more directions). A face whose back shows stays, so the " +
+        "Lab's inside-out fix, Flip, TwoSided and double-sided output do not turn a removed face into a hole, and two rings of faces around " +
+        "everything that shows stay too (rays miss what a slit or a lip shows). The Factory bakes to a triangle budget, so what goes here is " +
+        "detail the visible ship gets back. A Lab reduce percentage counts from the smaller part afterwards: lower it if it now eats faces " +
+        "that show (the Saleg's Revenge deck at 65 %).\n\nThe Vehicle Lab's saved roles for this output are read (every recipe that loads " +
+        "it, as its model or its second model, and the role lists that recipe's Generate wrote; a part with no record takes a marked role " +
+        "of its parent name, else the Lab's guess from its name): a part the Lab ignores hides nothing; a part that moves (wheels, turrets, " +
+        "guns, sails, flags, oars, rudders...), is placed, or is Flip or TwoSided hides nothing and loses nothing. Change a part to one of " +
+        "those afterwards, or turn the model, and the Lab asks you to fuse again. A gun nothing moves (no turret, recoil, deploy raise or " +
+        "gun elevation in the pack) stands still. Saleg's Revenge, the guns group alone: about 1.4 million faces.";
     [SerializeField] float unseenLowestCamera = (float)GlbDisconnectedParts.UnseenLowestCamera;   // its lowest camera, degrees above the horizon (user 2026-11-27: "make it configurable")
     bool analyzePending;   // slider moved: recount on the first Layout pass after the drag releases
     [SerializeField] Vector2 scroll;
@@ -410,6 +426,10 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 string was = GroupName(showOnlyLetter);
                 string now = EditorGUILayout.TextField(new GUIContent($"Group ⊕{showOnlyLetter} name", "A name for this group: shown in the view-mode list, saved with the groupings, and the fused shell is named after it (Fused_" + showOnlyLetter + "_<name>). Leave empty for the first part's name."), was);
                 if (now != was) SetGroupName(showOnlyLetter, now);
+                // the group's opt-in to the unseen-faces pass (2026-11-27, user: "when filtered on group, there should be a check box for opt in")
+                bool optedIn = unseenGroups.Contains(showOnlyLetter);
+                bool optIn = EditorGUILayout.ToggleLeft(new GUIContent($"Leave out faces no camera can see (⊕{showOnlyLetter})", UnseenTooltip), optedIn);
+                if (optIn != optedIn) { if (optIn) unseenGroups.Add(showOnlyLetter); else unseenGroups.RemoveAll(l => l == showOnlyLetter); }
             }
             bool Passes(Row r)
             {
@@ -730,21 +750,14 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 "part with the plain parts it is welded to and undoes the reversal only when they clearly agree the file is stored that way; " +
                 "mixed evidence changes nothing, and a file stored the standard way (the Teutonic) comes out byte-identical. Off by default. " +
                 "The fuse warns you when a group would need it."), checkMirrored);
-            // UNSEEN FACES (2026-11-27, Saleg's Revenge: "most of the guns bodies are still inside that are not visible")
-            leaveOutUnseen = EditorGUILayout.ToggleLeft(new GUIContent("Leave out faces no camera can see",
-                "After the fuse, every face that no camera of the game can see from EITHER side is left out: what lies inside the ship - " +
-                "gun bodies under the deck, the inner skin of the hull, the undersides below the hull. The cameras are the game's: its camera " +
-                "tilts from 28 degrees below the horizon (fully zoomed in) to 80, so the pass looks from straight above and at 65, 40 and 28 degrees " +
-                "(larger faces from more directions). A face whose back shows stays, so the Lab's inside-out fix, Flip, TwoSided and " +
-                "double-sided output do not turn a removed face into a hole, and two rings of faces around everything that shows stay too " +
-                "(rays miss what a slit or a lip shows). The Factory bakes to a triangle budget, so what goes here is detail " +
-                "the visible ship gets back.\n\nThe Vehicle Lab's saved roles for this output are read (every recipe that loads it, as its model or " +
-                "its second model, and the role lists that recipe's Generate wrote; a part with no record takes a marked role of its parent name, " +
-                "else the Lab's guess from its name): a part the Lab ignores hides nothing; a part that moves (wheels, turrets, guns, sails, flags, oars, rudders...), " +
-                "is placed, or is Flip or TwoSided hides nothing and loses nothing. Change a part to one of those afterwards, or turn the model, " +
-                "and the Lab asks you to fuse again. A gun nothing moves (no turret, recoil, deploy raise or gun elevation in the pack) stands still. " +
-                "Off by default. Saleg's Revenge: 57 % of the faces the game would draw, about 100 s."), leaveOutUnseen);
-            using (new EditorGUI.DisabledScope(!leaveOutUnseen))
+            // UNSEEN FACES (2026-11-27, Saleg's Revenge: "most of the guns bodies are still inside that are not visible"): opted
+            // in PER GROUP (user: "an opt in per group ... I can just opt in the G (guns) group and it will not try to mess with
+            // other groups"; "when filtered on group, there should be a check box for opt in") - the tick sits under the
+            // group's name when View mode shows one group; here, which groups have it, and the lowest camera
+            var unseenOn = UnseenGroupsInUse();
+            EditorGUILayout.LabelField(new GUIContent("Leave out faces no camera can see: " + (unseenOn.Count == 0 ? "no group (tick it on a group: View mode → the group)" : string.Join(" ", unseenOn.Select(l => "⊕" + l))),
+                "Ticked per group: View mode → one group, then the tick under the group's name. " + UnseenTooltip), EditorStyles.miniLabel);
+            using (new EditorGUI.DisabledScope(unseenOn.Count == 0))
                 unseenLowestCamera = EditorGUILayout.Slider(new GUIContent("    Lowest camera (°)",
                     "The lowest a camera looks down from, in degrees above the horizon: a face only a lower camera could see is left out. " +
                     "The game tilts its camera from 28 (fully zoomed in) to 80 (zoomed out), 28 is the default. Higher leaves out more and " +
@@ -1791,7 +1804,11 @@ public abstract class ModelWorkshopWindow : EditorWindow
             // (GlbDisconnectedParts.Unseen.cs): after the fuse, so the windings it judges are the output's own
             GlbDisconnectedParts.UnseenResult unseen = null;
             string unseenLine = null;   // leads the status (review round 3: after a deletion line of 40,902 characters it was not drawn) and goes into the report
-            if (leaveOutUnseen && done > 0)
+            // only the shells of the groups opted in lose faces; every other part that stands still hides and keeps its faces
+            var optedShells = new HashSet<string>(StringComparer.Ordinal); var optedLetters = new List<string>();
+            if (results != null) for (int gi = 0; gi < groups.Count; gi++)
+                if (unseenGroups.Contains(groups[gi].Key) && results[gi].Changed && !string.IsNullOrEmpty(results[gi].FusedNodeName)) { optedShells.Add(results[gi].FusedNodeName); optedLetters.Add("⊕" + groups[gi].Key); }
+            if (optedShells.Count > 0 && done > 0)
             {
                 EditorUtility.DisplayProgressBar("Model Workshop", "Leaving out the faces no camera can see…", 0.9f);
                 var lab = LabRecordsFor(outGlb, out string labNote, out string refusal);
@@ -1823,14 +1840,20 @@ public abstract class ModelWorkshopWindow : EditorWindow
                 }
                 else
                 {
-                    unseen = GlbDisconnectedParts.LeaveOutUnseenFaces(bytes, (i, name) => GlbDisconnectedParts.UnseenRoleFromLabRecords(name, lab, VehicleLabWindow.GuessRoleFromName),
+                    unseen = GlbDisconnectedParts.LeaveOutUnseenFaces(bytes, (i, name) =>
+                        {
+                            var role = GlbDisconnectedParts.UnseenRoleFromLabRecords(name, lab, VehicleLabWindow.GuessRoleFromName);
+                            return role == GlbDisconnectedParts.UnseenRole.Still && !optedShells.Contains(name) ? GlbDisconnectedParts.UnseenRole.Kept : role;
+                        },
                         progress: p => !EditorUtility.DisplayCancelableProgressBar("Model Workshop", $"Leaving out the faces no camera can see… {p:P0} asked (Cancel leaves every face in)", 0.9f + 0.1f * (float)p),
                         lowestCamera: Mathf.Clamp(unseenLowestCamera, (float)GlbDisconnectedParts.UnseenLowestCameraMin, (float)GlbDisconnectedParts.UnseenLowestCameraMax));
                     foreach (var w in unseen.Warnings) Debug.LogWarning("[Workshop] " + w);
                     if (unseen.Changed) bytes = unseen.Bytes;
-                    unseenLine = unseen.Details[0] + " — " + labNote;
+                    unseenLine = string.Join(" ", optedLetters) + " " + unseen.Details[0] + " — " + labNote;
                 }
             }
+            else if (UnseenGroupsInUse().Count > 0 && done > 0)
+                unseenLine = "unseen faces: " + string.Join(" ", UnseenGroupsInUse().Select(l => "⊕" + l)) + " opted in, but no such group fused a shell - nothing was left out.";
             if (done == 0) { status = "Nothing changed — no group produced a fused mesh and nothing was deleted (see warnings in the console)."; return; }
             File.WriteAllBytes(outGlb, bytes);
             // the parts that hid faces, beside the output: the Vehicle Lab asks before it generates when one of them is no

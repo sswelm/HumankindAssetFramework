@@ -46,6 +46,7 @@ public static partial class GlbDisconnectedParts
         Still,      // drawn, and never moves: hides what is behind it, and loses the faces no camera sees
         Moves,      // drawn, but moves or changes shape: hides nothing, loses nothing
         NotDrawn,   // the game does not draw it: hides nothing, loses nothing
+        Kept,       // drawn and still, but not asked (user 2026-11-27: "an opt in per group"): hides what is behind it, loses nothing
     }
 
     public sealed class UnseenResult
@@ -119,7 +120,7 @@ public static partial class GlbDisconnectedParts
 
         // every node that stands still and is drawn: its faces in their RENDERED winding (a mirrored node reverses it)
         var geos = new List<PartGeometry>(); var corners = new List<double[]>(); var stops = new List<bool[]>(); var asked = new List<bool>();
-        int moving = 0, notDrawn = 0, shared = 0, unread = 0;
+        int moving = 0, notDrawn = 0, shared = 0, unread = 0, keptByCaller = 0;
         for (int i = 0; i < nodes.Count; i++)
         {
             var node = nodes[i] as JObject;
@@ -128,7 +129,7 @@ public static partial class GlbDisconnectedParts
             string name = (string)node["name"] ?? ("node " + i);
             UnseenRole role = inScene.Contains(i) ? roleOf(i, name) : UnseenRole.NotDrawn;
             var meshPrims = (meshes.ElementAtOrDefault(meshIndex) as JObject)?["primitives"] as JArray;
-            if (role == UnseenRole.Still && (node["skin"] != null || (meshPrims != null && meshPrims.OfType<JObject>().Any(p => p["targets"] != null)))) role = UnseenRole.Moves;   // a skinned or morphing mesh moves
+            if ((role == UnseenRole.Still || role == UnseenRole.Kept) && (node["skin"] != null || (meshPrims != null && meshPrims.OfType<JObject>().Any(p => p["targets"] != null)))) role = UnseenRole.Moves;   // a skinned or morphing mesh moves
             if (role == UnseenRole.NotDrawn) { notDrawn++; continue; }
             if (role == UnseenRole.Moves) { moving++; continue; }
             PartGeometry g;
@@ -159,7 +160,8 @@ public static partial class GlbDisconnectedParts
             }
             bool isShared = meshUsers.TryGetValue(meshIndex, out int users) && users > 1;
             if (isShared) shared++;
-            geos.Add(g); corners.Add(c9); stops.Add(stop); asked.Add(!isShared);
+            if (role == UnseenRole.Kept) keptByCaller++;
+            geos.Add(g); corners.Add(c9); stops.Add(stop); asked.Add(!isShared && role != UnseenRole.Kept);
         }
         if (geos.Count == 0) { result.Details.Add("unseen faces: no part stands still and is drawn - nothing asked"); return result; }
 
@@ -249,7 +251,7 @@ public static partial class GlbDisconnectedParts
             d[f] = true;
         }
         for (int s = 0; s < geos.Count; s++) if (hideSegs[s].Length > 0) result.Hiders.Add(geos[s].NodeName);   // what could stop a ray: an opaque face of a still part
-        string kept = string.Format(CultureInfo.InvariantCulture, "{0} part(s) move, {1} are not drawn, {2} share a mesh, {3} could not be read: kept whole", moving, notDrawn, shared, unread);
+        string kept = string.Format(CultureInfo.InvariantCulture, "{0} part(s) move, {1} are not drawn, {2} share a mesh, {3} could not be read, {4} not opted in: kept whole", moving, notDrawn, shared, unread, keptByCaller);
         if (dropOf.Count == 0)
         {
             result.Details.Add(string.Format(CultureInfo.InvariantCulture, "unseen faces: none - every one of {0:N0} face(s) is seen by some camera ({3:0.#} degrees and up) from one side or the other; {1}; rays {2} ms", work.Count, kept, result.RayMs, lowestCamera));

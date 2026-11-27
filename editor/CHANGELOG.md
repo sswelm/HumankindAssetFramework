@@ -7,7 +7,10 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 - **Model Fuser: Leave out faces no camera can see** (2026-11-27, user, the Saleg's Revenge: "most of the guns bodies
   are still inside that are not visible"). An optional pass after the fuse leaves out every face that no camera of the
-  game sees from either side, keeping two rings around what shows. The cameras are the game's own: its camera tilts
+  game sees from either side, keeping two rings around what shows. It is opted in per fuse group (View mode → the
+  group, the tick under its name): only ticked groups lose faces, every other part still hides and keeps all of its
+  own. A Lab reduce percentage then counts from the smaller part: lower it where it starts eating faces that show.
+  The cameras are the game's own: its camera tilts
   from 28 degrees fully zoomed in to 80 zoomed out. On the Saleg's Revenge it leaves out 57 % of the faces of the parts
   that stand still (gun bodies, inner hull skins, undersides) in about 100 s. Rendered from 144 directions the pass
   does not ask, 343 of 4.25 million ship pixels changed from 28 degrees up, nearly all to a face just behind; the top
@@ -19,7 +22,7 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
   63 % on that ship, with small gaps when zoomed in fully). The progress bar has a Cancel (about 100 s on that
   ship). The Lab's name guess now makes a "Propeller" a rotor (it was Rigging: "propeller" contains "rope").
   Generate in the Lab names any part that could hide faces and has since become ignored, moving or placed (or a model
-  turned since), and asks before it runs. Off by default.
+  turned since), and asks before it runs. Off by default: no group is ticked.
 - **Vehicle Lab: a probe of a fused file keeps the roles** (2026-11-25, user report, the Khelandion galley: "when I
   probe I lose everything again"). Roles are kept by part name, and a fuse renames every part it groups: the galley's
   recipe named 149 parts, the fused file has 15, and all 15 came back Default, oars and sail included. A part new to

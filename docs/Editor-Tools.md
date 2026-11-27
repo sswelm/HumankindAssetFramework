@@ -562,13 +562,18 @@ windows. **Deep dive:**
   the plain parts they touch and acts only on a clear verdict; with the box off, the status after a fuse leads with
   the groups whose mirrored parts are still reversed in the output and how many faces, and the Fuser's own preview will not show it,
   because it draws the source as stored),
-  tick **Leave out faces no camera can see** to drop what lies inside the model (0.5.7, off by default): after the fuse
-  and the deletions, every face that no camera of the game sees from **either** side is left out — gun bodies under the
-  deck, the inner skin of a hull, undersides below it. The cameras are the game's: its camera tilts from 28 degrees
+  tick **Leave out faces no camera can see** on a group to drop what lies inside it (0.5.7, per group, off by default:
+  set **View mode** to the group and the tick sits under its name; the fuse options list the groups ticked): after the
+  fuse and the deletions, every face of a ticked group's shell that no camera of the game sees from **either** side is
+  left out — gun bodies under the deck, the inner skin of a hull. Every other part still hides what is behind it and
+  keeps every face, so a group you do not tick reaches the Lab as before (the Saleg's Revenge with only its guns ticked:
+  1,463,030 of their 1,635,577 faces at 45 degrees, the other 13 parts untouched). A Lab reduce percentage counts from
+  the smaller part afterwards, so a part that lost hidden faces can lose visible ones to the same setting: the ship's
+  deck group at Body 65 % lost big deck triangles once it was pruned, and 60 % (or Detail at 10 %) kept them. The cameras are the game's: its camera tilts from 28 degrees
   below the horizon fully zoomed in to 80 zoomed out (`DefaultCameraProfile` in the game's data), so the pass looks
   from straight above and at 65, 40 and 28 degrees (larger faces from more directions and more of their points). The
   camera has perspective, so the top edge of a fully zoomed-in screen looks along about 10 degrees; that edge is the
-  one place a removed face can show. **Lowest camera (°)** under the tick raises that 28 (15 to 85): on the Saleg's
+  one place a removed face can show. **Lowest camera (°)** in the fuse options raises that 28 (15 to 85): on the Saleg's
   Revenge 45 leaves out 63 % instead of 57 % and looks the same from 47 degrees up, at the price of about twice the
   changed pixels at 28 to 40 degrees and five times as many, many of them sky, at the top of a fully zoomed-in screen. A face stops a camera's view only
   where it shows its front, as under back-face culling; glass and cut-outs hide nothing and are kept. A face whose
