@@ -190,7 +190,7 @@ class ChainTierGuard(unittest.TestCase):
         cha = SOURCE.index('_tagged_names_pct(argv, "chainreduce")')
         two = SOURCE.index('a.startswith("twosided=")')
         self.assertLess(rai, cha); self.assertLess(cha, two)
-        self.assertIn("chain_names, twosided_names):", SOURCE)
+        self.assertIn("chain_names, deck_names, twosided_names):", SOURCE)   # DECK joined after CHAIN 2026-11-27
         self.assertIn('("RAILING", railing_names, railing_reduce), ("CHAIN", chain_names, chain_reduce), ("STRUCTURE"', SOURCE)
         self.assertIn('_weld = _rlabel not in ("RIGGING", "SHROUD", "RAILING", "CHAIN")', SOURCE)
 
@@ -198,6 +198,25 @@ class ChainTierGuard(unittest.TestCase):
         tag = NAMESPACE["_tagged_names_pct"]
         self.assertEqual(("@C:/p/x_chain.txt", 85.0), tag(["rig", "railingreduce=@r.txt|10", "chainreduce=@C:/p/x_chain.txt|85"], "chainreduce"))
         self.assertEqual(("", 0.0), tag(["rig", "railingreduce=@r.txt|10"], "chainreduce"))
+
+
+class DeckTierGuard(unittest.TestCase):
+    # 2026-11-27 (user: "could you add one additional Reduce group called Deck"): deckreduce=@<names>|<percent> is parsed right
+    # after chainreduce, its names join _role_marked, and the DECK tier runs right after BODY as a WELD tier.
+
+    def test_deck_is_parsed_after_chain_marked_and_a_weld_tier_after_body(self):
+        cha = SOURCE.index('_tagged_names_pct(argv, "chainreduce")')
+        dck = SOURCE.index('_tagged_names_pct(argv, "deckreduce")')
+        two = SOURCE.index('a.startswith("twosided=")')
+        self.assertLess(cha, dck); self.assertLess(dck, two)
+        self.assertIn("chain_names, deck_names, twosided_names):", SOURCE)
+        self.assertIn('("BODY", body_names, body_reduce), ("DECK", deck_names, deck_reduce), ("OAR"', SOURCE)
+        self.assertIn('_weld = _rlabel not in ("RIGGING", "SHROUD", "RAILING", "CHAIN")', SOURCE)   # DECK is not among them: it welds
+
+    def test_deckreduce_tag_carries_the_names_file_and_the_percent_and_is_nothing_when_absent(self):
+        tag = NAMESPACE["_tagged_names_pct"]
+        self.assertEqual(("@C:/p/x_deck.txt", 35.0), tag(["rig", "chainreduce=@c.txt|10", "deckreduce=@C:/p/x_deck.txt|35"], "deckreduce"))
+        self.assertEqual(("", 0.0), tag(["rig", "chainreduce=@c.txt|10"], "deckreduce"))
 
 
 class TurretTierGuard(unittest.TestCase):

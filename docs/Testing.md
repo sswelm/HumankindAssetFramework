@@ -803,8 +803,9 @@ together (`run_bg`), each into its own log, and prints the logs in declaration o
 time and reports progress as soon as it finishes; the wall time is the longest step's. Measured on the deploy port's
 branch: 870 s where the sequence took about 1,500. Until 2026-10-29 the source guards still ran in sequence BEFORE the
 drills started - nine minutes of `check-member-shape.sh`, `drill-reader-gates.sh` and their kin on a tree of 340 C#
-files - and the gate's wall was those nine plus the deploy drill's ten. Now the build and the unit tests run first
-(they are what everything else assumes), and then the gate regressions, guards and small Python tests run in sequence on ONE background lane
+files - and the gate's wall was those nine plus the deploy drill's ten. The build, unit tests, and timed gate
+regressions run first. This keeps the two-second subprocess controls clear of the Unity and native drills' startup
+load on Windows. The other guards and small Python tests run in sequence on ONE background lane
 (`run_lane` / `run_lane_go`, each step judged like a `run_bg` step) while the drills run at once. Each launch clears
 its previous log/metadata first and fails if that cannot be done, so a later phase cannot reuse an earlier success.
 Missing or unreadable queued commands fail their own step instead of replaying a preceding command. A lane, not a block:
@@ -2733,7 +2734,7 @@ of 506,759 rays; Rudder's all-doubled 23,516; a first per-face version that also
 
 **Step (c), stage 2 of item (5), the weld tiers (2026-10-15).** `editor/BlenderVehicleRig.Stage2.cs` + `editor/BlenderWeld.cs`
 are the script's SOURCE-SIDE reduction tiers in C#, held by `vehiclerig.exe --stages 2` after stage 1 on the same rows. Per
-tier (DEFAULT, RIGGING, SHROUD, RAILING, CHAIN, STRUCTURE, BODY, OAR, SAIL, RUDDER, WHEEL, GUN, WINDOW, FLIP, PRESERVE, DETAIL; skipped without
+tier (DEFAULT, RIGGING, SHROUD, RAILING, CHAIN, STRUCTURE, BODY, DECK, OAR, SAIL, RUDDER, WHEEL, GUN, WINDOW, FLIP, PRESERVE, DETAIL; skipped without
 names or at 0.5 % or less, the dials read as `min(95, max(0, float))` - a `nan` is 0, as Python's max keeps its first
 argument) and per named part (the first object of the name; a name the scene has not is the WARN): the mesh into a bmesh;
 the WELD tiers (all but RIGGING, SHROUD, RAILING and CHAIN) run `remove_doubles` within each material - the vertices whose corners all

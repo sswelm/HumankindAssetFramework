@@ -5,6 +5,34 @@ lives in the repository's root `CHANGELOG.md`.) Versions are also git tags: `edi
 
 ## 0.5.7 — unreleased
 
+- **Vehicle Lab: a Deck role with its own reduce dial** (2026-11-27, user request). Decks can be marked **Deck**
+  (dropdown, or key **K**) and cut by a **Deck reduce (%)** slider in Vertices control, welded and collapsed like
+  Body but on their own dial, with their own Show-only filter. A reduce percentage counts from what a part holds: on
+  the Saleg's Revenge, once the Model Fuser had left out the deck part's hidden faces, Body 65 % cut a wedge out of the
+  visible deck, and a lower dial for the deck alone keeps it. Not guessed from names. A recipe that marks no part
+  Deck generates exactly as before.
+- **Vehicle Lab: the role menus are in alphabetical order** (2026-11-27, user request): the part dropdown, "Mark all
+  shown as" and the Show-only filter (after its None and Undecided entries). Saved recipes are unchanged.
+- **Model Fuser: Leave out faces no camera can see** (2026-11-27, user, the Saleg's Revenge: "most of the guns bodies
+  are still inside that are not visible"). An optional pass after the fuse leaves out every face that no camera of the
+  game sees from either side, keeping two rings around what shows. It is opted in per fuse group (View mode → the
+  group, the tick under its name): only ticked groups lose faces, every other part still hides and keeps all of its
+  own. A Lab reduce percentage then counts from the smaller part: lower it where it starts eating faces that show.
+  The cameras are the game's own: its camera tilts
+  from 28 degrees fully zoomed in to 80 zoomed out. On the Saleg's Revenge it leaves out 57 % of the faces of the parts
+  that stand still (gun bodies, inner hull skins, undersides) in about 100 s. Rendered from 144 directions the pass
+  does not ask, 343 of 4.25 million ship pixels changed from 28 degrees up, nearly all to a face just behind; the top
+  edge of a fully zoomed-in screen loses a little more. The Factory bakes to a triangle budget, so that budget now
+  goes to faces that show. It reads the Vehicle Lab's saved roles for the output, also where the output is a recipe's
+  second model, and those of the file being fused, carried through its groups: ignored parts hide nothing; moving,
+  placed, Flip and TwoSided parts hide nothing and lose nothing, but a gun nothing moves (no turret, recoil, deploy
+  raise, or gun elevation in the pack) stands still. **Lowest camera (°)** raises the 28-degree floor (45 leaves out
+  63 % on that ship, with small gaps when zoomed in fully). The progress bar has a Cancel (about 100 s on that
+  ship). The Lab's name guess now makes a "Propeller" a rotor (it was Rigging: "propeller" contains "rope").
+  Animated transforms and their descendants stay whole. Only opaque geometry present in every populated scene can
+  hide another part. The Fuser saves the warning list before publishing pruned geometry. Generate asks when a hider
+  changes role or placement, the model is turned, the second model changes scale by axis, or the fast path is enabled.
+  Off by default: no group is ticked.
 - **Vehicle Lab: a probe of a fused file keeps the roles** (2026-11-25, user report, the Khelandion galley: "when I
   probe I lose everything again"). Roles are kept by part name, and a fuse renames every part it groups: the galley's
   recipe named 149 parts, the fused file has 15, and all 15 came back Default, oars and sail included. A part new to
